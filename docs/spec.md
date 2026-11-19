@@ -551,6 +551,36 @@ porteuses lumière, à `Z = Zb`.
 - `core` fournit les deux états (positions de plis, largeurs, amplitudes) ;
   `build.py` construit le maillage, la clé de forme et le driver.
 
+### 8.6 Atmosphère (brume) — `haze`
+
+Pour voir les faisceaux, sans alourdir le rendu.
+
+| Clé | Libellé | Défaut | Bornes |
+|---|---|---|---|
+| `enabled` | Atmosphère (brume) | non | |
+| `extent` | Étendue | plateau | plateau / plateau et salle |
+| `density` | Densité — **animable** *(choix)* | 0,02 | 0 – 1 |
+| `anisotropy` | Diffusion vers l'avant *(choix)* | 0,6 | −0,9 – 0,9 |
+| `quality` | Qualité | légère | légère / moyenne / fine |
+
+- `Haze_Volume` (`TS_Haze`) : **une boîte**, pas un volume de World (infini
+  et plus coûteux). Étendue « plateau » : la cage `Wk × (D − Ys)`, du
+  plancher au gril. Étendue « plateau et salle » : en plus, la salle
+  dessinée jusqu'à `−Yh`, du sol de salle à `facade_height`. Seulement si
+  `enabled`.
+- `TS_Haze` : Volume Scatter **homogène** (pas de texture de bruit, pour que
+  Cycles ne marche pas le volume pas à pas), pas de surface. Densité et
+  anisotropie viennent de la scène par **drivers**, comme l'ouverture du
+  rideau : `density` et `anisotropy` ne reconstruisent pas et `density`
+  s'anime (montée de brume).
+- `quality` règle EEVEE quand la brume est active : taille de tuile
+  volumétrique, nombre d'échantillons volumétriques, début et fin du volume
+  calés sur l'emprise de la boîte vue depuis `Cam_Face`. Légère = la moins
+  chère qui montre encore un faisceau net. Brume inactive : on ne touche
+  pas aux réglages de rendu de la scène.
+- Coût mesuré et noté ici : temps de rendu EEVEE 1280×720 depuis
+  `Cam_Face`, sans brume et avec chaque qualité.
+
 ## 9. Préréglages YAML
 
 - Même arborescence que les groupes de paramètres, plus `version: 1`.
