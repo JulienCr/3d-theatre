@@ -10,7 +10,7 @@ import bpy
 import numpy as np
 from mathutils import Vector
 
-from . import materials
+from . import atmosphere, materials
 from .core.layout import Layout, compute_layout
 from .core.meshes import Mesh, build_mesh, pleated_mesh
 from .core.primitives import Light, PleatedSurface, Tube
@@ -18,6 +18,7 @@ from .core.primitives import Light, PleatedSurface, Tube
 TAG = materials.TAG
 OPEN_KEY = "Open"
 OPENING_PATH = "theatre.curtains.main_opening"
+HAZE_NODE = "Haze Scatter"
 OPENING_EXPRESSION = "var / 100"
 FABRIC_THICKNESS = 0.003
 
@@ -76,7 +77,7 @@ def _delete_generated(root) -> None:
 
 # --------------------------------------------------------------- materials
 
-def _setup_ceiling_material(mat: bpy.types.Material) -> None:
+def _setup_ceiling_material(mat: bpy.types.Material, scene: bpy.types.Scene) -> None:
     """Hide the back face in EEVEE and the viewport (culling) and in Cycles (Backfacing mix)."""
     mat.use_backface_culling = True
     nodes, links = mat.node_tree.nodes, mat.node_tree.links
@@ -91,10 +92,30 @@ def _setup_ceiling_material(mat: bpy.types.Material) -> None:
     links.new(mix.outputs["Shader"], output.inputs["Surface"])
 
 
-MATERIAL_SETUP = {"TS_HouseCeiling": _setup_ceiling_material}
+def _setup_haze_material(mat: bpy.types.Material, scene: bpy.types.Scene) -> None:
+    """Homogeneous Volume Scatter without surface; density and anisotropy follow the scene."""
+    tree = mat.node_tree
+    tree.nodes.clear()
+    output = tree.nodes.new("ShaderNodeOutputMaterial")
+    scatter = tree.nodes.new("ShaderNodeVolumeScatter")
+    scatter.name = HAZE_NODE
+    tree.links.new(scatter.outputs["Volume"], output.inputs["Volume"])
+    for socket, prop in (("Density", "density"), ("Anisotropy", "anisotropy")):
+        driver = tree.driver_add(f'nodes["{HAZE_NODE}"].inputs["{socket}"].default_value').driver
+        driver.type = "SCRIPTED"
+        var = driver.variables.new()
+        var.name = "var"
+        var.type = "SINGLE_PROP"
+        var.targets[0].id_type = "SCENE"
+        var.targets[0].id = scene
+        var.targets[0].data_path = f"theatre.haze.{prop}"
+        driver.expression = "var"
 
 
-def get_material(name: str, colors) -> bpy.types.Material:
+MATERIAL_SETUP = {"TS_HouseCeiling": _setup_ceiling_material, "TS_Haze": _setup_haze_material}
+
+
+def get_material(name: str, colors, scene: bpy.types.Scene) -> bpy.types.Material:
     """Existing material by name, never modified; created with its colour otherwise."""
     mat = bpy.data.materials.get(name)
     if mat is not None:
@@ -109,7 +130,7 @@ def get_material(name: str, colors) -> bpy.types.Material:
         bsdf.inputs["Base Color"].default_value = color
         bsdf.inputs["Roughness"].default_value = ROUGHNESS.get(name, 0.6)
     if name in MATERIAL_SETUP:
-        MATERIAL_SETUP[name](mat)
+        MATERIAL_SETUP[name](mat, scene)
     return mat
 
 
@@ -198,6 +219,9 @@ def _make_geometry(primitive, scene, collections, slot_materials) -> bpy.types.O
     obj[TAG] = True
     obj[materials.CATEGORY] = primitive.material
     collections[primitive.collection].objects.link(obj)
+    if primitive.name == "Haze_Volume":
+        obj.display_type = "BOUNDS"
+        obj.visible_shadow = False
     if isinstance(primitive, PleatedSurface):
         _add_fabric_modifiers(obj)
         if primitive.open_state is not None:
@@ -265,13 +289,14 @@ def _rebuild(scene: bpy.types.Scene, params: dict) -> Layout:
     chosen = materials.overrides(scene)
     slot_materials = {}
     for name in {p.material for p in layout.objects}:
-        default = get_material(name, layout.materials)
+        default = get_material(name, layout.materials, scene)
         slot_materials[name] = chosen.get(name) or default
     for primitive in layout.objects:
         _make_geometry(primitive, scene, collections, slot_materials)
     for spec in layout.lights:
         _make_light(spec, collections)
     cameras = {spec.name: _make_camera(spec, collections) for spec in layout.cameras}
+    atmosphere.apply(scene, params, layout)
 
     if scene.camera is None or is_generated(scene.camera):
         scene.camera = cameras.get(wanted_camera) or cameras.get("Cam_Face")

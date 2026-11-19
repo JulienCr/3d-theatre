@@ -273,3 +273,25 @@ def test_wings_do_not_move_the_modules_but_frame_gap_does():
     params["modules"]["left"]["frame_gap"] = -1.0
     moved = bounds(compute_layout(params), "Module_L_Front")
     assert moved[0][0] == pytest.approx(inner[0][0] - 1.0)
+
+
+def test_haze_volume_is_a_single_box_only_when_enabled():
+    assert "Haze_Volume" not in layout().names()
+    stage = layout(haze={"enabled": True})
+    box = stage.find("Haze_Volume")
+    assert box.material == "TS_Haze"
+    assert approx_bounds(bounds(stage, "Haze_Volume"), ((-7.0, 7.0), (1.2, 7.0), (1.2, 7.3)))
+    both = layout(haze={"enabled": True, "extent": "stage_and_house"})
+    assert approx_bounds(bounds(both, "Haze_Volume"), ((-9.5, 9.5), (-12.0, 7.0), (0.0, 7.3)))
+    assert sum(1 for n in both.names() if n == "Haze_Volume") == 1
+
+
+def test_haze_view_range_fits_the_box_seen_from_the_front_camera():
+    from core.layout import haze_view_range
+    assert haze_view_range(layout()) is None
+    outer = haze_view_range(layout(haze={"enabled": True}))
+    inside = haze_view_range(layout(haze={"enabled": True, "extent": "stage_and_house"}))
+    assert outer is not None and inside is not None
+    near, far = outer
+    assert 11.0 < near < 13.0 < far < 20.0
+    assert inside[0] == pytest.approx(0.1) and inside[1] > far

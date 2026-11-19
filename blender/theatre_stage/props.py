@@ -116,9 +116,14 @@ def _make_property(param: Param, update):
     raise ValueError(f"Unsupported parameter kind: {kind}")
 
 
+def _tag_scene(self, context):
+    """Driver-only params: flag the scene so the drivers that read it re-evaluate."""
+    self.id_data.update_tag()
+
+
 def _make_update(group: Group, param: Param):
     if not param.rebuild:
-        return None
+        return _tag_scene
     mirrors = group.side_params and param.key == "symmetric"
 
     def update(self, context):

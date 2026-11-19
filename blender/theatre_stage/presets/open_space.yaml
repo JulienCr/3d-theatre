@@ -94,3 +94,9 @@ cameras:
   lens: 22.0
 house:
   ceiling: true
+haze:
+  enabled: false
+  extent: stage
+  density: 0.02
+  anisotropy: 0.6
+  quality: light

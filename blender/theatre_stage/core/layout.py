@@ -45,6 +45,7 @@ MATERIAL_COLORS: dict[str, tuple[float, float, float, float]] = {
     "TS_MainCurtain": (0.40, 0.02, 0.03, 1.0),
     "TS_Cyclorama": (0.90, 0.90, 0.90, 1.0),
     "TS_HouseCeiling": (0.15, 0.15, 0.15, 1.0),
+    "TS_Haze": (1.0, 1.0, 1.0, 1.0),
 }
 
 MATERIAL_LABELS: dict[str, str] = {
@@ -63,6 +64,7 @@ MATERIAL_LABELS: dict[str, str] = {
     "TS_MainCurtain": "Rideau de scène",
     "TS_Cyclorama": "Cyclorama",
     "TS_HouseCeiling": "Plafond de salle",
+    "TS_Haze": "Brume",
 }
 
 # Constants not exposed as parameters (spec section 4 and 8).
@@ -725,9 +727,37 @@ def _cameras(c: Ctx) -> Part:
     return Part(cameras=tuple(cams))
 
 
+def _haze(c: Ctx) -> Part:
+    hz = c.p["haze"]
+    if not hz["enabled"]:
+        return Part()
+    top = c.Hp + c.Hg
+    if hz["extent"] == "stage":
+        lo, hi = (-c.Wk / 2, c.Ys, c.Hp), (c.Wk / 2, c.D, top)
+    else:
+        half = max(c.Wk, c.Wt) / 2
+        lo, hi = (-half, -c.Yh, 0.0), (half, c.D, max(c.Hf, top))
+    return Part((_box("Haze_Volume", "TS_Haze", ARCHITECTURE, lo, hi),))
+
+
 FAMILIES: tuple[Callable[[Ctx], Part], ...] = (
-    _architecture, _stairs, _modules, _grid, _masking, _curtains, _lights, _cameras,
+    _architecture, _stairs, _modules, _grid, _masking, _curtains, _lights, _cameras, _haze,
 )
+
+
+def haze_view_range(layout: Layout) -> tuple[float, float] | None:
+    """(start, end) depths of the haze box along the Cam_Face axis, or None without haze."""
+    try:
+        box, cam = layout.find("Haze_Volume"), layout.find("Cam_Face")
+    except KeyError:
+        return None
+    forward = [t - o for t, o in zip(cam.target, cam.location)]
+    norm = math.sqrt(sum(v * v for v in forward))
+    forward = [v / norm for v in forward]
+    depths = [sum((corner[i] - cam.location[i]) * forward[i] for i in range(3))
+              for corner in ((x, y, z) for x in (box.min[0], box.max[0])
+                             for y in (box.min[1], box.max[1]) for z in (box.min[2], box.max[2]))]
+    return max(min(depths), 0.1), max(max(depths), 0.2)
 
 
 def compute_layout(params: Mapping | None = None) -> Layout:

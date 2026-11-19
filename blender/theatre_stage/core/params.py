@@ -205,6 +205,23 @@ SCHEMA: tuple[Group, ...] = (
         Param("lens", FLOAT, 22.0, "Focale (mm)", "Focale de l'objectif des caméras.",
               10.0, 200.0),
     )),
+    Group("haze", "Brume", (
+        _flag("enabled", False, "Atmosphère (brume)",
+              "Volume de brume pour voir les faisceaux. Inactif : aucun réglage de rendu modifié."),
+        _enum("extent", "stage", "Étendue", "Zone remplie de brume.", (
+            ("stage", "Plateau", "La cage, du plancher au gril."),
+            ("stage_and_house", "Plateau et salle", "La cage et la salle dessinée."),
+        )),
+        Param("density", FLOAT, 0.02, "Densité", "Densité de la brume. Animable, ne reconstruit "
+              "pas la scène.", 0.0, 1.0, animatable=True, rebuild=False),
+        Param("anisotropy", FLOAT, 0.6, "Diffusion vers l'avant",
+              "Diffusion vers l'avant de la lumière dans la brume.", -0.9, 0.9, rebuild=False),
+        _enum("quality", "light", "Qualité", "Coût de rendu du volume (EEVEE).", (
+            ("light", "Légère", "La moins chère qui montre un faisceau net."),
+            ("medium", "Moyenne", "Faisceaux plus doux."),
+            ("fine", "Fine", "Volume le plus précis, le plus lent."),
+        )),
+    )),
     Group("house", "Salle", (
         _flag("ceiling", True, "Plafond de salle",
               "Plafond visible seulement depuis la salle."),

@@ -29,10 +29,11 @@ def test_default_params_is_nested_like_the_yaml_and_fresh_each_call():
     assert a["masking"]["borders"] == (True,) * 8
 
 
-def test_only_main_opening_is_animatable_and_skips_rebuild():
+def test_driver_only_params_are_the_ones_that_skip_rebuild():
     animatable = [path for path, p in P.iter_params() if p.animatable]
     no_rebuild = [path for path, p in P.iter_params() if not p.rebuild]
-    assert animatable == no_rebuild == [("curtains", "main_opening")]
+    assert animatable == [("curtains", "main_opening"), ("haze", "density")]
+    assert no_rebuild == animatable + [("haze", "anisotropy")]
 
 
 def test_advanced_group_is_flagged_collapsed():

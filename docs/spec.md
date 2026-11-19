@@ -578,8 +578,16 @@ Pour voir les faisceaux, sans alourdir le rendu.
   calés sur l'emprise de la boîte vue depuis `Cam_Face`. Légère = la moins
   chère qui montre encore un faisceau net. Brume inactive : on ne touche
   pas aux réglages de rendu de la scène.
-- Coût mesuré et noté ici : temps de rendu EEVEE 1280×720 depuis
-  `Cam_Face`, sans brume et avec chaque qualité.
+- Coût mesuré (EEVEE de Blender 5.3, 1280×720 depuis `Cam_Face`, médiane de
+  5 rendus, un projecteur de test en faisceau de 30°) : sans brume 1981 ms,
+  légère (tuile 8, 32 échantillons) 2023 ms, moyenne (tuile 4, 64) 2132 ms,
+  fine (tuile 2, 128) 2103 ms, soit +2 % à +8 %. Pour une boîte homogène,
+  taille de tuile, échantillons et plage début/fin ne changent pas l'image
+  (écart nul, y compris aux extrêmes) : la qualité ne compte que pour un
+  matériau de remplacement non homogène. Dans la vue en mode rendu, le
+  redessin vaut 9,8 ms sans brume et 5,0 ms avec (mesure peu significative :
+  le film est déjà convergé). La densité s'anime : le driver suit des
+  images clés sur `haze.density`.
 
 ## 9. Préréglages YAML
 
