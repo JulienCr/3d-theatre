@@ -276,7 +276,9 @@ def _coerce(param: Param, value, path: str) -> tuple[Any, list[str]]:
             value = int(value)
     else:
         value = float(value)
-    clamped = min(max(value, param.min), param.max)
+    lo = -math.inf if param.min is None else param.min
+    hi = math.inf if param.max is None else param.max
+    clamped = min(max(value, lo), hi)
     if clamped != value:
         return clamped, [
             f"« {param.label} » ({path}) : {_fmt(value)} hors bornes, "

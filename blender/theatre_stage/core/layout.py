@@ -64,8 +64,8 @@ PLEAT_AMPLITUDE = 0.06
 CURTAIN_OPEN_AMPLITUDE = 0.20
 CURTAIN_OPEN_RATIO = 0.15
 CURTAIN_OVERLAP = 0.15
-WORK_LIGHT_WATTS_PER_SQM = 40.0
-FRONT_LIGHT_WATTS = 600.0
+WORK_LIGHT_WATTS_PER_SQM = 25.0
+FRONT_LIGHT_WATTS = 375.0
 FRONT_LIGHT_SIZE = 2.0
 LIGHT_KELVIN = 4000.0
 MIN_LANE = 0.60
@@ -75,6 +75,10 @@ EPS = 1e-9
 
 def _nn(index: int) -> str:
     return f"{index:02d}"
+
+
+def _metres(value: float) -> str:
+    return f"{value:.2f} m".replace(".", ",")
 
 
 def _round_half_up(value: float) -> int:
@@ -262,14 +266,12 @@ def _make_context(raw) -> tuple[Ctx, list[str]]:
     Tc = adv["proscenium_thickness"]
     if Tc > (W - 1.0) / 2:
         Tc = (W - 1.0) / 2
-        warnings.append("Montants du cadre trop larges pour le plateau : réduits à "
-                        f"{Tc:.2f} m.".replace(".", ","))
+        warnings.append(f"Montants du cadre trop larges pour le plateau : réduits à {_metres(Tc)}.")
     Wc = W - 2 * Tc
     Yc = Ys + PROSCENIUM_DEPTH
     if D < Yc + 0.5:
         D = Yc + 0.5
-        warnings.append("Profondeur de scène insuffisante derrière le cadre : "
-                        f"portée à {D:.2f} m.".replace(".", ","))
+        warnings.append(f"Profondeur de scène insuffisante derrière le cadre : portée à {_metres(D)}.")
 
     n = math.ceil(Hp / stairs["riser_max"] - EPS)
     n = max(n, 1)
@@ -283,8 +285,8 @@ def _make_context(raw) -> tuple[Ctx, list[str]]:
     if lateral and footprint > Z + EPS:
         Z = footprint
         if footprint > adv["side_zone_width"] + EPS:
-            warnings.append("Zone latérale élargie automatiquement à "
-                            f"{Z:.2f} m de chaque côté pour loger les escaliers.".replace(".", ","))
+            warnings.append(f"Zone latérale élargie automatiquement à {_metres(Z)} "
+                            "de chaque côté pour loger les escaliers.")
     Wt = W + 2 * Z
 
     if Hp + Hc + lintel > Hf or Hc + lintel > Hg:

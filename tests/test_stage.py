@@ -41,7 +41,8 @@ def test_enclosure_stays_symmetric_with_a_single_side_stair():
 def test_side_zone_widens_with_a_warning_only_when_stairs_need_it():
     lay = layout(stairs={"side_angle": 0.0, "width": 2.0})
     assert lay.derived.side_zone == pytest.approx(2.0)
-    assert any("Zone latérale élargie" in w and "2,00" in w for w in lay.warnings)
+    assert any("Zone latérale élargie" in w and "2,00 m" in w and w.endswith(".")
+               for w in lay.warnings)
     quiet = layout(stairs={"side_angle": 0.0})
     assert not any("Zone latérale" in w for w in quiet.warnings)
     wide = layout(stairs={"side_angle": 0.0}, advanced={"side_zone_width": 3.0})
