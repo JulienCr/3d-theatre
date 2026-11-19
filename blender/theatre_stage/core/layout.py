@@ -62,7 +62,8 @@ SLAT_PITCH = 0.15
 PLEAT_PITCH = 0.30
 PLEAT_AMPLITUDE = 0.06
 CURTAIN_OPEN_AMPLITUDE = 0.20
-CURTAIN_OPEN_RATIO = 0.15
+CURTAIN_POST_MARGIN = 0.05
+CURTAIN_MIN_BUNDLE = 0.30
 CURTAIN_OVERLAP = 0.15
 WORK_LIGHT_WATTS_PER_SQM = 25.0
 FRONT_LIGHT_WATTS = 375.0
@@ -181,6 +182,7 @@ class Ctx:
     Yc: float
     Z: float
     Wt: float
+    Yh: float
     risers: int
     riser_h: float
     stair_len: float
@@ -309,7 +311,8 @@ def _make_context(raw) -> tuple[Ctx, list[str]]:
     ys, battens_warning = _light_battens(p, Yc, D, plan)
     warnings.extend(battens_warning)
 
-    ctx = Ctx(p, W, D, Hp, Hg, A, Hf, Hc, Tc, Ys, lintel, Wc, Yc, Z, Wt, n, riser_h,
+    Yh = max(A, p["cameras"]["distance"] + 1.0)
+    ctx = Ctx(p, W, D, Hp, Hg, A, Hf, Hc, Tc, Ys, lintel, Wc, Yc, Z, Wt, Yh, n, riser_h,
               stair_len, footprint if lateral else 0.0, tuple(modules), ymod, plan, ys)
     return ctx, warnings
 
@@ -374,13 +377,13 @@ def _box(name, material, collection, lo, hi, origin=(0.0, 0.0, 0.0), yaw=0.0):
 def _architecture(c: Ctx) -> Part:
     A_, Wt, W, Wc, Ys, Yc, Hp, D = c.A, c.Wt, c.W, c.Wc, c.Ys, c.Yc, c.Hp, c.D
     roof_z = Hp + c.Hg + 2.0
-    objs = [
-        _box("House_Floor", "TS_HouseFloor", ARCHITECTURE, (-Wt / 2, -A_, -0.10), (Wt / 2, Ys, 0.0)),
+    objs: list = [
+        _box("House_Floor", "TS_HouseFloor", ARCHITECTURE, (-Wt / 2, -c.Yh, -0.10), (Wt / 2, Ys, 0.0)),
     ]
     for tag, s in (("L", -1), ("R", 1)):
         x0, x1 = (-Wt / 2 - FACADE_THICKNESS, -Wt / 2) if s < 0 else (Wt / 2, Wt / 2 + FACADE_THICKNESS)
         objs.append(_box(f"House_Wall_{tag}", "TS_Enclosure", ARCHITECTURE,
-                         (x0, -A_, 0.0), (x1, Ys, c.Hf)))
+                         (x0, -c.Yh, 0.0), (x1, Ys, c.Hf)))
 
     hole_top = min(Hp + c.Hc + c.lintel, c.Hf)
     polygons = []
@@ -478,7 +481,7 @@ def _grid(c: Ctx) -> Part:
     Hp, Hg, Wc = c.Hp, c.Hg, c.Wc
     count = int(math.floor((Wc - SLAT) / SLAT_PITCH + EPS)) + 1
     xs = tuple(-Wc / 2 + SLAT / 2 + i * SLAT_PITCH for i in range(count))
-    objs = [SlatGrid("Grid_Deck", "TS_Grid", GRID, xs, c.Yc, c.D, Hp + Hg, SLAT)]
+    objs: list = [SlatGrid("Grid_Deck", "TS_Grid", GRID, xs, c.Yc, c.D, Hp + Hg, SLAT)]
     z = Hp + Hg - c.p["grid"]["batten_drop"]
     for i, y in enumerate(c.light_batten_ys, start=1):
         objs.append(Tube(f"Batten_{_nn(i)}", "TS_Batten", GRID,
@@ -554,18 +557,21 @@ def _curtains(c: Ctx) -> Part:
     if not c.p["curtains"]["main_enabled"]:
         return Part()
     y = c.plan.curtain_plane
-    outer = c.Wc / 2 + 0.30
+    outer = c.W / 2 - CURTAIN_POST_MARGIN
     z0, z1 = c.Hp, c.Hp + c.Hc + 0.30
-    length = CURTAIN_OVERLAP + outer
-    count = _pleat_count(length)
+    count = _pleat_count(CURTAIN_OVERLAP + outer)
+    bundle = c.Tc - 2 * CURTAIN_POST_MARGIN
+    narrow = bundle < CURTAIN_MIN_BUNDLE - EPS
+    inner = outer - CURTAIN_MIN_BUNDLE if narrow else c.Wc / 2 + CURTAIN_POST_MARGIN
     objs = []
     for tag, s in (("L", -1), ("R", 1)):
         closed = PleatState((-s * CURTAIN_OVERLAP, y), (s * outer, y), PLEAT_AMPLITUDE)
-        gathered = s * outer - s * CURTAIN_OPEN_RATIO * length
-        opened = PleatState((gathered, y), (s * outer, y), CURTAIN_OPEN_AMPLITUDE)
+        opened = PleatState((s * inner, y), (s * outer, y), CURTAIN_OPEN_AMPLITUDE)
         objs.append(PleatedSurface(f"MainCurtain_{tag}", "TS_MainCurtain", CURTAINS, closed,
                                    z0, z1, count, (0.0, -1.0), opened))
-    return Part(tuple(objs))
+    warnings = ("Rideau de scène ouvert visible dans l'ouverture : montants du cadre "
+                "trop étroits.",) if narrow else ()
+    return Part(tuple(objs), warnings=warnings)
 
 
 def _lights(c: Ctx) -> Part:
@@ -597,7 +603,7 @@ def _cameras(c: Ctx) -> Part:
     target = (0.0, c.D / 2, c.Hp + 1.0)
     cams = []
     for name, x in (("Cam_Face", 0.0), ("Cam_Jardin", -0.75 * c.W / 2), ("Cam_Cour", 0.75 * c.W / 2)):
-        cams.append(Camera(name, CAMERAS, (x, -cm["distance"], cm["height"]), target, 35.0))
+        cams.append(Camera(name, CAMERAS, (x, -cm["distance"], cm["height"]), target, cm["lens"]))
     return Part(cameras=tuple(cams))
 
 

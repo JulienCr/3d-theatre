@@ -157,9 +157,19 @@ def test_front_light_position_and_target():
 def test_cameras():
     lay = layout()
     face, jardin, cour = (lay.find(n) for n in ("Cam_Face", "Cam_Jardin", "Cam_Cour"))
-    assert face.location == (0.0, -10.0, 2.5)
+    assert face.location == (0.0, -11.0, 3.0)
     assert jardin.location[0] == pytest.approx(-0.75 * 5.8) and cour.location[0] == pytest.approx(4.35)
-    assert face.target == pytest.approx((0.0, 3.5, 2.2)) and face.lens == 35.0
+    assert face.target == pytest.approx((0.0, 3.5, 2.2)) and face.lens == 22.0
+
+
+def test_house_reaches_behind_the_cameras():
+    lay = layout()
+    assert bounds(lay, "House_Floor")[1][0] == pytest.approx(-12.0)
+    assert bounds(lay, "House_Wall_L")[1][0] == pytest.approx(-12.0)
+    near = layout(cameras={"distance": 2.0})
+    assert bounds(near, "House_Floor")[1][0] == pytest.approx(-3.1)
+    assert bounds(layout(cameras={"lens": 50.0}), "House_Floor")[1][0] == pytest.approx(-12.0)
+    assert layout(cameras={"lens": 50.0}).find("Cam_Face").lens == 50.0
 
 
 def test_light_battens_exist_and_are_numbered_without_gaps():

@@ -85,5 +85,6 @@ lights:
   intensity: 1.0
   front: true
 cameras:
-  distance: 10.0
-  height: 2.5
+  distance: 11.0
+  height: 3.0
+  lens: 22.0

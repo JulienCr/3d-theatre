@@ -193,13 +193,13 @@ def test_main_curtain_geometry_and_states():
     lay = layout()
     left, right = lay.find("MainCurtain_L"), lay.find("MainCurtain_R")
     assert left.material == "TS_MainCurtain"
-    assert left.state.p0 == pytest.approx((0.15, 1.75)) and left.state.p1 == pytest.approx((-5.3, 1.75))
-    assert right.state.p0 == pytest.approx((-0.15, 1.75)) and right.state.p1 == pytest.approx((5.3, 1.75))
+    assert left.state.p0 == pytest.approx((0.15, 1.75)) and left.state.p1 == pytest.approx((-5.75, 1.75))
+    assert right.state.p0 == pytest.approx((-0.15, 1.75)) and right.state.p1 == pytest.approx((5.75, 1.75))
     assert left.z0 == pytest.approx(1.2) and left.z1 == pytest.approx(1.2 + 5.0 + 0.3)
     closed_len = abs(left.state.p1[0] - left.state.p0[0])
     opened = left.open_state
     assert opened.p1 == pytest.approx(left.state.p1)
-    assert abs(opened.p1[0] - opened.p0[0]) == pytest.approx(0.15 * closed_len)
+    assert opened.p0 == pytest.approx((-5.05, 1.75))
     assert opened.amplitude == pytest.approx(0.20) and left.state.amplitude == pytest.approx(0.06)
     assert left.pleat_count == right.pleat_count == round(closed_len / 0.3)
 
@@ -211,7 +211,30 @@ def test_main_curtain_meshes_share_topology_between_the_two_states():
     assert len(closed.vertices) == len(opened.vertices) == 2 * (4 * left.pleat_count + 1)
     assert closed.vertices != opened.vertices
     xs = [v[0] for v in opened.vertices]
-    assert min(xs) >= -5.3 - 0.2 and max(xs) <= -5.3 + 0.15 * 5.45 + 0.2
+    assert min(xs) == pytest.approx(-5.75) and max(xs) == pytest.approx(-5.05)
+
+
+@pytest.mark.parametrize("stage,advanced", [
+    ({}, {}),
+    ({"width": 14.0}, {"proscenium_thickness": 1.5}),
+    ({"width": 9.0}, {"proscenium_thickness": 0.5}),
+])
+def test_open_main_curtain_stays_behind_the_posts(stage, advanced):
+    lay = layout(stage=stage, advanced=advanced)
+    wc = lay.derived.cage_width
+    for name in ("MainCurtain_L", "MainCurtain_R"):
+        opened = pleated_mesh(lay.find(name), open_pose=True)
+        assert all(abs(v[0]) >= wc / 2 - 1e-9 for v in opened.vertices)
+    assert not any("Rideau de scène" in w for w in lay.warnings)
+
+
+def test_open_main_curtain_in_a_narrow_post_keeps_its_bundle_and_warns():
+    lay = layout(advanced={"proscenium_thickness": 0.35})
+    opened = lay.find("MainCurtain_R").open_state
+    assert abs(opened.p1[0] - opened.p0[0]) == pytest.approx(0.30)
+    assert any("Rideau de scène ouvert visible" in w for w in lay.warnings)
+    quiet = layout(advanced={"proscenium_thickness": 0.35}, curtains={"main_enabled": False})
+    assert not any("Rideau de scène" in w for w in quiet.warnings)
 
 
 def test_main_curtain_can_be_disabled():

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -15,7 +16,7 @@ class PresetError(ValueError):
     """Raised when a preset cannot be read at all (French message)."""
 
 
-def _plain(value):
+def _plain(value) -> Any:
     if isinstance(value, dict):
         return {k: _plain(v) for k, v in value.items()}
     if isinstance(value, (tuple, list)):

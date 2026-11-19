@@ -188,10 +188,12 @@ SCHEMA: tuple[Group, ...] = (
         _flag("front", True, "Face depuis la salle", "Lumière de face depuis la salle."),
     )),
     Group("cameras", "Caméras", (
-        _length("distance", 10.00, 2.0, 60.0, "Distance au nez",
+        _length("distance", 11.00, 2.0, 60.0, "Distance au nez",
                 "Distance des caméras au nez de scène."),
-        _length("height", 2.50, 0.5, 30.0, "Hauteur",
+        _length("height", 3.00, 0.5, 30.0, "Hauteur",
                 "Hauteur des caméras au-dessus du sol de salle."),
+        Param("lens", FLOAT, 22.0, "Focale (mm)", "Focale de l'objectif des caméras.",
+              10.0, 200.0),
     )),
 )
 
