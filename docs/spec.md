@@ -456,12 +456,19 @@ La **catégorie** d'un objet généré est son matériau `TS_*` par défaut.
   apparaissent ensuite (une rue de plus, etc.).
 - Détection : un objet généré dont le matériau n'est ni le `TS_*` par
   défaut ni le matériau retenu pour sa catégorie porte un nouveau choix.
-  Elle a lieu au début de chaque reconstruction et par un timer léger
-  (1 s) qui propage aussitôt le choix aux autres objets de la catégorie en
-  changeant leur matériau, **sans reconstruire**. Deux choix différents
-  dans la même catégorie : le premier objet par ordre de nom l'emporte, et
-  une alerte le signale.
-- Le timer ne parcourt que les objets marqués `theatre_generated` de la
+  Elle a lieu au début de chaque reconstruction et **après chaque
+  changement de matériau d'un emplacement** (abonnement `bpy.msgbus` à
+  `MaterialSlot.material`, réabonné au chargement de fichier). L'abonnement
+  ne fait que programmer une détection différée (timer à un coup, une seule
+  en attente), qui propage le choix aux autres objets de la catégorie
+  **sans reconstruire**. Deux choix différents dans la même catégorie : le
+  premier objet par ordre de nom l'emporte, et une alerte le signale.
+- **Pas de scrutation continue.** Le timer d'une seconde a été retiré après
+  un plantage dans sa lecture des emplacements (2026-11-20, après deux
+  ajouts BlenderKit sur `Backdrop`, `EXCEPTION_ACCESS_VIOLATION` dans
+  `materials._slot_material`), non reproduit hors session interactive. Le
+  code ne relit les objets qu'après un changement réel.
+- La détection ne parcourt que les objets marqués `theatre_generated` de la
   collection `Theatre`, ne modifie que des emplacements de matériau et ne
   tourne pas pendant une reconstruction.
 - Sous-panneau « Matériaux » : une ligne par catégorie (libellé français,
