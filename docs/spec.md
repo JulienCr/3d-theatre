@@ -95,6 +95,7 @@ le nez et la façade.
 | `side_angle` | Angle des escaliers latéraux (−90° centre, 0° salle, 90° mur) | 90° | −90 – 90 |
 | `side_offset` | Décalage latéral du palier (+ vers le mur, − vers le centre) | 0,00 | −10 – 10 |
 | `clearance` | Dégagement au pied de l'escalier *(choix)* | 1,00 | 0 – 5 |
+| `landing_depth` | Profondeur du palier (0 = sans palier) | 1,20 | 0 – 5 |
 | `center_width` | Largeur de l'escalier central *(choix)* | 2,00 | 0,60 – 10 |
 
 ### 3.4 Modules — `modules`
@@ -281,11 +282,29 @@ murs de cage 0,20 ; parement de plancher 0,03 ; liseré du nez 0,05 ;
 Pour le côté `s` (−1 jardin, +1 cour), `Ws` la largeur, `θ` l'angle, `o` le
 décalage latéral :
 
-- `Stairs_Landing_L/R` : palier carré de côté `Ws`, X sur
-  `s·[W/2 + o, W/2 + o + Ws]`, Z de 0 à `Hp`. Entièrement hors du plateau
-  (`o ≥ 0`), il est adossé à la façade : Y sur `[Ys − Ws, Ys]`. S'il passe
-  devant le plateau (`o < 0`), il est adossé au bandeau : Y sur `[−Ws, 0]`.
-  Sans recul de façade (`Ys = 0`) les deux coïncident.
+- Ligne d'appui `Yback` : la façade (`Ys`) si `o ≥ 0`, le bandeau (`0`) si
+  `o < 0` (escalier devant le plateau). Sans recul de façade les deux
+  coïncident.
+- `Stairs_Landing_L/R` : palier rectangulaire à hauteur du plateau, de Z = 0
+  à `Hp`, adossé à la ligne d'appui. `landing_depth` (`Ld`) se mesure dans
+  le sens dominant de la volée : pour `|θ| ≤ 45°`, X sur
+  `s·[W/2 + o, W/2 + o + Ws]` et Y sur `[Yback − Ld, Yback]` ; pour
+  `|θ| > 45°`, X sur `s·[W/2 + o, W/2 + o + Ld]` et Y sur
+  `[Yback − Ws, Yback]`. Avec la valeur par défaut (`Ld = Ws`), c'est le
+  carré d'avant.
+- **`Ld = 0` : pas de palier.** La volée part directement de la ligne
+  d'appui (`|θ| ≤ 45°`) ou du bord `x = s·(W/2 + o)` (`|θ| > 45°`). Devant la
+  scène à 0°, la première contremarche est le bandeau et le plateau sert de
+  dernière marche : l'escalier arrive droit sur le nez, sans promontoire.
+- Arrivée : le bord par lequel on quitte l'escalier (bord arrière du palier,
+  ou haut de la volée sans palier) doit toucher le plateau sur au moins
+  0,60 m (nez de scène, ou flanc de l'avant-plateau entre `0` et `Ys`).
+  Sinon alerte : « L'escalier X n'arrive pas sur le plateau : ajouter un
+  palier ou le décaler devant la scène. »
+- Volée : centrée en travers sur le palier pour `|θ| ≤ 45°`, adossée à la
+  ligne d'appui en travers pour `|θ| > 45°`. Aux angles intermédiaires elle
+  pivote autour du milieu de son bord de départ ; un chevauchement avec le
+  palier est voulu.
 - Direction de descente `d = (s·sin θ, −cos θ)` : 0° vers la salle, 90° vers
   le mur latéral, −90° vers le centre (le long du bandeau quand le palier y
   est adossé).
