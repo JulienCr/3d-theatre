@@ -1,0 +1,13 @@
+{
+  "extraKnownMarketplaces": {
+    "claude-config-mods": {
+      "source": {
+        "source": "directory",
+        "path": "D:\\dev\\claude-config"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "scratchpad@claude-config-mods": true
+  }
+}

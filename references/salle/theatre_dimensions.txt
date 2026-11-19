@@ -1,0 +1,25 @@
+THÉÂTRE NU — REPÈRE DE MODÉLISATION
+Source : une seule photographie. Cotes hypothétiques : elles ne sont pas mesurées.
+
+Axes du modèle GLB :
+X : latéral (gauche / droite)
+Y : profondeur, positif vers le fond de scène
+Z : vertical
+Origine : centre du nez de scène, niveau sol de la salle.
+Unité : mètre.
+
+Largeur générale : 14,00 m (entre -7 et +7 m)
+Largeur façade centrale / bandeau rouge : 11,60 m
+Plateau : 14,00 × 7,00 m, niveau supérieur Z=1,20 m
+Hauteur maximale façade : 7,35 m
+Linteau noir à environ 6,20 m au-dessus du sol
+Masques latéraux noirs à Y=2,05 m, avec portes 0,94 × 2,40 m
+Largeur claire entre masques : 6,90 m
+Escaliers : 2 × 6 marches, 0,20 m de hauteur × 0,30 m de giron, largeur 1,20 m.
+Avant-scène/salle : sol gris visible sur 3,10 m devant le plateau.
+Fond sombre à Y=7,0 m.
+
+La photo permet d'identifier des proportions et matières, mais pas les mesures,
+la profondeur réelle du plateau, le nombre exact de marches côté droit,
+ni la disposition exacte des parties masquées du théâtre.
+Le modèle est un blockout librement modifiable, pas un relevé architectural.
