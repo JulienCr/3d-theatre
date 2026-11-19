@@ -16,6 +16,7 @@ USER = "user"
 
 _items_cache: list = []
 preset_warnings: list[str] = []
+_selected = ""
 
 
 def user_dir(create: bool = False) -> Path:
@@ -38,6 +39,21 @@ def preset_items(self, context):
     _items_cache = [(ident, label, "Préréglage livré" if ident.startswith(SHIPPED)
                      else "Préréglage utilisateur") for ident, label, _ in list_presets()]
     return _items_cache
+
+
+def _get_preset(self) -> int:
+    """Index of the selected preset; the first item when it no longer exists."""
+    for index, item in enumerate(preset_items(None, None)):
+        if item[0] == _selected:
+            return index
+    return 0
+
+
+def _set_preset(self, index: int) -> None:
+    global _selected
+    items = preset_items(None, None)
+    if 0 <= index < len(items):
+        _selected = items[index][0]
 
 
 def _slug(name: str) -> str:
@@ -107,7 +123,8 @@ def register() -> None:
     for cls in CLASSES:
         bpy.utils.register_class(cls)
     bpy.types.WindowManager.theatre_preset = bpy.props.EnumProperty(
-        name="Préréglage", description="Préréglage à charger", items=preset_items)
+        name="Préréglage", description="Préréglage à charger", items=preset_items,
+        get=_get_preset, set=_set_preset)
 
 
 def unregister() -> None:
