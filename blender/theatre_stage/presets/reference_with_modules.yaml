@@ -3,6 +3,7 @@ stage:
   width: 11.6
   depth: 7.0
   grid_height: 6.1
+  wings: 2.0
 advanced:
   stage_height: 1.2
   apron_depth: 3.1
@@ -25,7 +26,7 @@ modules:
   symmetric: true
   left:
     enabled: true
-    wall_gap: 0.0
+    frame_gap: 0.0
     setback: 2.05
     width: 1.55
     depth: 2.0
@@ -42,7 +43,7 @@ modules:
     window_offset: 0.0
   right:
     enabled: true
-    wall_gap: 0.0
+    frame_gap: 0.0
     setback: 2.05
     width: 1.55
     depth: 2.0
@@ -89,3 +90,5 @@ cameras:
   distance: 11.0
   height: 3.0
   lens: 22.0
+house:
+  ceiling: true

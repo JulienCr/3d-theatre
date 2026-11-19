@@ -82,8 +82,9 @@ def _enum(key, default, label, tooltip, items):
 
 _MODULE_PARAMS = (
     _flag("enabled", True, "Module présent", "Affiche ce module latéral."),
-    _length("wall_gap", 0.0, 0.0, 5.0, "Écart au mur",
-            "Distance entre la charnière du module et le mur de cage."),
+    _length("frame_gap", 0.0, -10.0, 5.0, "Écart au cadre",
+            "Distance entre la charnière et le bord du cadre : positive vers l'axe, "
+            "négative vers les coulisses."),
     _length("setback", 2.05, 0.0, 30.0, "Recul de la charnière",
             "Distance de la charnière au nez de scène, vers le fond."),
     _length("width", 1.55, 0.40, 10.0, "Largeur de la face",
@@ -114,6 +115,8 @@ SCHEMA: tuple[Group, ...] = (
         _length("depth", 7.00, 3.0, 30.0, "Profondeur de scène", "Du nez de scène au fond."),
         _length("grid_height", 6.10, 3.0, 25.0, "Hauteur sous gril",
                 "Hauteur sous le gril, depuis le plancher."),
+        _length("wings", 2.00, 0.0, 15.0, "Coulisses",
+                "Largeur des coulisses de chaque côté de l'ouverture du cadre."),
     )),
     Group("advanced", "Avancé", (
         _length("stage_height", 1.20, 0.20, 2.50, "Hauteur du plateau",
@@ -196,6 +199,10 @@ SCHEMA: tuple[Group, ...] = (
                 "Hauteur des caméras au-dessus du sol de salle."),
         Param("lens", FLOAT, 22.0, "Focale (mm)", "Focale de l'objectif des caméras.",
               10.0, 200.0),
+    )),
+    Group("house", "Salle", (
+        _flag("ceiling", True, "Plafond de salle",
+              "Plafond visible seulement depuis la salle."),
     )),
 )
 

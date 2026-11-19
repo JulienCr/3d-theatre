@@ -11,9 +11,10 @@ import math
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 
+from .meshes import MAX_DEPTH_FACTOR
 from .params import module_sets, validate_params
 from .primitives import (
-    Box, Camera, FlatSurface, Light, Panel, PleatedSurface, PleatState, Prism,
+    Box, Camera, FlatSurface, HorizontalFace, Light, Panel, PleatedSurface, PleatState, Prism,
     SlatGrid, Tube,
 )
 
@@ -43,6 +44,7 @@ MATERIAL_COLORS: dict[str, tuple[float, float, float, float]] = {
     "TS_Masking": (0.01, 0.01, 0.01, 1.0),
     "TS_MainCurtain": (0.40, 0.02, 0.03, 1.0),
     "TS_Cyclorama": (0.90, 0.90, 0.90, 1.0),
+    "TS_HouseCeiling": (0.15, 0.15, 0.15, 1.0),
 }
 
 # Constants not exposed as parameters (spec section 4 and 8).
@@ -63,6 +65,7 @@ PLEAT_PITCH = 0.30
 PLEAT_AMPLITUDE = 0.06
 CURTAIN_OPEN_AMPLITUDE = 0.20
 CURTAIN_POST_MARGIN = 0.05
+CURTAIN_INNER_MARGIN = 0.25
 CURTAIN_MIN_BUNDLE = 0.30
 CURTAIN_OVERLAP = 0.15
 WORK_LIGHT_WATTS_PER_SQM = 25.0
@@ -71,6 +74,8 @@ FRONT_LIGHT_SIZE = 2.0
 LIGHT_KELVIN = 4000.0
 MIN_LANE = 0.60
 BATTEN_CLEARANCE = 0.30
+BORDER_SETBACK = 0.10
+BORDER_GAP = 0.10
 EPS = 1e-9
 
 
@@ -92,6 +97,7 @@ class Derived:
 
     total_width: float
     cage_width: float
+    frame_opening: float
     cage_front_y: float
     side_zone: float
     stair_footprint: float
@@ -179,6 +185,7 @@ class Ctx:
     Ys: float
     lintel: float
     Wc: float
+    Wk: float
     Yc: float
     Z: float
     Wt: float
@@ -219,12 +226,12 @@ def _tile(width, height, openings):
     return tuple(cells)
 
 
-def _module_spec(tag, s, label, m, Wc, Yc, D, Hp):
+def _module_spec(tag, s, label, m, Wc, Wk, Yc, D, Hp):
     theta = math.radians(m["angle"])
     c, sn = math.cos(theta), math.sin(theta)
     u_dir = (c, sn) if s < 0 else (-c, sn)
     v_dir = (-sn, c) if s < 0 else (sn, c)
-    hx, hy = s * (Wc / 2 - m["wall_gap"]), m["setback"]
+    hx, hy = s * (Wc / 2 - m["frame_gap"]), m["setback"]
     w, h, depth = m["width"], m["height"], m["depth"]
     warnings: list[str] = []
     openings = []
@@ -245,7 +252,7 @@ def _module_spec(tag, s, label, m, Wc, Yc, D, Hp):
 
     corners = [world(0, 0), world(w, 0), world(w, depth), world(w - MODULE_WALL, depth)]
     tol = 1e-6
-    if any(abs(x) > Wc / 2 + tol or y < Yc - tol or y > D + tol for x, y in corners):
+    if any(abs(x) > Wk / 2 + tol or y < Yc - tol or y > D + tol for x, y in corners):
         warnings.append(f"Module {label} : sort de la cage.")
     footprint = [world(u, v) for u in (0, w) for v in (0, MODULE_WALL)]
     footprint += [world(u, v) for u in (w - MODULE_WALL, w) for v in (0, depth)]
@@ -270,6 +277,7 @@ def _make_context(raw) -> tuple[Ctx, list[str]]:
         Tc = (W - 1.0) / 2
         warnings.append(f"Montants du cadre trop larges pour le plateau : réduits à {_metres(Tc)}.")
     Wc = W - 2 * Tc
+    Wk = Wc + 2 * st["wings"]
     Yc = Ys + PROSCENIUM_DEPTH
     if D < Yc + 0.5:
         D = Yc + 0.5
@@ -300,45 +308,49 @@ def _make_context(raw) -> tuple[Ctx, list[str]]:
     for tag, s, label, m in (("L", -1, "jardin", left), ("R", 1, "cour", right)):
         if not m["enabled"]:
             continue
-        spec, y_max, issues = _module_spec(tag, s, label, m, Wc, Yc, D, Hp)
+        spec, y_max, issues = _module_spec(tag, s, label, m, Wc, Wk, Yc, D, Hp)
         modules.append(spec)
         ymod = y_max if ymod is None else max(ymod, y_max)
         if tag == "L" or not symmetric:
             warnings.extend(issues)
 
-    plan, plan_warnings = _mask_plan(p, Wc, Yc, D, Hp, Hg, ymod)
+    plan, plan_warnings = _mask_plan(p, Wk, Yc, D, Hp, Hg, ymod)
     warnings.extend(plan_warnings)
     ys, battens_warning = _light_battens(p, Yc, D, plan)
     warnings.extend(battens_warning)
 
     Yh = max(A, p["cameras"]["distance"] + 1.0)
-    ctx = Ctx(p, W, D, Hp, Hg, A, Hf, Hc, Tc, Ys, lintel, Wc, Yc, Z, Wt, Yh, n, riser_h,
+    ctx = Ctx(p, W, D, Hp, Hg, A, Hf, Hc, Tc, Ys, lintel, Wc, Wk, Yc, Z, Wt, Yh, n, riser_h,
               stair_len, footprint if lateral else 0.0, tuple(modules), ymod, plan, ys)
     return ctx, warnings
 
 
-def _mask_plan(p, Wc, Yc, D, Hp, Hg, ymod):
+def _mask_plan(p, Wk, Yc, D, Hp, Hg, ymod):
     mk = p["masking"]
-    y0 = Yc + 0.50
+    yr = Yc + 0.15
+    curtain_dev = max(PLEAT_AMPLITUDE, CURTAIN_OPEN_AMPLITUDE) * MAX_DEPTH_FACTOR
+    border_dev = PLEAT_AMPLITUDE * MAX_DEPTH_FACTOR
+    yf = yr + curtain_dev + border_dev + BORDER_GAP + BORDER_SETBACK
+    y0 = yf + 0.20
     if ymod is not None:
         y0 = max(y0, ymod + 0.20)
     yb = {"bare_wall": D, "black_curtain": D - 0.40, "cyclorama": D - 1.20}[mk["backdrop"]]
     y1 = yb - 0.30
     lanes = mk["lanes"]
-    lane_width = max(y1 - y0, 0.0) / lanes
-    planes = tuple(y0 + k * lane_width for k in range(1, lanes + 1))
+    lane_width = max(yb - y0, 0.0) / lanes
+    planes = tuple(y0 + k * lane_width for k in range(lanes))
     zb = Hp + Hg - p["grid"]["batten_drop"]
     warnings = []
     if lane_width < MIN_LANE - EPS and mk["style"] == "italian":
         warnings.append("Rues de pendrillonnage de moins de 0,60 m : réduire le nombre de "
                         "rues ou reculer le fond.")
-    if mk["opening"] > Wc:
+    if mk["opening"] >= Wk:
         warnings.append("Ouverture du pendrillonnage plus large que la cage : "
                         "aucun pendrillon dessiné.")
     wants_border = mk["front_border"] or any(mk["borders"][: lanes])
     if wants_border and mk["border_bottom"] >= zb - Hp:
         warnings.append("Frises sans hauteur utile : le bas des frises atteint les porteuses.")
-    return MaskPlan(y0, y1, yb, lane_width, planes, Yc + 0.35, Yc + 0.15, zb), warnings
+    return MaskPlan(y0, y1, yb, lane_width, planes, yf, yr, zb), warnings
 
 
 def _masking_batten_ys(p, plan) -> list[float]:
@@ -375,11 +387,14 @@ def _box(name, material, collection, lo, hi, origin=(0.0, 0.0, 0.0), yaw=0.0):
 # ---------------------------------------------------------------- families
 
 def _architecture(c: Ctx) -> Part:
-    A_, Wt, W, Wc, Ys, Yc, Hp, D = c.A, c.Wt, c.W, c.Wc, c.Ys, c.Yc, c.Hp, c.D
+    Wt, W, Wc, Wk, Ys, Yc, Hp, D = c.Wt, c.W, c.Wc, c.Wk, c.Ys, c.Yc, c.Hp, c.D
     roof_z = Hp + c.Hg + 2.0
     objs: list = [
         _box("House_Floor", "TS_HouseFloor", ARCHITECTURE, (-Wt / 2, -c.Yh, -0.10), (Wt / 2, Ys, 0.0)),
     ]
+    if c.p["house"]["ceiling"]:
+        objs.append(HorizontalFace("House_Ceiling", "TS_HouseCeiling", ARCHITECTURE,
+                                   -Wt / 2, Wt / 2, -c.Yh, Ys, c.Hf, -1.0))
     for tag, s in (("L", -1), ("R", 1)):
         x0, x1 = (-Wt / 2 - FACADE_THICKNESS, -Wt / 2) if s < 0 else (Wt / 2, Wt / 2 + FACADE_THICKNESS)
         objs.append(_box(f"House_Wall_{tag}", "TS_Enclosure", ARCHITECTURE,
@@ -408,8 +423,8 @@ def _architecture(c: Ctx) -> Part:
     objs.append(_box("Proscenium_Lintel", "TS_Proscenium", ARCHITECTURE,
                      (-W / 2, py0, Hp + c.Hc), (W / 2, py1, Hp + c.Hc + c.lintel)))
 
-    outline = ((-W / 2, 0.0), (W / 2, 0.0), (W / 2, Yc), (Wc / 2, Yc), (Wc / 2, D),
-               (-Wc / 2, D), (-Wc / 2, Yc), (-W / 2, Yc))
+    outline = ((-W / 2, 0.0), (W / 2, 0.0), (W / 2, Yc), (Wk / 2, Yc), (Wk / 2, D),
+               (-Wk / 2, D), (-Wk / 2, Yc), (-W / 2, Yc))
     objs.append(Prism("Stage_Base", "TS_StageBase", ARCHITECTURE, "xy", (outline,),
                       0.0, Hp - FLOOR_FACING))
     objs.append(Prism("Stage_Floor", "TS_StageFloor", ARCHITECTURE, "xy", (outline,),
@@ -420,13 +435,17 @@ def _architecture(c: Ctx) -> Part:
                      (-W / 2, -FRONT_BAND_THICKNESS, Hp - NOSING), (W / 2, 0.0, Hp)))
 
     for tag, s in (("L", -1), ("R", 1)):
-        x0, x1 = (-Wc / 2 - CAGE_WALL, -Wc / 2) if s < 0 else (Wc / 2, Wc / 2 + CAGE_WALL)
+        x0, x1 = (-Wk / 2 - CAGE_WALL, -Wk / 2) if s < 0 else (Wk / 2, Wk / 2 + CAGE_WALL)
         objs.append(_box(f"Cage_Wall_{tag}", "TS_Cage", ARCHITECTURE, (x0, Yc, Hp), (x1, D, roof_z)))
+        if Wk > W + EPS:
+            fx0, fx1 = sorted((s * W / 2, s * (Wk / 2 + CAGE_WALL)))
+            objs.append(_box(f"Cage_Front_{tag}", "TS_Cage", ARCHITECTURE,
+                             (fx0, Ys + FACADE_THICKNESS, Hp), (fx1, Yc, roof_z)))
     objs.append(_box("Cage_Back", "TS_Cage", ARCHITECTURE,
-                     (-Wc / 2, D, Hp), (Wc / 2, D + CAGE_WALL, roof_z)))
+                     (-Wk / 2, D, Hp), (Wk / 2, D + CAGE_WALL, roof_z)))
     objs.append(_box("Cage_Roof", "TS_Cage", ARCHITECTURE,
-                     (-Wc / 2 - CAGE_WALL, Yc, roof_z),
-                     (Wc / 2 + CAGE_WALL, D + CAGE_WALL, roof_z + ROOF_THICKNESS)))
+                     (-Wk / 2 - CAGE_WALL, Yc, roof_z),
+                     (Wk / 2 + CAGE_WALL, D + CAGE_WALL, roof_z + ROOF_THICKNESS)))
     return Part(tuple(objs))
 
 
@@ -478,14 +497,14 @@ def _modules(c: Ctx) -> Part:
 
 
 def _grid(c: Ctx) -> Part:
-    Hp, Hg, Wc = c.Hp, c.Hg, c.Wc
-    count = int(math.floor((Wc - SLAT) / SLAT_PITCH + EPS)) + 1
-    xs = tuple(-Wc / 2 + SLAT / 2 + i * SLAT_PITCH for i in range(count))
+    Hp, Hg, Wk = c.Hp, c.Hg, c.Wk
+    count = int(math.floor((Wk - SLAT) / SLAT_PITCH + EPS)) + 1
+    xs = tuple(-Wk / 2 + SLAT / 2 + i * SLAT_PITCH for i in range(count))
     objs: list = [SlatGrid("Grid_Deck", "TS_Grid", GRID, xs, c.Yc, c.D, Hp + Hg, SLAT)]
     z = Hp + Hg - c.p["grid"]["batten_drop"]
     for i, y in enumerate(c.light_batten_ys, start=1):
         objs.append(Tube(f"Batten_{_nn(i)}", "TS_Batten", GRID,
-                         (-Wc / 2 + 0.10, y, z), (Wc / 2 - 0.10, y, z), BATTEN_RADIUS))
+                         (-Wk / 2 + 0.10, y, z), (Wk / 2 - 0.10, y, z), BATTEN_RADIUS))
     return Part(tuple(objs))
 
 
@@ -502,7 +521,7 @@ def _pleated(name, collection, x0, y0, x1, y1, z0, z1, facing, material="TS_Mask
 
 
 def _masking(c: Ctx) -> Part:
-    mk, plan, Wc, Hp, zb = c.p["masking"], c.plan, c.Wc, c.Hp, c.plan.zb
+    mk, plan, Wc, Wk, Hp, zb = c.p["masking"], c.plan, c.Wc, c.Wk, c.Hp, c.plan.zb
     objs = []
 
     def pleated(*args, **kwargs):
@@ -511,7 +530,7 @@ def _masking(c: Ctx) -> Part:
     def batten(name, a, b):
         objs.append(Tube(name, "TS_Batten", MASKING, (*a, zb), (*b, zb), BATTEN_RADIUS))
 
-    bx = Wc / 2 - 0.10
+    bx = Wk / 2 - 0.10
     for k, y in enumerate(plan.planes, start=1):
         batten(f"MaskingBatten_{_nn(k)}", (-bx, y), (bx, y))
     if mk["front_border"]:
@@ -519,14 +538,14 @@ def _masking(c: Ctx) -> Part:
     if mk["backdrop"] != "bare_wall":
         batten("MaskingBatten_Back", (-bx, plan.yb), (bx, plan.yb))
 
-    fits = mk["opening"] <= Wc
-    outer = Wc / 2 - 0.10
+    fits = mk["opening"] < Wk
+    wall = Wk / 2
     if mk["style"] == "italian":
-        if fits and outer - mk["opening"] / 2 > 0.10:
+        if fits and wall - mk["opening"] / 2 > 0.10:
             for k, y in enumerate(plan.planes, start=1):
                 for tag, s in (("L", -1), ("R", 1)):
                     objs.append(pleated(f"Leg_{tag}_{_nn(k)}", MASKING, s * mk["opening"] / 2, y,
-                                         s * outer, y, Hp, zb, (0.0, -1.0)))
+                                         s * wall, y, Hp, zb, (0.0, -1.0)))
     else:
         for tag, s in (("L", -1), ("R", 1)):
             x = s * mk["opening"] / 2
@@ -536,18 +555,19 @@ def _masking(c: Ctx) -> Part:
                 batten(f"MaskingBatten_Side_{tag}", (x, plan.y0), (x, plan.y1))
 
     if mk["border_bottom"] < zb - Hp:
-        half = (Wc - 0.20) / 2
+        half = Wk / 2
         z0 = Hp + mk["border_bottom"]
         if mk["front_border"]:
-            y = plan.front_plane - 0.10
+            y = plan.front_plane - BORDER_SETBACK
             objs.append(pleated("Border_00", MASKING, -half, y, half, y, z0, zb, (0.0, -1.0)))
         for k, y in enumerate(plan.planes, start=1):
             if mk["borders"][k - 1]:
-                objs.append(pleated(f"Border_{_nn(k)}", MASKING, -half, y - 0.10, half, y - 0.10,
+                objs.append(pleated(f"Border_{_nn(k)}", MASKING, -half, y - BORDER_SETBACK, half,
+                                     y - BORDER_SETBACK,
                                      z0, zb, (0.0, -1.0)))
 
     if mk["backdrop"] == "black_curtain":
-        half = (Wc - 0.20) / 2
+        half = Wk / 2
         objs.append(pleated("Backdrop", MASKING, -half, plan.yb, half, plan.yb, Hp, zb,
                              (0.0, -1.0)))
     elif mk["backdrop"] == "cyclorama":
@@ -566,7 +586,9 @@ def _curtains(c: Ctx) -> Part:
     count = _pleat_count(CURTAIN_OVERLAP + outer)
     bundle = c.Tc - 2 * CURTAIN_POST_MARGIN
     narrow = bundle < CURTAIN_MIN_BUNDLE - EPS
-    inner = outer - CURTAIN_MIN_BUNDLE if narrow else c.Wc / 2 + CURTAIN_POST_MARGIN
+    inner = outer - CURTAIN_MIN_BUNDLE
+    if not narrow:
+        inner = min(inner, c.Wc / 2 + CURTAIN_INNER_MARGIN)
     objs = []
     for tag, s in (("L", -1), ("R", 1)):
         closed = PleatState((-s * CURTAIN_OVERLAP, y), (s * outer, y), PLEAT_AMPLITUDE)
@@ -583,15 +605,15 @@ def _lights(c: Ctx) -> Part:
     lt = c.p["lights"]
     if not lt["enabled"]:
         return Part()
-    Wc, depth = c.Wc, c.D - c.Yc
-    nx = max(1, _round_half_up(Wc / lt["spacing"]))
+    Wk, depth = c.Wk, c.D - c.Yc
+    nx = max(1, _round_half_up(Wk / lt["spacing"]))
     ny = max(1, _round_half_up(depth / lt["spacing"]))
-    cx, cy = Wc / nx, depth / ny
+    cx, cy = Wk / nx, depth / ny
     z = c.Hp + c.Hg - 0.30
     lights, index = [], 1
     for iy in range(ny):
         for ix in range(nx):
-            x, y = -Wc / 2 + (ix + 0.5) * cx, c.Yc + (iy + 0.5) * cy
+            x, y = -Wk / 2 + (ix + 0.5) * cx, c.Yc + (iy + 0.5) * cy
             lights.append(Light(f"WorkLight_{_nn(index)}", LIGHTS, (x, y, z), (x, y, c.Hp),
                                 min(cx, cy) / 2, WORK_LIGHT_WATTS_PER_SQM * cx * cy * lt["intensity"],
                                 LIGHT_KELVIN))
@@ -629,7 +651,7 @@ def compute_layout(params: Mapping | None = None) -> Layout:
         warnings.extend(part.warnings)
     masking_battens = sum(1 for o in objects if o.name.startswith("MaskingBatten_"))
     derived = Derived(
-        total_width=ctx.Wt, cage_width=ctx.Wc, cage_front_y=ctx.Yc, side_zone=ctx.Z,
+        total_width=ctx.Wt, cage_width=ctx.Wk, frame_opening=ctx.Wc, cage_front_y=ctx.Yc, side_zone=ctx.Z,
         stair_footprint=ctx.footprint, risers_count=ctx.risers, riser_height=ctx.riser_h,
         stair_length=ctx.stair_len, batten_count=len(ctx.light_batten_ys),
         masking_batten_count=masking_battens, masking_y0=ctx.plan.y0, masking_y1=ctx.plan.y1,

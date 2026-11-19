@@ -5,6 +5,8 @@ from core.meshes import MAX_DEPTH_FACTOR, build_mesh, grid_shape, pleated_mesh
 from helpers import layout, make, modules_off
 
 ZB = 1.2 + 6.1 - 0.5
+YF = 1.75 + 0.20 * MAX_DEPTH_FACTOR + 0.06 * MAX_DEPTH_FACTOR + 0.20
+Y0 = YF + 0.20
 
 
 def no_modules(**groups):
@@ -21,22 +23,24 @@ def test_planes_start_behind_the_modules_when_present():
     lay = layout()
     assert lay.derived.masking_y0 == pytest.approx(4.05 + 0.20)
     assert lay.derived.masking_y1 == pytest.approx(7.0 - 0.40 - 0.30)
-    step = (6.3 - 4.25) / 3
+    step = (6.6 - 4.25) / 3
     ys = [plane_y(lay, f"MaskingBatten_{k:02d}") for k in (1, 2, 3)]
-    assert ys == pytest.approx([4.25 + step, 4.25 + 2 * step, 6.3])
+    assert ys == pytest.approx([4.25, 4.25 + step, 4.25 + 2 * step])
 
 
 def test_planes_start_behind_the_proscenium_without_modules():
     lay = no_modules()
-    assert lay.derived.masking_y0 == pytest.approx(2.1)
+    assert lay.derived.masking_y0 == pytest.approx(Y0)
+    step = (6.6 - Y0) / 3
     ys = [plane_y(lay, f"MaskingBatten_{k:02d}") for k in (1, 2, 3)]
-    assert ys == pytest.approx([2.1 + 1.4, 2.1 + 2.8, 6.3])
+    assert ys == pytest.approx([Y0, Y0 + step, Y0 + 2 * step])
+    assert plane_y(lay, "MaskingBatten_Back") - ys[-1] == pytest.approx(step)
 
 
 def test_shallow_modules_do_not_push_the_planes_back():
     params = make()
     params["modules"]["left"].update(setback=0.5, depth=0.5)
-    assert compute_layout(params).derived.masking_y0 == pytest.approx(2.1)
+    assert compute_layout(params).derived.masking_y0 == pytest.approx(Y0)
 
 
 def test_a_single_present_module_is_enough_to_push_the_planes():
@@ -57,7 +61,7 @@ def test_the_three_backdrops_build_their_own_object():
     black = layout(masking={"backdrop": "black_curtain"})
     assert black.find("Backdrop").material == "TS_Masking"
     assert black.find("Backdrop").state.p0[1] == pytest.approx(6.6)
-    assert black.find("Backdrop").state.p1[0] - black.find("Backdrop").state.p0[0] == pytest.approx(9.8)
+    assert black.find("Backdrop").state.p1[0] - black.find("Backdrop").state.p0[0] == pytest.approx(14.0)
     assert "MaskingBatten_Back" in black.names()
 
     bare = layout(masking={"backdrop": "bare_wall"})
@@ -73,10 +77,10 @@ def test_the_three_backdrops_build_their_own_object():
 def test_italian_legs_run_from_the_opening_edge_to_the_cage_wall():
     lay = layout()
     leg = lay.find("Leg_L_01")
-    assert leg.state.p0[0] == pytest.approx(-4.0) and leg.state.p1[0] == pytest.approx(-4.9)
+    assert leg.state.p0[0] == pytest.approx(-4.0) and leg.state.p1[0] == pytest.approx(-7.0)
     assert lay.find("Leg_R_02").state.p0[0] == pytest.approx(4.0)
     assert leg.z0 == pytest.approx(1.2) and leg.z1 == pytest.approx(ZB)
-    assert leg.pleat_count == round(0.9 / 0.3)
+    assert leg.pleat_count == round(3.0 / 0.3)
     assert leg.state.amplitude == pytest.approx(0.06)
     assert {f"Leg_{s}_{k:02d}" for s in "LR" for k in (1, 2, 3)} <= set(lay.names())
 
@@ -100,7 +104,7 @@ def test_lanes_still_set_the_border_planes_in_german_style():
 
 def test_opening_wider_than_the_cage_removes_the_legs_and_warns():
     for style in ("italian", "german"):
-        lay = layout(masking={"opening": 11.0, "style": style})
+        lay = layout(masking={"opening": 14.0, "style": style})
         assert not [n for n in lay.names() if n.startswith("Leg_")]
         assert any("plus large que la cage" in w for w in lay.warnings)
     assert not any("plus large" in w for w in layout().warnings)
@@ -136,9 +140,10 @@ def test_border_geometry_covers_the_leg_tops_toward_the_house():
     plane = plane_y(lay, "MaskingBatten_01")
     assert border.state.p0[1] == pytest.approx(plane - 0.10)
     assert border.z0 == pytest.approx(1.2 + 4.5) and border.z1 == pytest.approx(ZB)
-    assert border.state.p1[0] - border.state.p0[0] == pytest.approx(9.8)
+    assert border.state.p1[0] - border.state.p0[0] == pytest.approx(14.0)
     front = lay.find("Border_00")
-    assert front.state.p0[1] == pytest.approx(1.6 + 0.35 - 0.10)
+    assert front.state.p0[1] == pytest.approx(YF - 0.10)
+    assert plane_y(lay, "MaskingBatten_00") == pytest.approx(YF)
 
 
 def test_borders_without_useful_height_are_dropped_with_a_warning():
@@ -162,17 +167,15 @@ def test_masking_battens_share_the_light_batten_tube_and_height():
 
 
 def test_light_battens_near_masking_planes_are_removed_and_renumbered():
-    base = dict(masking={"backdrop": "bare_wall", "front_border": False},
-                curtains={"main_enabled": False})
-
-    def kept(lanes):
-        lay = no_modules(**{**base, "masking": {**base["masking"], "lanes": lanes}})
-        return [plane_y(lay, f"Batten_{i:02d}") for i in range(1, lay.derived.batten_count + 1)]
-
-    assert kept(1) == pytest.approx([2.1, 3.1, 4.1, 5.1, 6.1])
-    assert kept(3) == pytest.approx([2.1, 3.1, 4.1, 6.1])
-    # lanes=2 puts a plane at 4.4: the batten at 4.1 is exactly 0.30 away and stays
-    assert kept(2) == pytest.approx([2.1, 3.1, 4.1, 5.1, 6.1])
+    for lanes in (1, 2, 3):
+        lay = no_modules(masking={"backdrop": "bare_wall", "front_border": False, "lanes": lanes},
+                         curtains={"main_enabled": False})
+        planes = [plane_y(lay, f"MaskingBatten_{k:02d}") for k in range(1, lanes + 1)]
+        expected = [2.1 + i for i in range(5)
+                    if all(abs(2.1 + i - p) >= 0.30 - 1e-9 for p in planes)]
+        got = [plane_y(lay, f"Batten_{i:02d}") for i in range(1, lay.derived.batten_count + 1)]
+        assert got == pytest.approx(expected)
+        assert f"Batten_{len(got) + 1:02d}" not in lay.names()
 
 
 def test_the_main_curtain_plane_is_far_enough_to_keep_the_first_light_batten():
@@ -182,11 +185,11 @@ def test_the_main_curtain_plane_is_far_enough_to_keep_the_first_light_batten():
     assert lay.find("MainCurtain_L").state.p0[1] == pytest.approx(1.75)
 
 
-def test_a_front_border_clears_the_first_light_batten():
-    with_border = no_modules(curtains={"main_enabled": False})
-    without = no_modules(curtains={"main_enabled": False}, masking={"front_border": False})
-    assert plane_y(with_border, "Batten_01") != pytest.approx(2.1)
-    assert plane_y(without, "Batten_01") == pytest.approx(2.1)
+def test_light_battens_keep_their_distance_from_the_front_border_batten():
+    lay = no_modules(curtains={"main_enabled": False}, grid={"batten_spacing": 0.2})
+    front = plane_y(lay, "MaskingBatten_00")
+    ys = [plane_y(lay, f"Batten_{i:02d}") for i in range(1, lay.derived.batten_count + 1)]
+    assert ys and all(abs(y - front) >= 0.30 - 1e-9 for y in ys)
 
 
 def test_main_curtain_geometry_and_states():
@@ -199,7 +202,7 @@ def test_main_curtain_geometry_and_states():
     closed_len = abs(left.state.p1[0] - left.state.p0[0])
     opened = left.open_state
     assert opened.p1 == pytest.approx(left.state.p1)
-    assert opened.p0 == pytest.approx((-5.05, 1.75))
+    assert opened.p0 == pytest.approx((-5.25, 1.75))
     assert opened.amplitude == pytest.approx(0.20) and left.state.amplitude == pytest.approx(0.06)
     assert left.pleat_count == right.pleat_count == round(closed_len / 0.3)
 
@@ -212,7 +215,7 @@ def test_main_curtain_meshes_share_topology_between_the_two_states():
     assert len(closed.vertices) == len(opened.vertices) == cols * rows
     assert closed.vertices != opened.vertices
     xs = [v[0] for v in opened.vertices]
-    assert min(xs) == pytest.approx(-5.75) and max(xs) == pytest.approx(-5.05)
+    assert min(xs) == pytest.approx(-5.75) and max(xs) == pytest.approx(-5.25)
 
 
 @pytest.mark.parametrize("drape", [0.0, 0.5, 1.0])
@@ -224,7 +227,7 @@ def test_main_curtain_meshes_share_topology_between_the_two_states():
 ])
 def test_open_main_curtain_stays_behind_the_posts(stage, advanced, drape):
     lay = layout(stage=stage, advanced=advanced, masking={"drape": drape})
-    wc = lay.derived.cage_width
+    wc = lay.derived.frame_opening
     for name in ("MainCurtain_L", "MainCurtain_R"):
         opened = pleated_mesh(lay.find(name), open_pose=True)
         assert all(abs(v[0]) >= wc / 2 - 1e-9 for v in opened.vertices)
@@ -335,13 +338,13 @@ def test_drapery_grid_and_vertical_extent(drape):
 @pytest.mark.parametrize("drape", [0.0, 1.0])
 def test_legs_stay_within_their_own_extent(drape):
     lay = layout(masking={"drape": drape})
-    wc = lay.derived.cage_width
+    wk = lay.derived.cage_width
     for name in ("Leg_L_01", "Leg_R_03", "Leg_L_02"):
         leg = lay.find(name)
         xs = (leg.state.p0[0], leg.state.p1[0])
         for x, y, _ in build_mesh(leg).vertices:
             assert min(xs) - 1e-9 <= x <= max(xs) + 1e-9
-            assert abs(x) <= wc / 2 - 0.10 + 1e-9
+            assert abs(x) <= wk / 2 + 1e-9
             assert abs(x) >= 4.0 - 1e-9
             assert abs(y - leg.state.p0[1]) <= leg.state.amplitude * MAX_DEPTH_FACTOR + 1e-9
 
@@ -368,3 +371,44 @@ def test_drape_param_lives_in_the_masking_group():
     from core.params import GROUPS
     drape = next(p for p in GROUPS["masking"].params if p.key == "drape")
     assert (drape.default, drape.min, drape.max) == (0.5, 0.0, 1.0) and drape.rebuild
+
+
+# ----------------------------------------------- wall to wall and planes
+
+@pytest.mark.parametrize("drape", [0.0, 1.0])
+@pytest.mark.parametrize("wings", [0.0, 1.0, 2.0, 3.5])
+def test_drapery_touches_the_cage_walls_and_never_crosses_them(drape, wings):
+    lay = layout(stage={"wings": wings}, masking={"drape": drape})
+    wall = lay.derived.cage_width / 2
+    for name in ("Border_00", "Border_02", "Backdrop"):
+        xs = [v[0] for v in build_mesh(lay.find(name)).vertices]
+        assert min(xs) == pytest.approx(-wall, abs=1e-3) and max(xs) == pytest.approx(wall, abs=1e-3)
+        assert min(xs) >= -wall - 1e-9 and max(xs) <= wall + 1e-9
+    for name in ("Leg_L_01", "Leg_L_03"):
+        xs = [v[0] for v in build_mesh(lay.find(name)).vertices]
+        assert min(xs) == pytest.approx(-wall, abs=1e-3) and min(xs) >= -wall - 1e-9
+    for name in ("Leg_R_01", "Leg_R_03"):
+        xs = [v[0] for v in build_mesh(lay.find(name)).vertices]
+        assert max(xs) == pytest.approx(wall, abs=1e-3) and max(xs) <= wall + 1e-9
+
+
+@pytest.mark.parametrize("drape", [0.0, 0.5, 1.0])
+def test_front_border_never_enters_the_main_curtain_envelope(drape):
+    lay = layout(masking={"drape": drape})
+    ys = []
+    for name in ("MainCurtain_L", "MainCurtain_R"):
+        surface = lay.find(name)
+        for pose in (False, True):
+            ys += [v[1] for v in pleated_mesh(surface, pose).vertices]
+    border = [v[1] for v in build_mesh(lay.find("Border_00")).vertices]
+    assert min(border) > max(ys) + 0.05
+    first = [v[1] for v in build_mesh(lay.find("Border_01")).vertices]
+    assert min(first) > max(border) - 0.05
+
+
+def test_first_plane_closes_the_first_lane_and_nothing_hugs_the_backdrop():
+    lay = layout()
+    planes = [plane_y(lay, f"MaskingBatten_{k:02d}") for k in (1, 2, 3)]
+    assert planes[0] == pytest.approx(lay.derived.masking_y0)
+    assert lay.derived.backdrop_y - planes[-1] == pytest.approx(lay.derived.lane_width)
+    assert lay.derived.lane_width == pytest.approx((6.6 - 4.25) / 3)

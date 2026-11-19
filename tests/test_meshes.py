@@ -2,12 +2,12 @@ import pytest
 
 from core.layout import compute_layout
 from core.meshes import build_mesh
-from core.primitives import FlatSurface, PleatedSurface
+from core.primitives import FlatSurface, HorizontalFace, PleatedSurface
 from helpers import edge_report, layout, make, signed_volume
 
 
 def closed_primitives(lay):
-    return [o for o in lay.objects if not isinstance(o, (PleatedSurface, FlatSurface))]
+    return [o for o in lay.objects if not isinstance(o, (PleatedSurface, FlatSurface, HorizontalFace))]
 
 
 def busy_params():
@@ -68,13 +68,13 @@ def test_prism_t_shape_and_inverted_u_extrude_correctly():
     lay = layout()
     base = build_mesh(lay.find("Stage_Base"))
     assert len(base.vertices) == 16
-    assert signed_volume(base) == pytest.approx((11.6 * 1.6 + 10.0 * 5.4) * 1.17)
+    assert signed_volume(base) == pytest.approx((11.6 * 1.6 + 14.0 * 5.4) * 1.17)
 
 
 def test_tube_volume_is_close_to_a_cylinder():
     tube = layout().find("Batten_01")
     volume = signed_volume(build_mesh(tube))
-    expected = 3.141592653589793 * 0.024 ** 2 * 9.8
+    expected = 3.141592653589793 * 0.024 ** 2 * 13.8
     assert volume == pytest.approx(expected, rel=0.05)
 
 

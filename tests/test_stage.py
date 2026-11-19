@@ -3,6 +3,7 @@ import math
 import pytest
 
 from core.layout import compute_layout
+from core.meshes import build_mesh
 from helpers import approx_bounds, bounds, layout, make, modules_off
 
 
@@ -24,7 +25,9 @@ def test_step_count_and_tops_follow_the_risers():
 def test_total_width_depends_on_the_side_angle():
     assert layout(stairs={"side_angle": 0.0}).derived.total_width == pytest.approx(14.0)
     assert layout(stairs={"side_angle": 90.0}).derived.total_width == pytest.approx(17.0)
-    assert layout().derived.cage_width == pytest.approx(10.0)
+    assert layout().derived.frame_opening == pytest.approx(10.0)
+    assert layout().derived.cage_width == pytest.approx(14.0)
+    assert layout(stage={"wings": 0.5}).derived.cage_width == pytest.approx(11.0)
 
 
 def test_enclosure_stays_symmetric_with_a_single_side_stair():
@@ -94,7 +97,8 @@ def test_stage_floor_and_base_stack_to_the_stage_height():
     assert bounds(lay, "Stage_Floor")[2] == pytest.approx((1.17, 1.2))
     assert bounds(lay, "Stage_Base")[2] == pytest.approx((0.0, 1.17))
     base = bounds(lay, "Stage_Base")
-    assert base[0] == pytest.approx((-5.8, 5.8)) and base[1] == pytest.approx((0.0, 7.0))
+    assert base[0] == pytest.approx((-7.0, 7.0)) and base[1] == pytest.approx((0.0, 7.0))
+    assert bounds(layout(stage={"wings": 0.0}), "Stage_Base")[0] == pytest.approx((-5.8, 5.8))
 
 
 def test_proscenium_and_facade_dimensions():
@@ -122,7 +126,7 @@ def test_too_wide_posts_are_limited():
 
 
 def test_work_light_grid_counts_and_cells():
-    lay = layout()
+    lay = layout(stage={"wings": 0.0})
     assert len(lay.lights) == 7
     lights = [light for light in lay.lights if light.name != "WorkLight_Front"]
     assert len(lights) == 3 * 2
@@ -135,7 +139,9 @@ def test_work_light_grid_counts_and_cells():
 
 def test_light_grid_rounds_half_up_and_keeps_at_least_one_cell():
     lights = [l for l in layout(lights={"spacing": 4.0}).lights if l.name != "WorkLight_Front"]
-    assert len({l.location[0] for l in lights}) == 3
+    assert len({l.location[0] for l in lights}) == 4
+    wide = layout(stage={"wings": 0.0}, lights={"spacing": 4.0}).lights
+    assert len({l.location[0] for l in wide if l.name != "WorkLight_Front"}) == 3
     big = [l for l in layout(lights={"spacing": 10.0}).lights if l.name != "WorkLight_Front"]
     assert len(big) == 1
 
@@ -143,7 +149,7 @@ def test_light_grid_rounds_half_up_and_keeps_at_least_one_cell():
 def test_light_switches_and_intensity():
     assert layout(lights={"enabled": False}).lights == ()
     names = [l.name for l in layout(lights={"front": False}).lights]
-    assert "WorkLight_Front" not in names and len(names) == 6
+    assert "WorkLight_Front" not in names and len(names) == 5 * 2
     base = layout().find("WorkLight_01").energy
     assert layout(lights={"intensity": 2.0}).find("WorkLight_01").energy == pytest.approx(2 * base)
 
@@ -178,9 +184,9 @@ def test_light_battens_exist_and_are_numbered_without_gaps():
     for i in range(1, lay.derived.batten_count + 1):
         tube = lay.find(f"Batten_{i:02d}")
         ys.append(tube.start[1])
-        assert tube.start[0] == pytest.approx(-4.9) and tube.end[0] == pytest.approx(4.9)
+        assert tube.start[0] == pytest.approx(-6.9) and tube.end[0] == pytest.approx(6.9)
         assert tube.start[2] == pytest.approx(1.2 + 6.1 - 0.5) and tube.radius == pytest.approx(0.024)
-    assert ys == pytest.approx([3.1, 4.1])
+    assert ys == pytest.approx([2.1, 3.1])
     assert "Batten_03" not in lay.names()
 
 
@@ -201,8 +207,8 @@ def test_batten_requires_cage_depth():
 def test_grid_deck_slats_cover_the_cage():
     deck = layout().find("Grid_Deck")
     assert deck.z_min == pytest.approx(7.3)
-    assert deck.x_centers[0] == pytest.approx(-5.0 + 0.025)
-    assert deck.x_centers[-1] + 0.025 <= 5.0 + 1e-9
+    assert deck.x_centers[0] == pytest.approx(-7.0 + 0.025)
+    assert deck.x_centers[-1] + 0.025 <= 7.0 + 1e-9
     assert all(b - a == pytest.approx(0.15) for a, b in zip(deck.x_centers, deck.x_centers[1:]))
 
 
@@ -222,3 +228,48 @@ def test_object_names_are_unique_and_collections_declared():
         if hasattr(obj, "material"):
             assert obj.material in lay.materials
     assert lay.root_collection == "Theatre"
+
+
+def test_wings_widen_the_cage_and_every_cage_part_follows():
+    lay = layout()
+    wk = 14.0
+    assert approx_bounds(bounds(lay, "Cage_Wall_L"), ((-7.2, -7.0), (1.6, 7.0), (1.2, 9.3)))
+    assert approx_bounds(bounds(lay, "Cage_Wall_R"), ((7.0, 7.2), (1.6, 7.0), (1.2, 9.3)))
+    assert bounds(lay, "Cage_Back")[0] == pytest.approx((-wk / 2, wk / 2))
+    assert bounds(lay, "Cage_Roof")[0] == pytest.approx((-7.2, 7.2))
+    assert bounds(lay, "Stage_Floor")[0] == pytest.approx((-7.0, 7.0))
+    deck = lay.find("Grid_Deck")
+    assert deck.x_centers[0] - 0.025 == pytest.approx(-7.0)
+    assert all(abs(light.location[0]) < 7.0 for light in lay.lights)
+    assert lay.find("MaskingBatten_01").end[0] == pytest.approx(6.9)
+
+
+def test_cage_front_closes_the_wings_only_when_they_stick_out_of_the_frame():
+    lay = layout()
+    assert approx_bounds(bounds(lay, "Cage_Front_L"), ((-7.2, -5.8), (1.5, 1.6), (1.2, 9.3)))
+    assert approx_bounds(bounds(lay, "Cage_Front_R"), ((5.8, 7.2), (1.5, 1.6), (1.2, 9.3)))
+    for wings in (0.0, 0.8):
+        assert "Cage_Front_L" not in layout(stage={"wings": wings}).names()
+
+
+def test_ceiling_is_a_single_face_pointing_down_over_the_house():
+    lay = layout()
+    ceiling = lay.find("House_Ceiling")
+    assert ceiling.material == "TS_HouseCeiling"
+    mesh = build_mesh(ceiling)
+    assert len(mesh.faces) == 1
+    assert approx_bounds(bounds(lay, "House_Ceiling"), ((-8.5, 8.5), (-12.0, 1.2), (7.3, 7.3)))
+    pts = [mesh.vertices[i] for i in mesh.faces[0]]
+    nz = sum((a[0] - b[0]) * (a[1] + b[1]) for a, b in zip(pts, pts[1:] + pts[:1]))
+    assert nz < 0
+    assert "TS_HouseCeiling" in lay.materials
+    assert "House_Ceiling" not in layout(house={"ceiling": False}).names()
+
+
+def test_wings_do_not_move_the_modules_but_frame_gap_does():
+    inner = bounds(layout(stage={"wings": 0.0}), "Module_L_Front")
+    assert approx_bounds(bounds(layout(stage={"wings": 5.0}), "Module_L_Front"), inner)
+    params = make()
+    params["modules"]["left"]["frame_gap"] = -1.0
+    moved = bounds(compute_layout(params), "Module_L_Front")
+    assert moved[0][0] == pytest.approx(inner[0][0] - 1.0)

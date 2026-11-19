@@ -57,7 +57,7 @@ def test_module_return_follows_the_back_direction():
 
 def test_right_module_is_the_mirror_of_the_left_one_when_symmetric():
     lay = compute_layout(with_modules(left={"angle": 30.0, "window_enabled": True,
-                                            "wall_gap": 0.2}))
+                                            "frame_gap": 0.2}))
     for part in ("Front", "Return"):
         left = build_mesh(lay.find(f"Module_L_{part}")).vertices
         right = build_mesh(lay.find(f"Module_R_{part}")).vertices
@@ -74,8 +74,8 @@ def test_sides_are_independent_when_not_symmetric():
     assert not [n for n in lay.names() if n.startswith("Module_")]
 
 
-def test_wall_gap_and_setback_move_the_hinge():
-    lay = compute_layout(with_modules(left={"wall_gap": 0.5, "setback": 3.0}))
+def test_frame_gap_and_setback_move_the_hinge():
+    lay = compute_layout(with_modules(left={"frame_gap": 0.5, "setback": 3.0}))
     b = bounds(lay, "Module_L_Front")
     assert b[0][0] == pytest.approx(-4.5) and b[1][0] == pytest.approx(3.0)
 
@@ -137,8 +137,13 @@ def test_bay_outside_the_face_is_removed_with_a_warning():
 
 def test_module_leaving_the_cage_is_reported():
     assert not any("sort de la cage" in w for w in layout().warnings)
-    lay = compute_layout(with_modules(left={"angle": 90.0}))
-    assert any("Module jardin : sort de la cage" in w for w in lay.warnings)
+    assert not any("sort de la cage" in w
+                   for w in compute_layout(with_modules(left={"angle": 90.0})).warnings)
+    deep90 = compute_layout(with_modules(left={"angle": 90.0, "depth": 3.0}))
+    assert any("Module jardin : sort de la cage" in w for w in deep90.warnings)
+    p = with_modules(left={"angle": 90.0})
+    p["stage"]["wings"] = 0.0
+    assert any("Module jardin : sort de la cage" in w for w in compute_layout(p).warnings)
     deep = compute_layout(with_modules(left={"depth": 6.0}))
     assert any("sort de la cage" in w for w in deep.warnings)
 

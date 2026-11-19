@@ -137,6 +137,21 @@ class FlatSurface:
 
 
 @dataclass(frozen=True)
+class HorizontalFace:
+    """Single zero-thickness horizontal quad; `normal_z` is +1 (up) or -1 (down)."""
+
+    name: str
+    material: str
+    collection: str
+    x0: float
+    x1: float
+    y0: float
+    y1: float
+    z: float
+    normal_z: float
+
+
+@dataclass(frozen=True)
 class Light:
     """Square area light aimed from `location` at `target`."""
 
@@ -159,4 +174,4 @@ class Camera:
     lens: float
 
 
-Primitive = Box | Prism | Panel | Tube | SlatGrid | PleatedSurface | FlatSurface
+Primitive = Box | Prism | Panel | Tube | SlatGrid | PleatedSurface | FlatSurface | HorizontalFace

@@ -12,7 +12,7 @@ import zlib
 from dataclasses import dataclass
 
 from .primitives import (
-    Box, FlatSurface, Panel, PleatedSurface, PleatState, Prism, SlatGrid, Tube,
+    Box, FlatSurface, HorizontalFace, Panel, PleatedSurface, PleatState, Prism, SlatGrid, Tube,
 )
 
 PLEAT_SAMPLES = 8
@@ -318,6 +318,14 @@ def _flat_mesh(surface: FlatSurface) -> Mesh:
     return b.result()
 
 
+def _horizontal_mesh(face: HorizontalFace) -> Mesh:
+    b = _Builder()
+    ids = [b.add((x, y, face.z)) for x, y in ((face.x0, face.y0), (face.x1, face.y0),
+                                              (face.x1, face.y1), (face.x0, face.y1))]
+    b.face(ids, (0.0, 0.0, face.normal_z))
+    return b.result()
+
+
 def build_mesh(primitive) -> Mesh:
     """World-space mesh of any primitive (closed pose for pleated surfaces)."""
     if isinstance(primitive, Box):
@@ -334,4 +342,6 @@ def build_mesh(primitive) -> Mesh:
         return pleated_mesh(primitive)
     if isinstance(primitive, FlatSurface):
         return _flat_mesh(primitive)
+    if isinstance(primitive, HorizontalFace):
+        return _horizontal_mesh(primitive)
     raise TypeError(f"Unsupported primitive: {type(primitive).__name__}")
