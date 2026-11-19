@@ -23,6 +23,7 @@ stairs:
   side_angle: 90.0
   side_offset: 0.0
   clearance: 1.0
+  landing_depth: 1.2
   center_width: 2.0
 modules:
   symmetric: true

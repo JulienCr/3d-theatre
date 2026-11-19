@@ -96,6 +96,7 @@ MIN_LANE = 0.60
 BATTEN_CLEARANCE = 0.30
 BORDER_SETBACK = 0.10
 BORDER_GAP = 0.10
+ARRIVAL_MIN = 0.60
 EPS = 1e-9
 
 
@@ -295,39 +296,74 @@ Poly = tuple[tuple[float, float], ...]
 class SideStair:
     """Plan geometry of one lateral stair (side `s`), shared by the context and the builder."""
 
-    centre: tuple[float, float]
+    start: tuple[float, float]
     direction: tuple[float, float]
     yaw: float
-    landing: Poly
+    landing: Poly | None
     steps: tuple[Poly, ...]
     clearance: Poly | None
     footprint: float
+    arrival: float
 
 
-def _oriented_rect(centre, d, a0, a1, b0, b1) -> Poly:
+def _oriented_rect(origin, d, a0, a1, b0, b1) -> Poly:
     perp = (-d[1], d[0])
-    return tuple((centre[0] + a * d[0] + b * perp[0], centre[1] + a * d[1] + b * perp[1])
+    return tuple((origin[0] + a * d[0] + b * perp[0], origin[1] + a * d[1] + b * perp[1])
                  for a, b in ((a0, b0), (a1, b0), (a1, b1), (a0, b1)))
 
 
+def _collinear_overlap(a0, a1, b0, b1) -> float:
+    """Length shared by segments a and b when they lie on one line, else 0."""
+    ax, ay = a1[0] - a0[0], a1[1] - a0[1]
+    length = math.hypot(ax, ay)
+    bx, by = b1[0] - b0[0], b1[1] - b0[1]
+    blen = math.hypot(bx, by)
+    if length < EPS or blen < EPS:
+        return 0.0
+    ux, uy = ax / length, ay / length
+    if abs(ux * by - uy * bx) > 1e-6 * blen or abs((b0[0] - a0[0]) * uy - (b0[1] - a0[1]) * ux) > 1e-6:
+        return 0.0
+    t0 = (b0[0] - a0[0]) * ux + (b0[1] - a0[1]) * uy
+    t1 = (b1[0] - a0[0]) * ux + (b1[1] - a0[1]) * uy
+    return max(0.0, min(length, max(t0, t1)) - max(0.0, min(t0, t1)))
+
+
+def _arrival_length(s: int, W: float, Ys: float, edges) -> float:
+    """Longest stretch of `edges` lying on the stage front or the forestage flank."""
+    boundaries = (((-W / 2, 0.0), (W / 2, 0.0)), ((s * W / 2, 0.0), (s * W / 2, Ys)))
+    return max((_collinear_overlap(e0, e1, b0, b1) for e0, e1 in edges for b0, b1 in boundaries),
+               default=0.0)
+
+
 def _side_stair(s: int, W: float, Ys: float, n: int, st: Mapping) -> SideStair:
-    Ws, going, offset = st["width"], st["going"], st["side_offset"]
+    Ws, going, offset, depth = st["width"], st["going"], st["side_offset"], st["landing_depth"]
     theta = math.radians(st["side_angle"])
-    x0 = W / 2 + offset
-    ylo, yhi = (Ys - Ws, Ys) if offset >= 0 else (-Ws, 0.0)
-    centre = (s * (x0 + Ws / 2), (ylo + yhi) / 2)
     d = (s * math.sin(theta), -math.cos(theta))
-    landing = tuple((s * x, y) for x, y in ((x0, ylo), (x0 + Ws, ylo), (x0 + Ws, yhi), (x0, yhi)))
-    steps = tuple(_oriented_rect(centre, d, Ws / 2 + (j - 1) * going, Ws / 2 + j * going,
-                                 -Ws / 2, Ws / 2) for j in range(1, n))
+    x0 = W / 2 + offset
+    yback = Ys if offset >= 0 else 0.0
+    front_dominant = abs(st["side_angle"]) <= 45.0
+    if front_dominant:
+        box = (x0, yback - depth, x0 + Ws, yback)
+        start = (s * (x0 + Ws / 2), yback - depth)
+    else:
+        box = (x0, yback - Ws, x0 + depth, yback)
+        start = (s * (x0 + (depth if theta > 0 else 0.0)), yback - Ws / 2)
+    landing = None
+    if depth > EPS:
+        landing = tuple((s * x, y) for x, y in ((box[0], box[1]), (box[2], box[1]),
+                                                (box[2], box[3]), (box[0], box[3])))
+    steps = tuple(_oriented_rect(start, d, (j - 1) * going, j * going, -Ws / 2, Ws / 2)
+                  for j in range(1, n))
     length = (n - 1) * going
     clear = st["clearance"]
-    clearance = (_oriented_rect(centre, d, Ws / 2 + length, Ws / 2 + length + clear, -Ws / 2, Ws / 2)
+    clearance = (_oriented_rect(start, d, length, length + clear, -Ws / 2, Ws / 2)
                  if clear > 0 else None)
-    shapes = [landing, *steps] + ([clearance] if clearance else [])
-    corners = [p for poly in shapes for p in poly]
-    footprint = max(abs(x) for x, _ in corners) - W / 2
-    return SideStair(centre, d, math.atan2(d[1], d[0]), landing, steps, clearance, footprint)
+    shapes = ([landing] if landing else []) + list(steps) + ([clearance] if clearance else [])
+    footprint = max(abs(x) for poly in shapes for x, _ in poly) - W / 2
+    top = _oriented_rect(start, d, 0.0, 0.0, -Ws / 2, Ws / 2)
+    edges = [(landing[i], landing[(i + 1) % 4]) for i in range(4)] if landing else [(top[0], top[3])]
+    arrival = _arrival_length(s, W, Ys, edges)
+    return SideStair(start, d, math.atan2(d[1], d[0]), landing, steps, clearance, footprint, arrival)
 
 
 def _polys_overlap(a: Poly, b: Poly) -> bool:
@@ -542,13 +578,13 @@ def _stairs(c: Ctx) -> Part:
         label = "jardin" if s < 0 else "cour"
         geo = _side_stair(s, c.W, c.Ys, n, st)
         sides.append((s, label, geo))
-        xs = [p[0] for p in geo.landing]
-        objs.append(_box(f"Stairs_Landing_{tag}", "TS_Stairs", STAIRS,
-                         (min(xs), min(p[1] for p in geo.landing), 0.0),
-                         (max(xs), max(p[1] for p in geo.landing), Hp)))
-        origin = (*geo.centre, 0.0)
+        if geo.landing:
+            objs.append(_box(f"Stairs_Landing_{tag}", "TS_Stairs", STAIRS,
+                             (min(p[0] for p in geo.landing), min(p[1] for p in geo.landing), 0.0),
+                             (max(p[0] for p in geo.landing), max(p[1] for p in geo.landing), Hp)))
+        origin = (*geo.start, 0.0)
         for j in range(1, n):
-            a0, a1 = Ws / 2 + (j - 1) * going, Ws / 2 + j * going
+            a0, a1 = (j - 1) * going, j * going
             objs.append(_box(f"Stairs_Step_{tag}_{_nn(j)}", "TS_Stairs", STAIRS,
                              (a0, -Ws / 2, 0.0), (a1, Ws / 2, (n - j) * Hp / n), origin, geo.yaw))
         if min(p[1] for poly in geo.steps for p in poly) < -c.A - EPS:
@@ -557,15 +593,21 @@ def _stairs(c: Ctx) -> Part:
             clearances.append((f"Stairs_Clearance_{tag}", geo.clearance))
         if geo.clearance and min(p[1] for p in geo.clearance) < -c.Yh - EPS:
             warnings.append(f"Le dégagement de l'escalier {label} sort de la salle dessinée.")
-        drawn = (geo.landing, *geo.steps)
+        if geo.arrival < ARRIVAL_MIN - EPS:
+            warnings.append(f"L'escalier {label} n'arrive pas sur le plateau : ajouter un palier "
+                            "ou le décaler devant la scène.")
+        drawn = ((geo.landing,) if geo.landing else ()) + geo.steps
         if center_poly and any(_polys_overlap(poly, center_poly) for poly in drawn):
             warnings.append(f"L'escalier {label} chevauche l'escalier central.")
+    def points(geo):
+        return [p for poly in (((geo.landing,) if geo.landing else ()) + geo.steps) for p in poly]
+
     if len(sides) == 2 and any(abs(p[0]) < EPS or p[0] * sides[0][0] < 0
-                               for poly in (sides[0][2].landing, *sides[0][2].steps) for p in poly):
+                               for p in points(sides[0][2])):
         warnings.append("Les escaliers jardin et cour se croisent.")
     else:
         for s, label, geo in sides:
-            if any(p[0] * s < -EPS for poly in (geo.landing, *geo.steps) for p in poly):
+            if any(p[0] * s < -EPS for p in points(geo)):
                 warnings.append(f"L'escalier {label} dépasse l'axe de la scène.")
     if st["center"]:
         cw = st["center_width"]

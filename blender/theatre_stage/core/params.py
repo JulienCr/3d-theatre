@@ -150,6 +150,8 @@ SCHEMA: tuple[Group, ...] = (
                 "(le palier passe alors devant le plateau)."),
         _length("clearance", 1.0, 0.0, 5.0, "Dégagement",
                 "Espace libre au pied de l'escalier, au-delà de la dernière marche."),
+        _length("landing_depth", 1.2, 0.0, 5.0, "Profondeur du palier",
+                "Profondeur du palier dans le sens de la volée. 0 : pas de palier."),
         _length("center_width", 2.00, 0.60, 10.0, "Largeur centrale",
                 "Largeur de l'escalier central."),
     )),

@@ -5,7 +5,7 @@ import pytest
 from core.layout import compute_layout
 from core.meshes import build_mesh
 from core.params import validate_params
-from helpers import bounds, layout
+from helpers import approx_bounds, bounds, layout
 
 
 def step_vertices(lay, tag):
@@ -107,3 +107,57 @@ def test_clearance_is_not_drawn():
     assert not [n for n in layout().names() if "Clearance" in n]
     assert len(layout().clearances) == 2
     assert layout(stairs={"clearance": 0.0}).clearances == ()
+
+
+def arrival_warnings(lay):
+    return [w for w in lay.warnings if "n'arrive pas sur le plateau" in w]
+
+
+def test_default_landing_is_still_the_square_and_the_default_arrives():
+    lay = layout()
+    assert approx_bounds(bounds(lay, "Stairs_Landing_L"), ((-7.0, -5.8), (0.0, 1.2), (0.0, 1.2)))
+    assert not arrival_warnings(lay) and not arrival_warnings(layout(stairs={"side_angle": 0.0}))
+
+
+def test_no_landing_in_front_of_the_stage_arrives_straight_on_the_stage_front():
+    lay = layout(stairs={"side_offset": -2.0, "side_angle": 0.0, "landing_depth": 0.0})
+    assert not [n for n in lay.names() if n.startswith("Stairs_Landing")]
+    assert lay.derived.risers_count == 6
+    assert len([n for n in lay.names() if n.startswith("Stairs_Step_R_")]) == 5
+    (x0, x1), (y0, y1), (z0, z1) = bounds(lay, "Stairs_Step_R_01")
+    assert (x0, x1) == pytest.approx((3.8, 5.0)) and (y0, y1) == pytest.approx((-0.3, 0.0))
+    assert z1 == pytest.approx(1.0)
+    assert not arrival_warnings(lay)
+
+
+def test_arrival_is_checked_for_a_flight_that_does_not_reach_the_stage():
+    lay = layout(advanced={"proscenium_setback": 0.0},
+                 stairs={"side_offset": 0.0, "side_angle": 0.0, "landing_depth": 0.0})
+    assert len(arrival_warnings(lay)) == 2
+    assert "ajouter un palier ou le décaler devant la scène" in arrival_warnings(lay)[0]
+    shallow = layout(stairs={"side_angle": 0.0, "landing_depth": 0.5})
+    assert len(arrival_warnings(shallow)) == 2
+
+
+def test_no_landing_at_90_degrees_starts_at_the_stage_edge_and_arrives_on_the_flank():
+    lay = layout(stairs={"side_angle": 90.0, "landing_depth": 0.0})
+    assert "Stairs_Landing_R" not in lay.names()
+    (x0, x1), (y0, y1), _ = bounds(lay, "Stairs_Step_R_01")
+    assert (x0, x1) == pytest.approx((5.8, 6.1)) and (y0, y1) == pytest.approx((0.0, 1.2))
+    assert not arrival_warnings(lay)
+
+
+def test_landing_depth_sets_the_landing_along_the_flight_direction():
+    front = layout(stairs={"side_angle": 0.0, "landing_depth": 0.5})
+    assert approx_bounds(bounds(front, "Stairs_Landing_R"), ((5.8, 7.0), (0.7, 1.2), (0.0, 1.2)))
+    side = layout(stairs={"landing_depth": 0.5})
+    assert approx_bounds(bounds(side, "Stairs_Landing_R"), ((5.8, 6.3), (0.0, 1.2), (0.0, 1.2)))
+    deep = layout(stairs={"landing_depth": 2.0, "side_angle": 0.0})
+    assert bounds(deep, "Stairs_Landing_R")[1] == pytest.approx((-0.8, 1.2))
+
+
+def test_no_landing_shrinks_the_side_zone_and_flight_start_follows_the_angle_sign():
+    assert layout(stairs={"landing_depth": 0.0}).derived.total_width < layout().derived.total_width
+    inward = layout(stairs={"side_angle": -90.0, "side_offset": -2.0})
+    outward = layout(stairs={"side_angle": 90.0, "side_offset": -2.0})
+    assert min(v[0] for v in step_vertices(inward, "R")) < min(v[0] for v in step_vertices(outward, "R"))
