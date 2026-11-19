@@ -258,7 +258,7 @@ class _FoldDraw:
 
 
 def _fold_row(state: PleatState, count: int, draw: _FoldDraw, drape: float,
-              d_top: float, height: float) -> list[tuple[float, float]]:
+              d_top: float, height: float, limit: float | None) -> list[tuple[float, float]]:
     """(x, y) of one row, `d_top` below the top edge of a surface `height` tall."""
     (x0, y0), (x1, y1) = state.p0, state.p1
     dx, dy = x1 - x0, y1 - y0
@@ -286,6 +286,8 @@ def _fold_row(state: PleatState, count: int, draw: _FoldDraw, drape: float,
             u = bounds[k] + t * (bounds[k + 1] - bounds[k])
             off = depth * _fold_profile(t)
             points.append((x0 + dx * u + nx * off, y0 + dy * u + ny * off))
+    if limit is not None:
+        points = [(min(max(x, -limit), limit), y) for x, y in points]
     return points
 
 
@@ -301,7 +303,7 @@ def pleated_mesh(surface: PleatedSurface, open_pose: bool = False) -> Mesh:
     for d_top in reversed(_row_heights(height)):
         z = surface.z0 + (height - d_top)
         grid.append([b.add((x, y, z)) for x, y in _fold_row(state, count, draw, surface.drape,
-                                                              d_top, height)])
+                                                              d_top, height, surface.x_limit)])
     out = (surface.facing[0], surface.facing[1], 0.0)
     for low, high in zip(grid, grid[1:]):
         for i in range(len(low) - 1):

@@ -120,6 +120,7 @@ class PleatedSurface:
     facing: Vec2
     open_state: PleatState | None = None
     drape: float = 0.0
+    x_limit: float | None = None
 
 
 @dataclass(frozen=True)

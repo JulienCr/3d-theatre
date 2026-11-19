@@ -135,7 +135,7 @@ def test_front_border_switch_removes_its_border_and_batten():
 
 
 def test_border_geometry_covers_the_leg_tops_toward_the_house():
-    lay = layout()
+    lay = layout(masking={"borders_mode": "manual"})
     border = lay.find("Border_01")
     plane = plane_y(lay, "MaskingBatten_01")
     assert border.state.p0[1] == pytest.approx(plane - 0.10)
@@ -147,12 +147,12 @@ def test_border_geometry_covers_the_leg_tops_toward_the_house():
 
 
 def test_borders_without_useful_height_are_dropped_with_a_warning():
-    lay = layout(masking={"border_bottom": 6.0})
+    lay = layout(masking={"border_bottom": 6.0, "borders_mode": "manual"})
     assert not [n for n in lay.names() if n.startswith("Border_")]
     assert any("Frises sans hauteur utile" in w for w in lay.warnings)
     assert not any("Frises" in w for w in layout().warnings)
     quiet = layout(masking={"border_bottom": 6.0, "front_border": False,
-                            "borders": (False,) * 8})
+                            "borders": (False,) * 8, "borders_mode": "manual"})
     assert not any("Frises" in w for w in quiet.warnings)
 
 

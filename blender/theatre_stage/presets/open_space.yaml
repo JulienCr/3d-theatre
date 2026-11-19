@@ -81,6 +81,13 @@ masking:
   border_bottom: 4.5
   backdrop: black_curtain
   drape: 0.5
+  leg_angle: 0.0
+  convergence: 0.0
+  borders_mode: computed
+sightlines:
+  seat_distance: 2.0
+  seat_wall_gap: 0.5
+  eye_height: 1.1
 curtains:
   main_enabled: true
   main_opening: 100.0

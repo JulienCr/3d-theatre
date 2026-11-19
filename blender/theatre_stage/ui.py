@@ -149,6 +149,11 @@ class THEATRE_PT_derived(_SubPanel):
         col.label(text=f"Porteuses lumière : {d.batten_count}")
         col.label(text=f"Porteuses de pendrillonnage : {d.masking_batten_count}")
         col.label(text=f"Largeur d'une rue : {_metres(d.lane_width)}")
+        for name, height in d.border_bottoms:
+            col.label(text=f"Bas de {name} : {_metres(height)}")
+        for lane, jardin, cour in d.visible_depths:
+            where = f"rue {lane}" if lane else "avant plan 1"
+            col.label(text=f"Coulisse vue ({where}) : {_metres(jardin)} / {_metres(cour)}")
 
 
 class THEATRE_PT_alerts(_SubPanel):

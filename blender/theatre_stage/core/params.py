@@ -183,8 +183,24 @@ SCHEMA: tuple[Group, ...] = (
             ("bare_wall", "Mur nu", "Le mur de cage reste visible."),
             ("cyclorama", "Cyclorama", "Toile tendue claire."),
         )),
+        _angle("leg_angle", 0.0, 0.0, 20.0, "Inclinaison des pendrillons",
+               "Pendrillons à l'italienne penchés vers le public (0° : droits)."),
+        _angle("convergence", 0.0, 0.0, 20.0, "Convergence",
+               "Écartement progressif de l'ouverture vers le lointain (à l'italienne)."),
+        _enum("borders_mode", "computed", "Hauteur des frises", "Bas des frises.", (
+            ("computed", "Calées sur la découverte", "Calculées depuis le premier rang."),
+            ("manual", "Manuelle", "Hauteur réglée à la main, contrôlée seulement."),
+        )),
         Param("drape", FLOAT, 0.5, "Drapé", "Irrégularité des plis : 0 donne des plis réguliers, "
               "1 un drapé très marqué.", 0.0, 1.0),
+    )),
+    Group("sightlines", "Découverte", (
+        _length("seat_distance", 2.00, 0.50, 30.0, "Premier rang",
+                "Distance du premier rang au nez de scène."),
+        _length("seat_wall_gap", 0.50, 0.0, 10.0, "Fauteuil extrême",
+                "Écart du fauteuil de référence au mur de salle."),
+        _length("eye_height", 1.10, 0.80, 3.0, "Hauteur d'œil",
+                "Hauteur d'œil, assis, au-dessus du sol de salle."),
     )),
     Group("curtains", "Rideaux", (
         _flag("main_enabled", True, "Rideau de scène", "Rideau de scène à la grecque."),

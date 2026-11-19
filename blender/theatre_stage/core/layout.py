@@ -13,6 +13,9 @@ from dataclasses import dataclass, field
 
 from .meshes import MAX_DEPTH_FACTOR
 from .params import module_sets, validate_params
+from .sightlines import (
+    computed_bottoms, segment_polygon_overlap, visible_points, wing_reach,
+)
 from .primitives import (
     Box, Camera, FlatSurface, HorizontalFace, Light, Panel, PleatedSurface, PleatState, Prism,
     SlatGrid, Tube,
@@ -97,6 +100,7 @@ BATTEN_CLEARANCE = 0.30
 BORDER_SETBACK = 0.10
 BORDER_GAP = 0.10
 ARRIVAL_MIN = 0.60
+LOW_BORDER = 2.20
 EPS = 1e-9
 
 
@@ -132,6 +136,8 @@ class Derived:
     backdrop_y: float
     lane_width: float
     modules_max_y: float | None
+    border_bottoms: tuple[tuple[str, float], ...] = ()
+    visible_depths: tuple[tuple[int, float, float], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -180,6 +186,7 @@ class ModuleSpec:
     depth: float
     cells: tuple
     openings: tuple
+    footprint: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -221,6 +228,7 @@ class Ctx:
     ymod: float | None
     plan: MaskPlan
     light_batten_ys: tuple[float, ...]
+    sight: Sight
 
 
 def _clip_bay(label, what, u0, u1, z0, z1, width, height):
@@ -284,8 +292,13 @@ def _module_spec(tag, s, label, m, Wc, Wk, Yc, D, Hp):
         yaw, v_min, v_max = theta, 0.0, MODULE_WALL
     else:
         yaw, v_min, v_max = math.pi - theta, -MODULE_WALL, 0.0
+    rects = (
+        tuple(world(u, v) for u, v in ((0, 0), (w, 0), (w, MODULE_WALL), (0, MODULE_WALL))),
+        tuple(world(u, v) for u, v in ((w - MODULE_WALL, 0), (w, 0), (w, depth),
+                                       (w - MODULE_WALL, depth))),
+    )
     spec = ModuleSpec(tag, label, (hx, hy, Hp), yaw, v_min, v_max, w, h, depth,
-                      _tile(w, h, openings), tuple(openings))
+                      _tile(w, h, openings), tuple(openings), rects)
     return spec, y_max, warnings
 
 
@@ -408,6 +421,88 @@ def _polys_overlap(a: Poly, b: Poly) -> bool:
     return True
 
 
+@dataclass(frozen=True)
+class Sight:
+    """Section and plan sightline results (spec 8.7)."""
+
+    bottoms: dict
+    derived_bottoms: tuple[tuple[str, float], ...] = ()
+    depths: tuple[tuple[int, float, float], ...] = ()
+
+
+def _inner_edge(mk, plan, y: float) -> float:
+    """Leg inner-edge |x| at plane depth `y`: nominal opening plus the convergence."""
+    return mk["opening"] / 2 + (y - plan.planes[0]) * math.tan(math.radians(mk["convergence"]))
+
+
+def _sightlines(p, Wc, Wk, Wt, Ys, Yc, Hp, Hg, Hc, plan, battens, modules):
+    mk, sl = p["masking"], p["sightlines"]
+    eye = (-sl["seat_distance"], sl["eye_height"])
+    zb = plan.zb
+    lanes = mk["lanes"]
+    screens = [("Linteau", Ys + PROSCENIUM_RECESS, Hp + Hc)]
+    borders = []
+    if mk["front_border"]:
+        borders.append(("Border_00", plan.front_plane - BORDER_SETBACK))
+    for k, y in enumerate(plan.planes, start=1):
+        if mk["borders"][k - 1]:
+            borders.append((f"Border_{k:02d}", y - BORDER_SETBACK))
+    named = [(f"Batten_{i:02d}", y, zb) for i, y in enumerate(battens, start=1)]
+    named += [(f"MaskingBatten_{k:02d}", y, zb) for k, y in enumerate(plan.planes, start=1)]
+    if mk["front_border"]:
+        named.append(("MaskingBatten_00", plan.front_plane, zb))
+    if mk["backdrop"] != "bare_wall":
+        named.append(("MaskingBatten_Back", plan.yb, zb))
+    warnings: list[str] = []
+    bottoms: dict = {}
+    if mk["borders_mode"] == "manual":
+        for name, y in borders:
+            bottoms[name] = Hp + mk["border_bottom"]
+        screens += [(name, y, bottoms[name]) for name, y in borders]
+        for name in visible_points(eye, screens, named + [("gril", Yc, Hp + Hg)]):
+            subject = "le gril est visible" if name == "gril" else f"porteuse {name} visible"
+            warnings.append(f"Découverte verticale : {subject} depuis le premier rang.")
+    else:
+        free = [(name, y, None) for name, y in borders]
+        raw = computed_bottoms(eye, screens + free, [(y, z) for _, y, z in named], Hp + Hg, plan.yb)
+        for name, z in raw.items():
+            bottoms[name] = max(z, Hp)
+            if bottoms[name] - Hp < LOW_BORDER - EPS:
+                warnings.append(f"Frise {name} très basse : le bas est à "
+                                f"{_metres(bottoms[name] - Hp)} du plateau.")
+            if bottoms[name] >= zb - EPS:
+                warnings.append(f"Frise {name} sans hauteur utile : le bas atteint les porteuses.")
+    derived = tuple((name, bottoms[name] - Hp) for name, _ in borders if name in bottoms)
+    depths, plan_warnings = _wing_depths(p, Wc, Wk, Wt, Yc, plan, modules)
+    return Sight(bottoms, derived, depths), warnings + plan_warnings
+
+
+def _wing_depths(p, Wc, Wk, Wt, Yc, plan, modules):
+    mk, sl = p["masking"], p["sightlines"]
+    if mk["style"] != "italian" or mk["opening"] >= Wk:
+        return (), []
+    seat_u, seat_y = -(Wt / 2 - sl["seat_wall_gap"]), -sl["seat_distance"]
+    planes = list(plan.planes) + [plan.yb]
+    rows, warnings = [], []
+    for lane in range(len(plan.planes) + 1):
+        reach: dict[int, tuple[float, float]] = {}
+        for s in (-1, 1):
+            if lane == 0:
+                edges = [(Wc / 2, Yc)] + [(s * x, y) for m in modules if (m.tag == "L") == (s < 0)
+                                          for poly in m.footprint for x, y in poly]
+            else:
+                edges = [(_inner_edge(mk, plan, planes[lane - 1]), planes[lane - 1])]
+            front, line = wing_reach(seat_u, seat_y, edges, planes[lane])
+            reach[s] = (front, line)
+        rows.append((lane, *(max(min(reach[s][1], Wk / 2) - reach[s][0], 0.0) for s in (-1, 1))))
+        seen = [("jardin" if s < 0 else "cour") for s in (-1, 1) if reach[s][1] > Wk / 2 + EPS]
+        if seen:
+            where = f"rue {lane}" if lane else "avant le plan 1"
+            warnings.append(f"Découverte en coulisse {' et '.join(seen)} {where} : "
+                            "le mur de cage se voit.")
+    return tuple(rows), warnings
+
+
 def _make_context(raw) -> tuple[Ctx, list[str]]:
     p, warnings = validate_params(raw)
     st, adv, stairs = p["stage"], p["advanced"], p["stairs"]
@@ -458,10 +553,12 @@ def _make_context(raw) -> tuple[Ctx, list[str]]:
     warnings.extend(plan_warnings)
     ys, battens_warning = _light_battens(p, Yc, D, plan)
     warnings.extend(battens_warning)
+    sight, sight_warnings = _sightlines(p, Wc, Wk, Wt, Ys, Yc, Hp, Hg, Hc, plan, ys, tuple(modules))
+    warnings.extend(sight_warnings)
 
     Yh = max(A, p["cameras"]["distance"] + 1.0)
     ctx = Ctx(p, W, D, Hp, Hg, A, Hf, Hc, Tc, Ys, lintel, Wc, Wk, Yc, Z, Wt, Yh, n, riser_h,
-              stair_len, footprint if lateral else 0.0, tuple(modules), ymod, plan, ys)
+              stair_len, footprint if lateral else 0.0, tuple(modules), ymod, plan, ys, sight)
     return ctx, warnings
 
 
@@ -488,7 +585,7 @@ def _mask_plan(p, Wk, Yc, D, Hp, Hg, ymod):
         warnings.append("Ouverture du pendrillonnage plus large que la cage : "
                         "aucun pendrillon dessiné.")
     wants_border = mk["front_border"] or any(mk["borders"][: lanes])
-    if wants_border and mk["border_bottom"] >= zb - Hp:
+    if wants_border and mk["borders_mode"] == "manual" and mk["border_bottom"] >= zb - Hp:
         warnings.append("Frises sans hauteur utile : le bas des frises atteint les porteuses.")
     return MaskPlan(y0, y1, yb, lane_width, planes, yf, yr, zb), warnings
 
@@ -676,16 +773,17 @@ def _pleat_count(length: float) -> int:
 
 
 def _pleated(name, collection, x0, y0, x1, y1, z0, z1, facing, material="TS_Masking",
-             drape=0.0):
+             drape=0.0, x_limit=None):
     length = math.hypot(x1 - x0, y1 - y0)
     return PleatedSurface(name, material, collection,
                           PleatState((x0, y0), (x1, y1), PLEAT_AMPLITUDE), z0, z1,
-                          _pleat_count(length), facing, drape=drape)
+                          _pleat_count(length), facing, drape=drape, x_limit=x_limit)
 
 
 def _masking(c: Ctx) -> Part:
     mk, plan, Wc, Wk, Hp, zb = c.p["masking"], c.plan, c.Wc, c.Wk, c.Hp, c.plan.zb
     objs = []
+    warnings: list[str] = []
 
     def pleated(*args, **kwargs):
         return _pleated(*args, drape=mk["drape"], **kwargs)
@@ -703,12 +801,22 @@ def _masking(c: Ctx) -> Part:
 
     fits = mk["opening"] < Wk
     wall = Wk / 2
-    if mk["style"] == "italian":
-        if fits and wall - mk["opening"] / 2 > 0.10:
-            for k, y in enumerate(plan.planes, start=1):
-                for tag, s in (("L", -1), ("R", 1)):
-                    objs.append(pleated(f"Leg_{tag}_{_nn(k)}", MASKING, s * mk["opening"] / 2, y,
-                                         s * wall, y, Hp, zb, (0.0, -1.0)))
+    if mk["style"] == "italian" and fits:
+        alpha = math.radians(mk["leg_angle"])
+        for k, y in enumerate(plan.planes, start=1):
+            a = _inner_edge(mk, plan, y)
+            if wall - a <= 0.10:
+                continue
+            drop = (wall - a) * math.tan(alpha)
+            for tag, s in (("L", -1), ("R", 1)):
+                objs.append(pleated(f"Leg_{tag}_{_nn(k)}", MASKING, s * a, y, s * wall, y - drop,
+                                    Hp, zb, (0.0, -1.0), x_limit=wall))
+                if alpha > 0:
+                    run = max((wall - a) / math.cos(alpha) - 0.10, 0.0)
+                    end = (s * (a + run * math.cos(alpha)), y - run * math.sin(alpha))
+                    objs.append(Tube(f"LegPipe_{tag}_{_nn(k)}", "TS_Batten", MASKING,
+                                     (s * a, y, zb), (*end, zb), BATTEN_RADIUS))
+                    warnings.extend(_leg_collision(c, tag, s, k, (s * a, y), (s * wall, y - drop)))
     else:
         for tag, s in (("L", -1), ("R", 1)):
             x = s * mk["opening"] / 2
@@ -717,17 +825,15 @@ def _masking(c: Ctx) -> Part:
                                      (-s, 0.0)))
                 batten(f"MaskingBatten_Side_{tag}", (x, plan.y0), (x, plan.y1))
 
-    if mk["border_bottom"] < zb - Hp:
-        half = Wk / 2
-        z0 = Hp + mk["border_bottom"]
-        if mk["front_border"]:
-            y = plan.front_plane - BORDER_SETBACK
-            objs.append(pleated("Border_00", MASKING, -half, y, half, y, z0, zb, (0.0, -1.0)))
-        for k, y in enumerate(plan.planes, start=1):
-            if mk["borders"][k - 1]:
-                objs.append(pleated(f"Border_{_nn(k)}", MASKING, -half, y - BORDER_SETBACK, half,
-                                     y - BORDER_SETBACK,
-                                     z0, zb, (0.0, -1.0)))
+    half = Wk / 2
+    border_planes = [("Border_00", plan.front_plane)] if mk["front_border"] else []
+    border_planes += [(f"Border_{_nn(k)}", y) for k, y in enumerate(plan.planes, start=1)
+                      if mk["borders"][k - 1]]
+    for name, plane in border_planes:
+        z0 = c.sight.bottoms.get(name)
+        if z0 is not None and z0 < zb - EPS:
+            y = plane - BORDER_SETBACK
+            objs.append(pleated(name, MASKING, -half, y, half, y, z0, zb, (0.0, -1.0)))
 
     if mk["backdrop"] == "black_curtain":
         half = Wk / 2
@@ -737,7 +843,21 @@ def _masking(c: Ctx) -> Part:
         half = (Wc - 0.60) / 2
         objs.append(FlatSurface("Cyclorama", "TS_Cyclorama", MASKING, (-half, plan.yb),
                                 (half, plan.yb), Hp, zb, (0.0, -1.0)))
-    return Part(tuple(objs))
+    return Part(tuple(objs), warnings=tuple(warnings))
+
+
+def _leg_collision(c: Ctx, tag, s, k, inner, outer) -> list[str]:
+    """Warning when the outer edge of a slanted leg runs into a module or a front plane."""
+    plan, mk = c.plan, c.p["masking"]
+    hit = any(segment_polygon_overlap(inner, outer, poly)
+              for m in c.modules if m.tag == tag for poly in m.footprint)
+    if mk["front_border"] and outer[1] < plan.front_plane - EPS:
+        hit = True
+    if c.p["curtains"]["main_enabled"] and outer[1] < plan.curtain_plane - EPS:
+        hit = True
+    if not hit:
+        return []
+    return [f"Pendrillon {'jardin' if s < 0 else 'cour'} {_nn(k)} : trop incliné pour la rue."]
 
 
 def _curtains(c: Ctx) -> Part:
@@ -845,6 +965,7 @@ def compute_layout(params: Mapping | None = None) -> Layout:
         stair_length=ctx.stair_len, batten_count=len(ctx.light_batten_ys),
         masking_batten_count=masking_battens, masking_y0=ctx.plan.y0, masking_y1=ctx.plan.y1,
         backdrop_y=ctx.plan.yb, lane_width=ctx.plan.lane_width, modules_max_y=ctx.ymod,
+        border_bottoms=ctx.sight.derived_bottoms, visible_depths=ctx.sight.depths,
     )
     return Layout(tuple(objects), tuple(lights), tuple(cameras), derived, tuple(warnings),
                   clearances=tuple(clearances))
