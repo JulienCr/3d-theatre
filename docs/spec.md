@@ -558,18 +558,29 @@ Pour voir les faisceaux, sans alourdir le rendu.
 | Clé | Libellé | Défaut | Bornes |
 |---|---|---|---|
 | `enabled` | Atmosphère (brume) | non | |
-| `extent` | Étendue | plateau | plateau / plateau et salle |
+| `extent` | Étendue | plateau et salle | plateau et salle / plateau |
+| `falloff` | Fondu vers la salle (étendue « plateau ») *(choix)* | 2,00 | 0,10 – 10 |
 | `density` | Densité — **animable** *(choix)* | 0,02 | 0 – 1 |
 | `anisotropy` | Diffusion vers l'avant *(choix)* | 0,6 | −0,9 – 0,9 |
 | `quality` | Qualité | légère | légère / moyenne / fine |
 
-- `Haze_Volume` (`TS_Haze`) : **une boîte**, pas un volume de World (infini
-  et plus coûteux). Étendue « plateau » : la cage `Wk × (D − Ys)`, du
-  plancher au gril. Étendue « plateau et salle » : en plus, la salle
-  dessinée jusqu'à `−Yh`, du sol de salle à `facade_height`. Seulement si
-  `enabled`.
-- `TS_Haze` : Volume Scatter **homogène** (pas de texture de bruit, pour que
-  Cycles ne marche pas le volume pas à pas), pas de surface. Densité et
+- **Aucune limite de brume ne doit se voir.** Une boîte homogène montre une
+  paroi nette partout où une face tombe dans le vide (retour utilisateur :
+  la brume « s'arrêtait pile sur le devant de la scène »). Règle : chaque
+  face de la boîte est sur un mur, un sol, un plancher ou un plafond, ou
+  derrière ; la seule frontière ouverte autorisée est le fondu ci-dessous.
+- `Haze_Volume` (`TS_Haze`) : **une seule boîte**, pas un volume de World.
+  Étendue « plateau et salle » (défaut) : toute l'enceinte, de `−Yh` au fond
+  `D`, entre les murs (salle et cage), du sol de salle au plus haut du
+  plafond de salle et du gril ; le plateau et ses volumes sont dedans. La
+  brume reste homogène.
+- Étendue « plateau » : la cage `Wk`, du plancher au gril, de `D` jusqu'à
+  `Ys − falloff` côté salle. La densité décroît linéairement de la façade
+  (`Y = Ys`, pleine densité) à `Ys − falloff` (zéro), par un dégradé en
+  coordonnées objet. Ce volume n'est plus homogène : Cycles le parcourt pas
+  à pas et la qualité EEVEE compte ; surcoût mesuré et noté ci-dessous.
+- `TS_Haze` : Volume Scatter **homogène** en étendue « plateau et salle »
+  (pas de texture de bruit), pas de surface. Densité et
   anisotropie viennent de la scène par **drivers**, comme l'ouverture du
   rideau : `density` et `anisotropy` ne reconstruisent pas et `density`
   s'anime (montée de brume).
