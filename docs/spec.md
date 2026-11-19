@@ -590,15 +590,14 @@ Pour voir les faisceaux, sans alourdir le rendu.
   chère qui montre encore un faisceau net. Brume inactive : on ne touche
   pas aux réglages de rendu de la scène.
 - Coût mesuré (EEVEE de Blender 5.3, 1280×720 depuis `Cam_Face`, médiane de
-  5 rendus, un projecteur de test en faisceau de 30°) : sans brume 1981 ms,
-  légère (tuile 8, 32 échantillons) 2023 ms, moyenne (tuile 4, 64) 2132 ms,
-  fine (tuile 2, 128) 2103 ms, soit +2 % à +8 %. Pour une boîte homogène,
-  taille de tuile, échantillons et plage début/fin ne changent pas l'image
-  (écart nul, y compris aux extrêmes) : la qualité ne compte que pour un
-  matériau de remplacement non homogène. Dans la vue en mode rendu, le
-  redessin vaut 9,8 ms sans brume et 5,0 ms avec (mesure peu significative :
-  le film est déjà convergé). La densité s'anime : le driver suit des
-  images clés sur `haze.density`.
+  5 rendus, lumières de travail allumées, un projecteur de test en faisceau
+  de 30°) : sans brume 2577 ms ; « plateau et salle » légère (tuile 8,
+  32 échantillons) 2901 ms ; « plateau » avec fondu : légère 2957 ms, moyenne
+  (tuile 4, 64) 2840 ms, fine (tuile 2, 128) 2819 ms, soit +10 % à +15 %
+  (écarts entre qualités dans le bruit de mesure). Taille de tuile,
+  échantillons et plage début/fin ne changent pas l'image, même avec le
+  dégradé (écart maximal 0,004 entre légère et fine) : on garde « légère ».
+  La densité s'anime : le driver suit des images clés sur `haze.density`.
 
 ## 9. Préréglages YAML
 

@@ -112,3 +112,9 @@ def test_every_material_category_has_a_french_label_and_is_used_by_the_layout():
     assert all(label and label[0].isupper() for label in MATERIAL_LABELS.values())
     used = {o.material for o in layout(stairs={"center": True}).objects}
     assert used <= set(MATERIAL_LABELS)
+
+
+def test_haze_extent_item_order_is_pinned_for_stored_values_and_the_material_driver():
+    extent = next(p for p in P.GROUPS["haze"].params if p.key == "extent")
+    assert [item[0] for item in extent.items] == ["stage", "stage_and_house"]
+    assert extent.default == "stage_and_house"

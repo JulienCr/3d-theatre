@@ -277,21 +277,39 @@ def test_wings_do_not_move_the_modules_but_frame_gap_does():
 
 def test_haze_volume_is_a_single_box_only_when_enabled():
     assert "Haze_Volume" not in layout().names()
-    stage = layout(haze={"enabled": True})
-    box = stage.find("Haze_Volume")
-    assert box.material == "TS_Haze"
-    assert approx_bounds(bounds(stage, "Haze_Volume"), ((-7.0, 7.0), (1.2, 7.0), (1.2, 7.3)))
-    both = layout(haze={"enabled": True, "extent": "stage_and_house"})
-    assert approx_bounds(bounds(both, "Haze_Volume"), ((-9.5, 9.5), (-12.0, 7.0), (0.0, 7.3)))
-    assert sum(1 for n in both.names() if n == "Haze_Volume") == 1
+    lay = layout(haze={"enabled": True})
+    assert lay.find("Haze_Volume").material == "TS_Haze"
+    assert sum(1 for n in lay.names() if n == "Haze_Volume") == 1
+
+
+@pytest.mark.parametrize("stairs,stage", [({}, {}), ({"side_angle": 0.0}, {}),
+                                          ({}, {"wings": 5.0}), ({}, {"wings": 0.0})])
+def test_house_haze_box_ends_on_walls_floor_and_ceiling(stairs, stage):
+    lay = layout(haze={"enabled": True}, stairs=stairs, stage=stage)
+    (x0, x1), (y0, y1), (z0, z1) = bounds(lay, "Haze_Volume")
+    floor, ceiling = bounds(lay, "House_Floor"), bounds(lay, "House_Ceiling")
+    wall_l, wall_r = bounds(lay, "Cage_Wall_L"), bounds(lay, "Cage_Wall_R")
+    assert x0 == pytest.approx(min(floor[0][0], wall_l[0][1]))
+    assert x1 == pytest.approx(max(floor[0][1], wall_r[0][0]))
+    assert y0 == pytest.approx(floor[1][0]) and y1 == pytest.approx(bounds(lay, "Cage_Back")[1][0])
+    assert z0 == pytest.approx(floor[2][1])
+    assert z1 == pytest.approx(max(ceiling[2][0], lay.find("Grid_Deck").z_min))
+
+
+def test_stage_haze_fades_toward_the_house_and_keeps_every_side_on_a_wall():
+    lay = layout(haze={"enabled": True, "extent": "stage", "falloff": 3.0},
+                 advanced={"proscenium_setback": 0.0})
+    (x0, x1), (y0, y1), (z0, z1) = bounds(lay, "Haze_Volume")
+    house = layout(haze={"enabled": True}, advanced={"proscenium_setback": 0.0})
+    assert y0 == pytest.approx(0.0 - 3.0)
+    assert (x0, x1, z0, z1, y1) == pytest.approx(
+        tuple(bounds(house, "Haze_Volume")[i][j] for i, j in ((0, 0), (0, 1), (2, 0), (2, 1), (1, 1))))
 
 
 def test_haze_view_range_fits_the_box_seen_from_the_front_camera():
     from core.layout import haze_view_range
     assert haze_view_range(layout()) is None
-    outer = haze_view_range(layout(haze={"enabled": True}))
-    inside = haze_view_range(layout(haze={"enabled": True, "extent": "stage_and_house"}))
-    assert outer is not None and inside is not None
-    near, far = outer
-    assert 11.0 < near < 13.0 < far < 20.0
-    assert inside[0] == pytest.approx(0.1) and inside[1] > far
+    house = haze_view_range(layout(haze={"enabled": True}))
+    stage = haze_view_range(layout(haze={"enabled": True, "extent": "stage", "falloff": 1.0}))
+    assert house is not None and stage is not None
+    assert house[0] == pytest.approx(0.1) and stage[0] > 8.0 and house[1] == pytest.approx(stage[1])

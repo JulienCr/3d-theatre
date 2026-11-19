@@ -208,10 +208,12 @@ SCHEMA: tuple[Group, ...] = (
     Group("haze", "Brume", (
         _flag("enabled", False, "Atmosphère (brume)",
               "Volume de brume pour voir les faisceaux. Inactif : aucun réglage de rendu modifié."),
-        _enum("extent", "stage", "Étendue", "Zone remplie de brume.", (
-            ("stage", "Plateau", "La cage, du plancher au gril."),
-            ("stage_and_house", "Plateau et salle", "La cage et la salle dessinée."),
+        _enum("extent", "stage_and_house", "Étendue", "Zone remplie de brume.", (
+            ("stage", "Plateau", "La cage, avec un fondu vers la salle."),
+            ("stage_and_house", "Plateau et salle", "Toute l'enceinte, brume homogène."),
         )),
+        _length("falloff", 2.00, 0.10, 10.0, "Fondu vers la salle",
+                "Étendue « plateau » : distance sur laquelle la brume s'estompe devant la façade."),
         Param("density", FLOAT, 0.02, "Densité", "Densité de la brume. Animable, ne reconstruit "
               "pas la scène.", 0.0, 1.0, animatable=True, rebuild=False),
         Param("anisotropy", FLOAT, 0.6, "Diffusion vers l'avant",

@@ -19,6 +19,8 @@ TAG = materials.TAG
 OPEN_KEY = "Open"
 OPENING_PATH = "theatre.curtains.main_opening"
 HAZE_NODE = "Haze Scatter"
+HAZE_DENSITY = "Haze Density"
+HAZE_RAMP = "Haze Ramp"
 OPENING_EXPRESSION = "var / 100"
 FABRIC_THICKNESS = 0.003
 
@@ -92,33 +94,75 @@ def _setup_ceiling_material(mat: bpy.types.Material, scene: bpy.types.Scene) -> 
     links.new(mix.outputs["Shader"], output.inputs["Surface"])
 
 
-def _setup_haze_material(mat: bpy.types.Material, scene: bpy.types.Scene) -> None:
-    """Homogeneous Volume Scatter without surface; density and anisotropy follow the scene."""
-    tree = mat.node_tree
-    tree.nodes.clear()
-    output = tree.nodes.new("ShaderNodeOutputMaterial")
-    scatter = tree.nodes.new("ShaderNodeVolumeScatter")
-    scatter.name = HAZE_NODE
-    tree.links.new(scatter.outputs["Volume"], output.inputs["Volume"])
-    for socket, prop in (("Density", "density"), ("Anisotropy", "anisotropy")):
-        driver = tree.driver_add(f'nodes["{HAZE_NODE}"].inputs["{socket}"].default_value').driver
-        driver.type = "SCRIPTED"
+def _drive(tree, path: str, expression: str, scene: bpy.types.Scene, **sources: str) -> None:
+    """Driver on a node-tree property reading scene properties (`name=data_path`)."""
+    driver = tree.driver_add(path).driver
+    driver.type = "SCRIPTED"
+    for name, data_path in sources.items():
         var = driver.variables.new()
-        var.name = "var"
+        var.name = name
         var.type = "SINGLE_PROP"
         var.targets[0].id_type = "SCENE"
         var.targets[0].id = scene
-        var.targets[0].data_path = f"theatre.haze.{prop}"
-        driver.expression = "var"
+        var.targets[0].data_path = data_path
+    driver.expression = expression
+
+
+def _setup_haze_material(mat: bpy.types.Material, scene: bpy.types.Scene) -> None:
+    """Volume Scatter without surface. Density is scaled by a Y ramp that only the
+    "stage" extent activates (enum index 1 is "stage_and_house": ramp neutral)."""
+    tree = mat.node_tree
+    nodes, links = tree.nodes, tree.links
+    nodes.clear()
+    output = nodes.new("ShaderNodeOutputMaterial")
+    scatter = nodes.new("ShaderNodeVolumeScatter")
+    scatter.name = HAZE_NODE
+    density = nodes.new("ShaderNodeValue")
+    density.name = HAZE_DENSITY
+    coords = nodes.new("ShaderNodeTexCoord")
+    split = nodes.new("ShaderNodeSeparateXYZ")
+    ramp = nodes.new("ShaderNodeMapRange")
+    ramp.name = HAZE_RAMP
+    ramp.clamp = True
+    scale = nodes.new("ShaderNodeMath")
+    scale.operation = "MULTIPLY"
+    links.new(coords.outputs["Object"], split.inputs["Vector"])
+    links.new(split.outputs["Y"], ramp.inputs["Value"])
+    links.new(ramp.outputs["Result"], scale.inputs[0])
+    links.new(density.outputs[0], scale.inputs[1])
+    links.new(scale.outputs[0], scatter.inputs["Density"])
+    links.new(scatter.outputs["Volume"], output.inputs["Volume"])
+    _drive(tree, f'nodes["{HAZE_DENSITY}"].outputs[0].default_value', "var", scene,
+           var="theatre.haze.density")
+    _drive(tree, f'nodes["{HAZE_NODE}"].inputs["Anisotropy"].default_value', "var", scene,
+           var="theatre.haze.anisotropy")
+    ramp_path = f'nodes["{HAZE_RAMP}"].inputs'
+    setback = "theatre.advanced.proscenium_setback"
+    _drive(tree, f'{ramp_path}["From Min"].default_value', "ys - fade", scene,
+           ys=setback, fade="theatre.haze.falloff")
+    _drive(tree, f'{ramp_path}["From Max"].default_value', "ys", scene, ys=setback)
+    _drive(tree, f'{ramp_path}["To Min"].default_value', "mode", scene,
+           mode="theatre.haze.extent")
+
+
+def _upgrade_haze_material(mat: bpy.types.Material, scene: bpy.types.Scene) -> None:
+    """Give a TS_Haze made before the ramp existed its new node setup (ours only)."""
+    tree = mat.node_tree
+    if tree and tree.nodes.get(HAZE_NODE) and tree.nodes.get(HAZE_RAMP) is None:
+        tree.animation_data_clear()
+        _setup_haze_material(mat, scene)
 
 
 MATERIAL_SETUP = {"TS_HouseCeiling": _setup_ceiling_material, "TS_Haze": _setup_haze_material}
+MATERIAL_UPGRADE = {"TS_Haze": _upgrade_haze_material}
 
 
 def get_material(name: str, colors, scene: bpy.types.Scene) -> bpy.types.Material:
     """Existing material by name, never modified; created with its colour otherwise."""
     mat = bpy.data.materials.get(name)
     if mat is not None:
+        if name in MATERIAL_UPGRADE:
+            MATERIAL_UPGRADE[name](mat, scene)
         return mat
     mat = bpy.data.materials.new(name)
     color = colors[name]

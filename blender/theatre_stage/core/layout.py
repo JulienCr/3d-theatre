@@ -731,13 +731,10 @@ def _haze(c: Ctx) -> Part:
     hz = c.p["haze"]
     if not hz["enabled"]:
         return Part()
-    top = c.Hp + c.Hg
-    if hz["extent"] == "stage":
-        lo, hi = (-c.Wk / 2, c.Ys, c.Hp), (c.Wk / 2, c.D, top)
-    else:
-        half = max(c.Wk, c.Wt) / 2
-        lo, hi = (-half, -c.Yh, 0.0), (half, c.D, max(c.Hf, top))
-    return Part((_box("Haze_Volume", "TS_Haze", ARCHITECTURE, lo, hi),))
+    half = max(c.Wk, c.Wt) / 2
+    top = max(c.Hf, c.Hp + c.Hg)
+    y0 = -c.Yh if hz["extent"] == "stage_and_house" else c.Ys - hz["falloff"]
+    return Part((_box("Haze_Volume", "TS_Haze", ARCHITECTURE, (-half, y0, 0.0), (half, c.D, top)),))
 
 
 FAMILIES: tuple[Callable[[Ctx], Part], ...] = (

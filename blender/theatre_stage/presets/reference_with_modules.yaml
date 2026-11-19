@@ -96,7 +96,8 @@ house:
   ceiling: true
 haze:
   enabled: false
-  extent: stage
+  extent: stage_and_house
+  falloff: 2.0
   density: 0.02
   anisotropy: 0.6
   quality: light
