@@ -285,13 +285,24 @@ décalage latéral :
 - Ligne d'appui `Yback` : la façade (`Ys`) si `o ≥ 0`, le bandeau (`0`) si
   `o < 0` (escalier devant le plateau). Sans recul de façade les deux
   coïncident.
-- `Stairs_Landing_L/R` : palier rectangulaire à hauteur du plateau, de Z = 0
-  à `Hp`, adossé à la ligne d'appui. `landing_depth` (`Ld`) se mesure dans
-  le sens dominant de la volée : pour `|θ| ≤ 45°`, X sur
-  `s·[W/2 + o, W/2 + o + Ws]` et Y sur `[Yback − Ld, Yback]` ; pour
-  `|θ| > 45°`, X sur `s·[W/2 + o, W/2 + o + Ld]` et Y sur
-  `[Yback − Ws, Yback]`. Avec la valeur par défaut (`Ld = Ws`), c'est le
-  carré d'avant.
+- `Stairs_Landing_L/R` : **palier en biais**, à hauteur du plateau (Z de 0
+  à `Hp`), choisi par l'utilisateur sur fiche avec schéma (2026-11-19). Le
+  palier est un trapèze rectangle qui comble l'espace entre le plateau et
+  la volée tournée :
+  - côté appui : un bord posé sur la **ligne d'appui** — la ligne arrière
+    (`Y = Yback`) pour `|θ| ≤ 45°`, le flanc (`x = s·(W/2 + o)`) pour
+    `|θ| > 45°` ; ce bord part du coin `(s·(W/2 + o), Yback)` et s'en
+    éloigne (vers l'extérieur sur la ligne arrière, vers la salle sur le
+    flanc) ;
+  - côté volée : le bord de départ de la volée, perpendiculaire à `d`, de
+    largeur `Ws` ;
+  - les deux autres côtés sont perpendiculaires à la ligne d'appui
+    (projection orthogonale du bord de départ sur la ligne d'appui) ;
+  - `landing_depth` (`Ld`) est le plus petit écart entre la ligne d'appui et
+    le bord de départ (le petit côté du trapèze).
+  À 0° et à 90°, le trapèze redevient le rectangle d'avant (`Ws × Ld`) ; avec
+  `Ld = Ws`, le carré d'origine. Le palier se construit comme un polygone
+  extrudé (`Prism`), sans chevauchement avec la volée ni avec le plateau.
 - **`Ld = 0` : pas de palier.** La volée part directement de la ligne
   d'appui (`|θ| ≤ 45°`) ou du bord `x = s·(W/2 + o)` (`|θ| > 45°`). Devant la
   scène à 0°, la première contremarche est le bandeau et le plateau sert de
@@ -302,10 +313,11 @@ décalage latéral :
   scène, ou flanc de l'avant-plateau entre `0` et `Ys`).
   Sinon alerte : « L'escalier X n'arrive pas sur le plateau : ajouter un
   palier ou le décaler devant la scène. »
-- Volée : centrée en travers sur le palier pour `|θ| ≤ 45°`, adossée à la
-  ligne d'appui en travers pour `|θ| > 45°`. Aux angles intermédiaires elle
-  pivote autour du milieu de son bord de départ ; un chevauchement avec le
-  palier est voulu.
+- Volée : un bloc droit qui commence au bord de départ et descend selon `d`,
+  dans le prolongement exact du palier, sans vide ni chevauchement.
+- `Ld = 0` à un angle intermédiaire : le trapèze devient un triangle (le
+  coin du bord de départ touche la ligne d'appui) ; un palier d'aire nulle
+  (0° ou 90°) n'est pas créé.
 - Direction de descente `d = (s·sin θ, −cos θ)` : 0° vers la salle, 90° vers
   le mur latéral, −90° vers le centre (le long du bandeau quand le palier y
   est adossé).
