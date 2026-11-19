@@ -1,0 +1,89 @@
+version: 1
+stage:
+  width: 11.6
+  depth: 7.0
+  grid_height: 6.1
+advanced:
+  stage_height: 1.2
+  apron_depth: 3.1
+  facade_height: 7.3
+  proscenium_height: 5.0
+  proscenium_thickness: 0.8
+  proscenium_setback: 1.2
+  lintel_height: 0.8
+  side_zone_width: 1.2
+stairs:
+  left: true
+  right: true
+  center: false
+  riser_max: 0.2
+  going: 0.3
+  width: 1.2
+  side_angle: 90.0
+  center_width: 2.0
+modules:
+  symmetric: true
+  left:
+    enabled: true
+    wall_gap: 0.0
+    setback: 2.05
+    width: 1.55
+    depth: 2.0
+    height: 5.0
+    angle: 0.0
+    door_enabled: true
+    door_width: 0.94
+    door_height: 2.4
+    door_offset: 0.0
+    window_enabled: false
+    window_width: 1.0
+    window_height: 1.2
+    window_sill: 1.0
+    window_offset: 0.0
+  right:
+    enabled: true
+    wall_gap: 0.0
+    setback: 2.05
+    width: 1.55
+    depth: 2.0
+    height: 5.0
+    angle: 0.0
+    door_enabled: true
+    door_width: 0.94
+    door_height: 2.4
+    door_offset: 0.0
+    window_enabled: false
+    window_width: 1.0
+    window_height: 1.2
+    window_sill: 1.0
+    window_offset: 0.0
+grid:
+  batten_spacing: 1.0
+  batten_drop: 0.5
+masking:
+  style: italian
+  lanes: 3
+  opening: 8.0
+  front_border: true
+  borders:
+  - true
+  - true
+  - true
+  - true
+  - true
+  - true
+  - true
+  - true
+  border_bottom: 4.5
+  backdrop: black_curtain
+curtains:
+  main_enabled: true
+  main_opening: 100.0
+lights:
+  enabled: true
+  spacing: 3.0
+  intensity: 1.0
+  front: true
+cameras:
+  distance: 10.0
+  height: 2.5
