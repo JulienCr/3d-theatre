@@ -2,7 +2,8 @@
 
 Extension Blender 5.3 qui génère une maquette de scénographie à l'échelle 1:1 :
 plateau, enceinte, cadre, cage de scène, gril, escaliers, modules latéraux,
-pendrillonnage, rideaux, lumières de travail et caméras vue public. Toute la
+pendrillonnage, rideaux, lumières de travail, implantation lumière (appareils
+pilotés en DMX) et caméras vue public. Toute la
 géométrie se déduit d'un jeu de paramètres réglables dans un panneau et
 enregistrables en préréglages YAML.
 
@@ -30,17 +31,26 @@ blender/theatre_stage/
     params.py                schéma unique des paramètres
     layout.py                paramètres -> cotes et volumes (dataclasses)
     presets.py               lecture / écriture YAML, validation
+    fixtures.py              fiches d'appareils, attributs DMX, 8/16 bits, photométrie
+    rig.py                   implantation (perche, pylônes, zones, visées, lames), patch
+    qlc.py                   génération texte des .qxw et .qxf (XML)
   props.py                   PropertyGroup généré depuis le schéma
   build.py                   cotes -> objets, matériaux, lumières, caméras
+  rigbuild.py                implantation -> objets, hiérarchies d'appareils, drivers, nœuds
   ui.py                      panneau « Théâtre » dans la barre latérale 3D
   presets/                   préréglages livrés (YAML)
+  library/fixtures/<id>/     fiches livrées : fixture.yaml, source/, meshes/, gobos/
+tools/                       scripts système (Python + pytest + PyYAML), hors extension
+  gdtf_to_fiche.py           GDTF -> fiche pré-remplie
+  check_qlc_fixture.py       fiche <-> définition .qxf de QLC+
 tests/                       pytest, hors Blender
 ```
 
 - **Une seule source de vérité.** `core/params.py` déclare chaque paramètre :
   clé anglaise, groupe, type, défaut, bornes, libellé français, info-bulle.
   La PropertyGroup, le panneau et les clés YAML en dérivent.
-- **`core/` ne connaît pas Blender.** `layout.py` prend un dictionnaire de
+- **`core/` ne connaît pas Blender.** `fixtures.py` ne lit que le YAML des
+  fiches, jamais un GDTF. `layout.py` prend un dictionnaire de
   paramètres et rend une description complète de la scène : boîtes,
   polygones extrudés, transformations, positions de lumières et de caméras,
   cotes calculées, alertes. `build.py` ne fait que traduire cette
@@ -201,6 +211,147 @@ aucun chiffre : les trois valeurs ci-dessus sont des choix.
 `main_opening` est le seul paramètre qui **ne reconstruit pas** la scène : il
 n'agit que par driver (section 8.5).
 
+### 3.10 Implantation lumière — `rig`
+
+| Clé | Libellé | Défaut | Bornes |
+|---|---|---|---|
+| `enabled` | Implantation lumière | oui | |
+| `aim_height` | Hauteur de visée au-dessus du plancher *(choix)* | 1,70 | 0,50 – 2,50 |
+| `site` | Site de référence des projecteurs de face (élévation du faisceau) | 45° | 20 – 70 |
+| `area_depth` | Profondeur de la zone de jeu depuis le nez *(choix)* | 6,00 | 1 – 30 |
+
+Site 45° : fiche ADEC 6-3, méthode McCandless (45° de site, 45° d'azimut,
+section 13). `enabled` décoché : aucun objet de la section 13, aucun patch.
+
+### 3.11 Perche de face — `rig_front`
+
+| Clé | Libellé | Défaut | Bornes |
+|---|---|---|---|
+| `ceiling_gap` | Écart de la perche sous le plafond de salle *(choix)* | 0,30 | 0,05 – 2 |
+| `auto_position` | Position en Y calculée | oui | |
+| `y` | Position en Y, mode manuel | −1,40 | −30 – 5 |
+
+Le défaut manuel est la valeur que donne le calcul avec les défauts
+(section 13.2).
+
+### 3.12 Contre — `backlight`
+
+| Clé | Libellé | Défaut | Bornes |
+|---|---|---|---|
+| `enabled` | Contre | oui | |
+| `fixture` | Appareil | `martin_mac_aura` | énumération (1) |
+| `mode` | Mode DMX | mode par défaut de la fiche | énumération (2) |
+| `count` | Nombre d'appareils | 6 | 1 – 24 |
+| `distance` | Distance au nez de la porteuse visée *(choix)* | 4,00 | 0,50 – 30 |
+
+(1) Énumération **dynamique** : les `id` des fiches de la bibliothèque dont la
+famille convient (section 12.2), relue au chargement de l'extension et par le
+bouton « Recharger la bibliothèque ». Un `id` inconnu dans un préréglage donne
+le défaut du paramètre et un avertissement.
+(2) Énumération dynamique : `default` (mode par défaut de la fiche) et les noms
+des modes de l'appareil choisi.
+
+### 3.13 Mobiles de face — `front_movers`
+
+| Clé | Libellé | Défaut | Bornes |
+|---|---|---|---|
+| `enabled` | Mobiles de face | oui | |
+| `fixture` | Appareil | `robe_robin_esprite` | énumération |
+| `mode` | Mode DMX | mode par défaut de la fiche | énumération |
+| `count` | Nombre d'appareils | 4 | 1 – 16 |
+
+### 3.14 Pylônes — `towers`
+
+`symmetric` (défaut oui) : même règle que `modules` (un jeu, appliqué aux deux
+côtés en miroir ; décoché, jeux `left` et `right` indépendants). Hors jeux :
+
+| Clé | Libellé | Défaut | Bornes |
+|---|---|---|---|
+| `symmetric` | Symétrique | oui | |
+| `fixture` | Appareil | `robe_robin_esprite` | énumération |
+| `mode` | Mode DMX | mode par défaut de la fiche | énumération |
+| `truss_size` | Côté de la section carrée du truss *(choix)* | 0,30 | 0,15 – 0,60 |
+| `base_size` | Côté de la platine *(choix)* | 0,80 | 0,30 – 2 |
+
+Chaque jeu :
+
+| Clé | Libellé | Défaut | Bornes |
+|---|---|---|---|
+| `count` | Nombre de pylônes (0 = aucun) | 1 | 0 – 4 |
+| `first_distance` | Distance du premier pylône au nez *(choix)* | 3,00 | 0 – 30 |
+| `spacing` | Écart entre pylônes *(choix)* | 2,00 | 1 – 10 |
+| `height` | Hauteur du pylône, depuis le sol de salle *(choix)* | 4,50 | 2 – 10 |
+| `movers` | Mobiles par pylône | 2 | 0 – 6 |
+
+### 3.15 PC de face — `front_pc`
+
+| Clé | Libellé | Défaut | Bornes |
+|---|---|---|---|
+| `enabled` | PC de face | oui | |
+| `fixture` | Appareil | `generic_pc_led` | énumération |
+| `mode` | Mode DMX | mode par défaut de la fiche | énumération |
+| `zone_mode` | Découpage en zones | automatique | automatique / manuel |
+| `zone_width` | Largeur de zone visée *(choix)* | 3,00 | 1 – 10 |
+| `columns` | Zones en largeur (mode manuel) | 3 | 1 – 8 |
+| `rows` | Rangs en profondeur (mode manuel) | 2 | 1 – 4 |
+| `azimuth` | Azimut de croisement | 45° | 10 – 80 |
+| `overlap` | Recouvrement des zones voisines *(choix)* | 0,20 | 0 – 1 |
+
+`overlap` : fraction de la taille d'une zone ajoutée au champ couvert (section
+13.7). Azimut 45° : fiche ADEC 6-3.
+
+### 3.16 Découpes — `profiles`
+
+| Clé | Libellé | Défaut | Bornes |
+|---|---|---|---|
+| `enabled` | Découpes | oui | |
+| `fixture` | Appareil | `etc_s4led_s3_lustr_x8` | énumération |
+| `mode` | Mode DMX | mode par défaut de la fiche | énumération |
+| `lintel_margin` | Marge sous le linteau pour la coupe haute *(choix)* | 0,10 | 0 – 1 |
+| `tube_angle` | Tube de lentille (0 = choisi automatiquement) | 0 | 0 – 90 |
+| `blades_mode` | Lames | automatique | automatique / manuel |
+
+Réglage manuel, lu seulement si `blades_mode` vaut `manual`. Le schéma
+déclare ces clés par boucle, comme `_MODULE_PARAMS`, pour chacune des trois
+découpes `p` = `l` (jardin), `c` (centre), `r` (cour) et chacune des quatre
+lames `b` = 1 à 4 :
+
+| Clé | Libellé | Défaut | Bornes |
+|---|---|---|---|
+| `<p>_blade_<b>_insertion` | Insertion de la lame (0 = dégagée, 1 = course complète) | 0 | 0 – 1 |
+| `<p>_blade_<b>_angle` | Inclinaison de la lame | 0° | −45 – 45 |
+| `<p>_rotation` | Rotation du cadrage | 0° | −90 – 90 |
+
+La numérotation des lames est celle de la fiche (section 12.2). Une valeur
+hors de la course ou de l'inclinaison permise par la fiche est ramenée dans
+la plage et signalée.
+
+### 3.17 Repos — `rest`
+
+| Clé | Libellé | Défaut | Bornes |
+|---|---|---|---|
+| `pc_level` | Niveau des PC de face *(choix)* | 0,70 | 0 – 1 |
+| `profile_level` | Niveau des découpes *(choix)* | 0,70 | 0 – 1 |
+| `mover_level` | Niveau des mobiles *(choix)* | 0,50 | 0 – 1 |
+| `haze_level` | Niveau du hazer *(choix)* | 1,00 | 0 – 1 |
+| `cct_left` | Température de couleur, PC accrochés côté jardin, en K *(choix)* | 3200 | 1500 – 12000 |
+| `cct_right` | Température de couleur, PC accrochés côté cour, en K *(choix)* | 5600 | 1500 – 12000 |
+| `cct_profile` | Température de couleur des découpes, en K *(choix)* | 4000 | 1500 – 12000 |
+
+### 3.18 Patch DMX — `patch`
+
+Une famille = un univers de départ et une adresse de départ (deux entiers).
+Familles : `backlight`, `front_movers`, `tower_movers`, `front_pc`,
+`profiles`, `hazer`.
+
+| Clé | Libellé | Défaut | Bornes |
+|---|---|---|---|
+| `<famille>_universe` | Univers de la famille | `backlight` 1, `front_movers` 2, `tower_movers` 3, `front_pc` 4, `profiles` 5, `hazer` 6 *(choix)* | 1 – 63999 |
+| `<famille>_address` | Adresse de départ | 1 | 1 – 512 |
+
+Un univers par famille évite tout recouvrement et tout dépassement de 512
+canaux avec les défauts *(choix)*.
+
 ## 4. Cotes dérivées
 
 Notations : `W` largeur plateau, `D` profondeur, `Hp` hauteur plateau,
@@ -293,7 +444,7 @@ murs de cage 0,20 ; parement de plancher 0,03 ; liseré du nez 0,05 ;
   moins du fond. Une porteuse à moins de 0,30 en Y d'une porteuse de
   pendrillonnage ou du plan du rideau de scène est retirée (section 8). Les
   restantes sont numérotées de la face vers le fond, sans trou. Les
-  projecteurs s'y accrocheront dans une version suivante (voir `BACKLOG.md`).
+  projecteurs s'y accrochent selon la section 13, par position en Y.
 
 ### 5.6 Escaliers latéraux (`TS_Stairs`)
 
@@ -431,11 +582,15 @@ donc à la régénération.
 | `TS_HouseFloor` | sol de salle | gris |
 | `TS_Stairs` | escaliers, paliers | gris foncé |
 | `TS_Module` | modules | noir chaud |
-| `TS_Grid` / `TS_Batten` | gril, porteuses | métal sombre |
+| `TS_Grid` / `TS_Batten` | gril, porteuses, perche de face, bras de pylône | métal sombre |
 | `TS_Masking` | pendrillons, frises, rideau de fond | velours noir |
 | `TS_MainCurtain` | rideau de scène | velours rouge |
 | `TS_Cyclorama` | cyclorama | blanc mat |
 | `TS_HouseCeiling` | plafond de salle, une face (section 5.1) | gris sombre |
+| `TS_Fixture` | corps, étrier, embase des appareils (section 14) | noir mat |
+| `TS_Lens` | verre des lentilles | gris verre, sombre |
+| `TS_Truss` | pylônes et platines | métal gris |
+| `TS_Blade` | lames de cadrage, invisibles pour la caméra (14.4) | noir |
 
 Tous les maillages reçoivent des UV en projection boîte, **1 unité UV =
 1 m**, sans étirement. Les matériaux BlenderKit procéduraux n'ont pas
@@ -479,7 +634,9 @@ La **catégorie** d'un objet généré est son matériau `TS_*` par défaut.
 
 - Collection racine `Theatre`, sous-collections `Theatre_Architecture`,
   `Theatre_Stairs`, `Theatre_Modules`, `Theatre_Grid`, `Theatre_Masking`,
-  `Theatre_Curtains`, `Theatre_Lights`, `Theatre_Cameras`.
+  `Theatre_Curtains`, `Theatre_Lights`, `Theatre_Cameras`, `Theatre_Rig`
+  (perche de face, pylônes, bras), `Theatre_Fixtures` (hiérarchies d'appareils,
+  section 14).
 - Chaque objet généré porte la propriété personnalisée `theatre_generated`.
   La reconstruction supprime **uniquement** ces objets et leurs données
   orphelines, puis recrée tout. Un objet non marqué trouvé dans ces
@@ -500,9 +657,18 @@ La **catégorie** d'un objet généré est son matériau `TS_*` par défaut.
 - Les items d'un EnumProperty dynamique restent référencés côté Python.
 - Panneau « Théâtre » dans la barre latérale de la vue 3D : Plateau,
   Avancé (replié), Escaliers, Modules, Gril, Pendrillonnage, Rideaux,
-  Lumières, Caméras, Préréglages, et un encadré **Cotes calculées** (largeur
-  hors tout, largeur de cage, contremarches, nombre de porteuses) suivi des
-  alertes.
+  Lumières, Caméras, Implantation, Perche de face, Contre, Mobiles de face,
+  Pylônes, PC de face, Découpes, Repos, Patch DMX, Préréglages, et un encadré
+  **Cotes calculées** (largeur hors tout, largeur de cage, contremarches,
+  nombre de porteuses, puis les cotes de la section 13.10) suivi des alertes.
+  Boutons de l'implantation : « Plein feu de repos » (15.2), « Exporter QLC+ »
+  (16), « Recharger la bibliothèque » (12.1).
+- Les énumérations `fixture` et `mode` sont dynamiques (items référencés côté
+  Python, section 3.12) ; le dessin du panneau ne relit pas le disque : la
+  bibliothèque est lue au chargement et au bouton.
+- Une reconstruction qui change l'implantation recrée les appareils, leurs
+  drivers et les propriétés de scène absentes (15.2) ; elle ne touche à
+  aucune propriété `dmx_<u>_<c>` existante.
 
 ## 8. Pendrillonnage et rideaux
 
@@ -636,7 +802,12 @@ Pour voir les faisceaux, sans alourdir le rendu.
 | `density` | Densité — **animable** *(choix)* | 0,02 | 0 – 1 |
 | `anisotropy` | Diffusion vers l'avant *(choix)* | 0,6 | −0,9 – 0,9 |
 | `quality` | Qualité | légère | légère / moyenne / fine |
+| `dmx_driven` | Densité pilotée par le hazer (DMX) | non | |
+| `fixture` | Appareil hazer | `generic_hazer` | énumération dynamique |
+| `mode` | Mode DMX du hazer | mode par défaut de la fiche | énumération dynamique |
 
+- `dmx_driven`, `fixture` et `mode` : la densité suit alors le canal du hazer
+  (section 15.4).
 - **Aucune limite de brume ne doit se voir.** Une boîte homogène montre une
   paroi nette partout où une face tombe dans le vide (retour utilisateur :
   la brume « s'arrêtait pile sur le devant de la scène »). Règle : chaque
@@ -715,7 +886,18 @@ Calculée dans `core`, testée, sans rien dessiner dans la scène.
 - Même arborescence que les groupes de paramètres, plus `version: 1`.
   `modules` contient `symmetric`, `left` et `right`.
 - Livrés dans `presets/` : `reference_with_modules.yaml` (valeurs par défaut)
-  et `open_space.yaml` (sans modules).
+  et `open_space.yaml` (sans modules). Les deux portent l'implantation
+  lumière avec ses valeurs par défaut : 6 MAC Aura en contre, 4 Esprite de
+  face, 1 pylône de 2 Esprite par côté, zones de 3,00 m, visée à 1,70 m,
+  3 découpes.
+- Les groupes des sections 13 à 16 (`rig`, `rig_front`, `backlight`,
+  `front_movers`, `towers`, `front_pc`, `profiles`, `rest`, `patch`) et les
+  clés ajoutées à `haze` s'écrivent comme les autres, `towers` avec
+  `symmetric`, `left` et `right` comme `modules`. `version` reste à 1 : les
+  clés sont additives, un préréglage plus ancien prend les défauts. Le patch
+  fait partie du préréglage ; les valeurs DMX en direct n'en font pas partie.
+- Une énumération de fiche (`fixture`, `mode`) dont l'`id` est absent de la
+  bibliothèque revient au défaut du paramètre, avec un avertissement.
 - Préréglages utilisateur enregistrés dans
   `bpy.utils.extension_path_user(__package__, path="presets", create=True)`,
   jamais dans le dossier de l'extension.
@@ -740,7 +922,20 @@ Calculées dans `core`, rédigées en français, affichées dans le panneau :
 - rues de moins de 0,60 m ;
 - ouverture du pendrillonnage plus large que la cage ;
 - frises sans hauteur utile ;
-- rideau de scène ouvert visible dans l'ouverture (montants trop étroits).
+- rideau de scène ouvert visible dans l'ouverture (montants trop étroits) ;
+- bibliothèque : fiche invalide ou introuvable (12.7) ;
+- implantation : zone de jeu raccourcie (13.1) ; perche de face hors de la
+  salle (13.2) ; point d'accroche hors du tube (13.3) ; porteuse à plus de
+  0,50 m de la distance demandée pour le contre, ou aucune porteuse (13.4) ;
+  pylône trop bas, sur un escalier ou hors de la salle (13.6) ; rang de PC
+  dont la porteuse est trop en arrière (13.7) ; appareils qui se touchent sur
+  un tube (13.10) ;
+- photométrie : zone non couverte ou champ trop large, hors de la plage de
+  zoom (13.7) ; découpe sans tube assez large, lame hors course ou lames non
+  adaptées (13.8) ; pan/tilt hors course (13.9) ; température de couleur de
+  repos hors de la plage de la fiche (15.2) ;
+- patch : recouvrement d'adresses, univers au-delà de 512 canaux (15.1) ;
+- brume : `DMX_Haze` de DMX Visualizer actif dans le monde (15.4).
 
 ## 11. Vérification
 
@@ -757,7 +952,886 @@ Calculées dans `core`, rédigées en français, affichées dans le panneau :
 - Dans Blender : capture depuis `Cam_Face` avec le préréglage
   `reference_with_modules`, à comparer avec `scene-vue-artiste.png` ; puis
   `open_space`, à comparer avec `scene-vue-artiste-ouvert.png`.
+- Tests `pytest` des sections 12 à 16 (aucun ne dépend de Blender, de QLC+
+  ou d'un GDTF du disque ; le test qui lit `C:\QLC+` est ignoré s'il est
+  absent) :
+  - fiches : chargement et rejet des clés manquantes, attribut inconnu
+    conservé, canaux 16 bits (`encode` puis `decode` rend `v` à 1/65535 près,
+    `v = 1` donne `255, 255`), empreinte et offsets, les six fiches livrées
+    valides, outil GDTF sur un petit GDTF construit dans le test (offsets
+    multiples → 16 bits, attributs inconnus gardés) ;
+  - implantation : `Yp = −1,40` avec les défauts ; 12 PC et 4 circuits ;
+    décalage en X `ΔY·tan(azimut)` et faisceaux parallèles en plan par
+    direction ; champ requis, bornage au zoom et alerte ; accroche par Y
+    (première porteuse, retrait d'une porteuse qui renumérote, contre à plus de
+    0,50 m) ; pylônes miroirs et empilement ; zones à 1, 2 et 4 rangs ;
+  - visée : pour chaque mobile, le faisceau recalculé depuis les octets
+    16 bits arrondis passe à moins de 1 cm de la visée ; seconde solution
+    pan/tilt ; hors course ;
+  - découpes : un point de chaque droite de coupe appartient au plan de sa
+    lame ; tube choisi sur un cas calculé à la main ; `blades_mode = manual`
+    restitue les valeurs saisies ;
+  - patch : adresses consécutives, recouvrement, 512 canaux ; valeurs de
+    repos ; `cct_to_rgb` plus rouge que bleu sous 6500 K ;
+  - export : `.qxw` et `.qxf` bien formés, adresses à base 0, contrôle MAC
+    Aura contre le `.qxf` de QLC+ (ignoré si absent).
+- Dans Blender, en plus, depuis `Cam_Face` et **en Cycles** (rendu vers un
+  fichier, jamais `evaluated_get`) : reconstruction sans erreur et sans
+  objet manquant (30 appareils par défaut) ; propriétés `dmx_<u>_<c>` écrites
+  puis `scene.update_tag()` : les drivers de dimmer, couleur, pan, tilt et
+  zoom suivent ; « Plein feu de repos » ; chaque découpe cadre son tiers,
+  coupe nette au nez et sous le linteau ; les faisceaux d'une même direction
+  sont parallèles en plan ; la lumière sort par le bord de la lentille d'un
+  profil, sans ombre du corps ; un gobo et l'iris d'un Esprite se projettent ;
+  sens de `Normal` des lumières en Cycles (14.5) ; brume pilotée par le hazer ;
+  étalonnage lumen / watt (14.8) consigné dans `docs/`.
 
-## 12. Hors périmètre v1
+## 12. Bibliothèque d'appareils
+
+Cadre commun à tous les appareils de la section 13 : une **fiche** YAML par
+modèle, lue par `core/fixtures.py`. `core` ne lit jamais un GDTF. Le moteur de
+référence est **Cycles** ; EEVEE ignore les profils IES et les arbres de nœuds
+de lumière (section 14.5), il ne rend donc que l'intensité et la couleur RVB.
+
+### 12.1 Disposition des dossiers
+
+```
+blender/theatre_stage/library/fixtures/<id>/     livré avec l'extension
+  fixture.yaml
+  source/                  GDTF d'origine, fiches techniques (PDF), profils IES
+  meshes/                  maillages (.glb ou .obj) importés par nom
+  gobos/                   images de gobos (.png)
+<extension_path_user(__package__, path="fixtures", create=True)>/<id>/
+                           fiches de l'utilisateur, même disposition
+```
+
+- **Tout est versionné** : fiches, GDTF, IES, maillages, images de gobos. Les
+  chemins de la fiche sont relatifs à son dossier.
+- Une fiche utilisateur de même `id` qu'une fiche livrée la remplace
+  (information dans les alertes). Le nom du dossier est l'`id`.
+- La bibliothèque est lue au chargement de l'extension et par le bouton
+  « Recharger la bibliothèque ». Une fiche invalide est écartée avec un message
+  français qui liste les clés fautives ; elle n'apparaît dans aucune
+  énumération.
+
+### 12.2 Schéma d'une fiche
+
+Unités : mètre, degré, kilogramme, lumen, kelvin. « Obl. » : obligatoire
+(`non` = facultatif ; `si …` = obligatoire sous condition). Une clé
+obligatoire à `null` (laissée ainsi par l'outil GDTF) rend la fiche invalide.
+
+| Clé | Type | Obl. | Rôle |
+|---|---|---|---|
+| `version` | entier | oui | `1` |
+| `id` | texte ASCII `a-z0-9_` | oui | identifiant, égal au nom du dossier |
+| `manufacturer`, `model` | texte | oui | identité |
+| `family` | `moving_wash` / `moving_profile` / `pc` / `profile` / `hazer` | oui | famille. Détermine les énumérations de la section 3 : `backlight` → `moving_wash` ; `front_movers`, `towers` → `moving_wash` ou `moving_profile` ; `front_pc` → `pc` ; `profiles` → `profile` ; `haze.fixture` → `hazer` |
+| `sources` | liste de `{kind, url, note}` | oui | `kind` : `datasheet`, `gdtf`, `ies`, `other`. `url` : adresse ou chemin relatif |
+| `physical.weight` | kg | oui | poids, avec accessoires de la fiche |
+| `physical.dimensions` | `{width, depth, height}` | si pas `hazer` | encombrement en position neutre, `height` de la face de fixation au point le plus bas |
+| `physical.mount.hook_height` | m | si pas `hazer` | de l'axe du tube à la face de fixation de l'embase |
+| `physical.mount.tilt_axis_height` | m | si pas `hazer` | de la face de fixation à l'axe de tilt, le long de l'axe de pan |
+| `optics.beam_type` | `profile` / `wash` | si pas `hazer` | choisit la source de lumière (14.3) |
+| `optics.lens_diameter` | m | si pas `hazer` | diamètre utile de la lentille |
+| `optics.lens_offset` | m | si pas `hazer` | de l'axe de tilt à la face avant de la lentille, le long du faisceau |
+| `optics.flux` | lm | si pas `hazer` | flux total, pleine intensité, blanc |
+| `optics.field_angle` | `{min, max}` | si zoom (DMX ou mécanique) | angle de champ plein (bord à 10 %) aux deux extrémités du zoom |
+| `optics.beam_angle` | `{min, max}` | si `wash` | angle de faisceau plein (50 %), mêmes extrémités |
+| `optics.lens_tubes` | liste d'angles de champ | si lentilles fixes | exclusif de `field_angle` |
+| `optics.zoom_invert` | booléen | non (`false`) | `false` : 0 = `min` ; `true` : 0 = `max` |
+| `optics.ies` | chemin | non | profil IES, Cycles seulement |
+| `colour.systems` | liste parmi `rgbw`, `cmy`, `cto`, `cct`, `emitters` | non (vide = blanc fixe) | systèmes de couleur présents |
+| `colour.cct_range` | `{min, max}` K | si `cct` | plage de température de couleur |
+| `colour.cto_kelvin` | K | si `cto` | température de couleur du filtre CTO plein |
+| `colour.emitters` | liste de `{attribute, rgb}` | si `emitters` | une émission par attribut `emitter_N`, `rgb` linéaire 0–1 de l'émetteur à pleine intensité |
+| `motion.type` | `moving` / `static` | si pas `hazer` | `static` : visée fixée à la construction |
+| `motion.pan`, `motion.tilt` | `{min, max}` | si `moving` | course physique, en degrés, zéro compris (convention 13.9) |
+| `blades.count` | entier (4) | non | absent = pas de lames |
+| `blades.mode` | `motorised` / `manual` | si lames | `manual` : réglées à la construction |
+| `blades.gate_from_lens` | m | si lames | du plan des lames à la face avant de la lentille, vers l'arrière |
+| `blades.span` | m | si lames | longueur du bord d'une lame ; `e = span/2` |
+| `blades.travel` | `{open, closed}` | si lames | distance du bord à l'axe, positive du côté de la lame, négative au-delà de l'axe : lame dégagée / course complète |
+| `blades.sides` | 4 angles | si lames | direction « côté lame » de chaque lame, rotation du cadrage nulle, de +X vers +Y de la tête (13.8) |
+| `blades.angle_limit` | angle | si lames | inclinaison maximale du bord, ± |
+| `blades.rotation` | `{min, max}` | si `motorised` | course de `blade_rot` |
+| `gobos.wheels` | liste de `{name, rotation_range, slots}` | non | `name` : `gobo1` ou `gobo2` ; `rotation_range` : degrés pour `gobo1_rot` (360 par défaut) ; `slots` : liste de `{name, image, dmx}` |
+| `iris.min_ratio` | 0–1 | non | rapport du diamètre d'iris fermé au diamètre ouvert |
+| `strobe` | `{open, closed, strobe}` | non | `open`, `closed` : `[octet_min, octet_max]` ; `strobe` : `{from, to, hz_min, hz_max}` |
+| `modes` | liste | oui | modes DMX (ci-dessous) |
+| `default_mode` | texte | oui | nom d'un mode |
+| `model3d` | voir ci-dessous | oui | modèle 3D |
+| `qlc` | `{manufacturer, model, modes, verified}` | non | définition QLC+ équivalente (section 16.3) |
+
+Un mode : `{name, footprint, channels}`, `footprint` = nombre de canaux
+occupés. Un canal : `{offset, attribute, bits, default, fine}` :
+`offset` à partir de 1 ; `attribute` du vocabulaire 12.3 ; `bits` 8 ou 16 ;
+`default` : octet (8 bits) ou entier 0–65535 (16 bits) ; `fine` : offset du
+canal fin si `bits` vaut 16 (défaut `offset + 1`). Les offsets d'un mode sont
+uniques et inférieurs ou égaux à `footprint`.
+
+`model3d` :
+
+- `kind: procedural` : `shape` (`pc`, `profile`, `box`), `body` `{width,
+  depth, height}`, `barrel` `{diameter, length}` (profils), `yoke`
+  `{gap, height}` ; tout en mètres. Le dessin se déduit de ces cotes.
+- `kind: mesh` : `parts` `{base, yoke, head}`, chacune `{file, offset}`.
+  `file` : `.glb` ou `.obj`, en mètres. `offset` : position de l'origine de la
+  pièce dans le repère de la pièce parente (`base` : face de fixation ;
+  `yoke` : dans `base` ; `head` : dans `yoke`, à l'axe de tilt). Si un
+  fichier ne s'importe pas, repli sur un `procedural` déclaré dans la même
+  fiche (`fallback`).
+
+Le hazer n'a ni `physical.dimensions`, ni `optics`, ni `motion` : sa fiche
+porte `physical.weight`, `modes` et `model3d: {kind: none}` (racine vide,
+section 14.1).
+
+### 12.3 Vocabulaire des attributs DMX
+
+Identifiants anglais, valeur normalisée `v` dans [0, 1] (section 12.4). Un
+attribut absent du mode n'est tout simplement pas lu : l'appareil garde sa
+valeur neutre.
+
+| Attribut | Sens de `v` |
+|---|---|
+| `dimmer` | intensité, linéaire |
+| `pan`, `tilt` | `angle = min + v·(max − min)` de `motion.pan` / `motion.tilt` |
+| `zoom` | champ `= min + v·(max − min)` de `optics.field_angle` (inversé si `zoom_invert`) ; le faisceau suit par la même interpolation sur `beam_angle` |
+| `color_r`, `color_g`, `color_b`, `color_w` | niveau de l'émetteur ou du canal additif |
+| `cyan`, `magenta`, `yellow` | 0 = filtre dégagé, 1 = filtre plein |
+| `cto` | 0 = aucun, 1 = filtre `cto_kelvin` plein |
+| `cct` | `K = min + v·(max − min)` de `colour.cct_range`, linéaire en K *(choix)* |
+| `emitter_1` … `emitter_8` | niveau de chaque émetteur de `colour.emitters` |
+| `strobe` | octet `B = round(255·v)` ; interprété par `strobe` de la fiche (14.7) |
+| `gobo1`, `gobo2` | octet `B = round(255·v)` ; la fente est celle dont `dmx` contient `B` |
+| `gobo1_rot` | angle du gobo = `v·rotation_range` de la roue `gobo1` |
+| `iris` | 0 = ouvert, 1 = fermé à `iris.min_ratio` |
+| `blade_1a`, `blade_1b` … `blade_4a`, `blade_4b` | insertion aux deux extrémités A et B de la lame ; 0 = dégagée, 1 = course complète |
+| `blade_rot` | rotation du cadrage, `min + v·(max − min)` de `blades.rotation` |
+| `haze_density` | densité du hazer, 0 – 1 |
+
+**Attribut inconnu.** L'outil GDTF (12.6) et la fiche acceptent tout autre
+nom, conservé tel quel, en minuscules et sans espaces (ex. `aura_dimmer`,
+`prism1`). Un tel canal compte dans l'empreinte, reçoit sa propriété
+`dmx_<u>_<c>` (valeur par défaut de la fiche), figure dans le patch et dans
+l'export QLC+, mais **aucun objet Blender ne le lit**. Le prisme et le frost
+sont dans ce cas (voir `BACKLOG.md`).
+
+### 12.4 Canaux 8 et 16 bits
+
+Une propriété de scène `dmx_<u>_<c>` vaut `octet / 255` (contrat du pont).
+
+- 8 bits : `v = c`, `c` étant la propriété du canal.
+- 16 bits : avec `c` la propriété du canal gros et `f` celle du canal fin,
+  `v = (c + f/256) · 256/257 = (256·c + f)/257`. C'est exactement
+  `N / 65535` pour `N = 256·octet_gros + octet_fin`. La forme brute
+  `c + f/256` dépasse 1 de 0,39 % à pleine échelle et décalerait un pan de
+  540° de 2° : elle n'est pas employée.
+- Écriture d'une valeur `v` (valeurs de repos, 15.2) : 8 bits `N = round(255·v)`,
+  propriété `N/255` ; 16 bits `N = round(65535·v)`, octets `N >> 8` et
+  `N & 255`, propriétés `octet/255`. L'erreur maximale est une demi-unité du
+  dernier bit : 0,004° sur un pan de 540°.
+- `core` fournit `encode(v, bits)` → octets et `decode(c, f, bits)` → `v` ;
+  l'aller-retour est testé.
+
+### 12.5 Les six fiches livrées
+
+Identifiants fixes. Les valeurs non citées ici sont « à relever dans la
+fiche constructeur » et saisies dans le YAML avec leur source.
+
+| `id` | Famille | Origine et données connues |
+|---|---|---|
+| `martin_mac_aura` | `moving_wash` | MAC Aura (pas la XB). GDTF `Martin_Professional@MAC_Aura@20230201NoMeas.gdtf` (dossier du module Open Stage Blender DMX de l'utilisateur), copié dans `source/`. Anneau « Aura » : canaux conservés comme attributs inconnus (`aura_*`), non rendus |
+| `robe_robin_esprite` | `moving_profile` | GDTF « Robin Esprite » `Robe_Lighting@Robin_Esprite@2024-02-15…gdtf`. Lames motorisées `blade_1a` … `blade_4b`, `blade_rot` ; gobos et iris ; couleur CMY + CTO |
+| `generic_pc_led` | `pc` | PC LED générique, blanc variable (`cct`), **étalonné sur la photométrie d'un vrai PC LED** dont les sources sont citées dans `sources`. Pas de GDTF |
+| `etc_s4led_s3_lustr_x8` | `profile` | ETC Source Four LED Series 3 Lustr X8 : 10 889 lm, huit émetteurs (rouge profond à indigo, `colour.emitters`), fenêtre de 80 mm, 8,9 kg avec le barillet à lames (6,8 kg sans), lames manuelles, tubes de lentille 5, 10, 14, 19, 26, 36, 50 et 70° (ceux qui ont un plan ETC) ; cinq modes DMX de 1 à 12 canaux. Pas de GDTF |
+| `etc_s4led_s3_daylight_hdr` | `profile` | Idem avec le module Daylight HDR : 14 214 lm, `cct` de 1900 à 10450 K. Pas de GDTF |
+| `generic_hazer` | `hazer` | Machine à brume à un canal `haze_density` |
+
+### 12.6 Outil GDTF → fiche
+
+`tools/gdtf_to_fiche.py <fichier.gdtf> --id <id> [--mode <nom> …] --out
+blender/theatre_stage/library/fixtures/<id>/` (Python système, `zipfile` et
+`xml.etree`, sans dépendance). Il lit `description.xml` et écrit un
+`fixture.yaml` à compléter à la main.
+
+**Rempli par l'outil :**
+
+- `id` (proposition `fabricant_modele`), `manufacturer`, `model`, `sources`
+  (le GDTF, copié dans `source/`) ;
+- `modes` : nom, empreinte, canaux (offset, 8 ou 16 bits d'après les offsets
+  multiples du canal GDTF, valeur par défaut), `default_mode` = premier mode ;
+- attributs, d'après la table ci-dessous ; tout nom inconnu est conservé ;
+- `motion.pan` / `motion.tilt` d'après `PhysicalFrom` / `PhysicalTo` des
+  fonctions de canal ;
+- `optics.beam_angle` d'après les bornes physiques de `Zoom` (le GDTF donne
+  l'angle de faisceau), `optics.flux` et `optics.lens_diameter` d'après la
+  géométrie de faisceau (`LuminousFlux`, `BeamRadius`), `optics.beam_type` ;
+- `gobos.wheels` : fentes, plages DMX, images extraites dans `gobos/` ;
+- `strobe`, `iris.min_ratio` d'après les fonctions de canal ;
+- `model3d.kind: mesh` : fichiers de `Models` copiés dans `meshes/`,
+  `offset` d'après l'arbre de géométries ; `physical.dimensions` et
+  `physical.weight` quand le GDTF les porte.
+
+| Attribut GDTF | Attribut de la fiche |
+|---|---|
+| `Dimmer` | `dimmer` |
+| `Pan`, `Tilt`, `Zoom` | `pan`, `tilt`, `zoom` |
+| `ColorAdd_R`, `_G`, `_B`, `_W` | `color_r`, `color_g`, `color_b`, `color_w` |
+| `ColorSub_C`, `_M`, `_Y` | `cyan`, `magenta`, `yellow` |
+| `CTO` | `cto` |
+| `CTC` | `cct` |
+| `Shutter1` (et `Shutter1Strobe…`) | `strobe` |
+| `Gobo1`, `Gobo2` | `gobo1`, `gobo2` |
+| `Gobo1Pos` | `gobo1_rot` |
+| `Iris` | `iris` |
+| `Blade1A`, `Blade1B` … `Blade4A`, `Blade4B` | `blade_1a`, `blade_1b` … `blade_4a`, `blade_4b` |
+| `BladeRot` | `blade_rot` |
+
+**Complété à la main** (laissé à `null` quand obligatoire) : `family`, URLs
+des fiches techniques, `physical.mount`, `optics.lens_offset`,
+`optics.field_angle` (le GDTF ne donne que le faisceau), `zoom_invert`,
+`colour` (systèmes, plage CCT, CTO, rgb des émetteurs), toute la géométrie des
+lames (`gate_from_lens`, `span`, `travel`, `sides`, `angle_limit`,
+`rotation`), `model3d` procédural ou son repli, `qlc`, `optics.ies`.
+
+### 12.7 Validation
+
+`core/fixtures.py` rend, pour chaque fiche, un objet figé ou une liste
+d'erreurs en français. Contrôles : clés obligatoires (conditions du tableau
+12.2) ; `id` égal au nom du dossier ; offsets uniques et ≤ `footprint` ; canaux
+16 bits dont `fine` est libre ; `default_mode` existant ; `min` ≤ `max` ;
+`lens_tubes` triés et sans doublon ; `blades.sides` à quatre angles distincts ;
+un attribut du vocabulaire n'apparaît qu'une fois par mode (sauf attributs
+inconnus) ; fichiers cités présents.
+
+## 13. Implantation lumière
+
+Tout est calculé dans `core/rig.py` (positions, visées, champs, lames,
+pan/tilt). `rigbuild.py` ne fait que traduire. Méthode : fiche ADEC 6-3
+(McCandless) : site 45° et azimut 45°, deux appareils de directions opposées
+par zone, faisceaux parallèles en plan pour une même direction, chaud d'un
+côté et froid de l'autre, recouvrement des zones voisines.
+
+### 13.1 Notations et zone de jeu
+
+Valeurs existantes : `Wc`, `Wt`, `Wk`, `Hp`, `Hc`, `Hf = facade_height`,
+`Ys`, `D`, `Yh`, `Zb = Hp + Hg − batten_drop`, `Yb` (ligne de fond, 8.1).
+Nouvelles :
+
+- `Za = Hp + aim_height` : plan de visée (2,90 par défaut).
+- **Zone de jeu** : `X` sur `[−Wc/2, Wc/2]`, `Y` sur `[0, Ya]` avec
+  `Ya = min(area_depth, Yb)`. Alerte « Zone de jeu raccourcie » si
+  `area_depth > Yb`.
+- **Grille de zones** : `nx = columns` et `nr = rows` en mode manuel ;
+  automatique : `nx = max(1, round(Wc / zone_width))` et
+  `nr = min(4, max(1, round(Ya / zone_width)))`. `zw = Wc/nx`, `zd = Ya/nr`
+  (3,33 × 3,00 par défaut). Zone `(i, j)`, `i` de 0 (jardin) à `nx − 1`, `j`
+  de 0 (face) à `nr − 1` : centre `(xc_i, yr_j)` avec
+  `xc_i = −Wc/2 + (i + ½)·zw`, `yr_j = (j + ½)·zd`. La grille est calculée
+  même si `front_pc.enabled` est décoché.
+- `spread(i, n) = −Wc/2 + (i + ½)·Wc/n` : répartition régulière sur
+  l'ouverture du cadre.
+- Visée de zone `T_ij = (xc_i, yr_j, Za)`.
+- **Point d'accroche** `H = (X, Y, Zh)` : sur l'axe du tube. **Racine** de
+  l'appareil : `(X, Y, Zh − hook_height)`. **Pivot** `P` : axe de tilt,
+  `(X, Y, Zh − hook_height − tilt_axis_height)`. Toute visée part de `P`.
+- `nearest_batten(y)` : porteuse lumière dont le Y est le plus proche de `y`
+  (`None` s'il n'y en a pas). **Première porteuse** : la plus proche de la
+  face. Les accroches se font **par position en Y, jamais par numéro** : le
+  retrait d'une porteuse par le pendrillonnage (5.5) renumérote sans casser le
+  plan de feux.
+
+### 13.2 Perche de face — `FrontPipe`
+
+Tube Ø 0,048 (`TS_Batten`) sous le plafond de salle, parallèle au nez, X sur
+`±(Wt/2 − 0,10)`.
+
+- `Zp = Hf − ceiling_gap` (7,00 par défaut).
+- Mode automatique : le site fixe la distance horizontale à la zone de la
+  première rangée, l'azimut la répartit en Y et en X :
+  `h = (Zp − Za) / tan(site)`, `ΔYp = h·cos(azimuth)`, `Yp = yr_0 − ΔYp` (`azimuth`
+  de `front_pc`).
+  Par défaut `h = 4,10`, `ΔYp = 2,90`, `Yp = 1,50 − 2,90 = −1,40` : le
+  décalage en X du même appareil vaut aussi 2,90.
+- Mode manuel : `Yp = rig_front.y` ; `ΔYp` garde la valeur du calcul
+  automatique (il sert en 13.7).
+- Alertes : `Zp ≤ Za` ; `Yp` hors de `[−Yh + 0,30, Ys − 0,30]` (perche hors de
+  la salle sous le plafond).
+- Aucune suspente n'est dessinée en v1.
+
+### 13.3 Points d'accroche sur les tubes
+
+Un appareil a un `Zh` : `Zp` pour la perche de face, `Zb` pour une porteuse
+lumière. Un `X` hors du tube (`±(Wt/2 − 0,10)` pour la perche,
+`±(Wk/2 − 0,10)` pour une porteuse) est ramené à l'extrémité et signalé :
+« Point d'accroche hors de la perche : … ».
+
+### 13.4 Contre — `Backlight_NN`
+
+`N = count` MAC Aura (par défaut), `NN` de 01 (jardin) à `N`.
+
+- `Yg = nearest_batten(distance).Y`, `Zh = Zb`, `X_i = spread(i, N)`. Alerte
+  si `|Yg − distance| > 0,50` (« Aucune porteuse à moins de 0,50 m de … :
+  contre posé à … m »). Sans aucune porteuse : pas de contre, alerte.
+- **Visée de repos** : `T = (X_i, yr_j, Za)` où `j` est le rang dont le centre
+  est le plus grand `yr_j < Yg` (zone devant le contre, côté face) ; à
+  défaut `j = 0`.
+
+### 13.5 Mobiles de face — `FrontMover_NN`
+
+`N = count` Esprite (par défaut), `NN` de 01 à `N`, jardin vers cour. Accroche
+`(spread(i, N), Yp, Zp)` sur `FrontPipe`. Visée de repos `T = (X_i, yr_0, Za)`.
+
+### 13.6 Pylônes — `Tower_L_NN`, `Tower_R_NN`
+
+Pour chaque côté `s` (−1 jardin, +1 cour) et chaque pylône `k` de 1 à `count`
+(jeu miroir si `symmetric`) :
+
+- `Y_k = −(first_distance + (k − 1)·spacing)` ; `B = max(base_size, truss_size)` ;
+  axe `X_t = s·(Wt/2 − B/2)` : la platine touche le mur de salle.
+- `Tower_<c>_NN` : **un seul maillage** (`TS_Truss`) : platine `B × B`,
+  épaisseur 0,02, puis section carrée `truss_size`, de `Z = 0` à `height` :
+  quatre montants Ø 0,05, un cadre horizontal tous les 0,50, une diagonale
+  par face et par travée.
+- Mobile `m` (de 1, en haut, à `movers`) : bras `TowerArm_<c>_NN_MM` (tube
+  Ø 0,048, `TS_Batten`) à `Z_m = height − 0,10 − (m − 1)·pitch`, avec
+  `pitch = hook_height + dimensions.height + 0,10` *(choix : jeu de 0,10)*.
+  Longueur du bras `arm = max(0,25, dimensions.width/2 + 0,10)` *(choix)*,
+  du flanc du truss `X = s·(|X_t| − truss_size/2)` à
+  `X_m = s·(|X_t| − truss_size/2 − arm)`. Accroche `(X_m, Y_k, Z_m)`.
+- Appareils `TowerMover_L_NN` / `_R_NN` : `NN` continu sur le côté, pylône
+  après pylône, du haut vers le bas.
+- **Visée de repos** : côté opposé de la scène,
+  `T = (−s·Wc/4, Ya·(m − ½)/movers, Za)`.
+- Alertes : bas du dernier appareil `Z_m − hook_height − dimensions.height <
+  0,50` (« Pylône trop bas pour n appareils ») ; emprise du pylône
+  (`B × B`) qui recoupe un escalier, son palier ou son dégagement (5.6) ;
+  `Y_k − B/2 < −Yh`.
+
+### 13.7 PC de face — `FrontPC_L_NN`, `FrontPC_R_NN`
+
+Deux appareils par zone, un par direction `d` : `L` (accroché côté jardin,
+`s_d = −1`) et `R` (côté cour, `s_d = +1`). `NN = j·nx + i + 1`. Total
+`2·nx·nr` (12 par défaut).
+
+- **Accroche en Y** : rang 0 sur la perche de face `(Yp, Zp)` ; rang 1 sur la
+  **première porteuse lumière** `(Y, Zb)` (méthode ADEC) ; rang `j ≥ 2` sur
+  `nearest_batten(yr_j − ΔYp)` *(choix)*. `ΔY = yr_j − Y_accroche`. Si
+  `ΔY < 0,10` : rang non posé, alerte « Rang j : porteuse trop en arrière de
+  la zone ».
+- **Accroche en X** (croisement) : `X = xc_i + s_d·ΔY·tan(azimuth)`. Même
+  azimut pour tous les appareils d'une direction : faisceaux parallèles en
+  plan ; le site varie avec le rang.
+- **Visée** : `T_ij`. Axe `a = (T_ij − P)/|T_ij − P|`.
+- **Champ couvert** : rectangle centré sur `T_ij` au plan `Za`, de demi-côtés
+  `(zw/2)·(1 + overlap)` en X et `(zd/2)·(1 + overlap)` en Y ; quatre coins
+  `C_k`. Champ requis `F_req = 2·max_k angle(a, (C_k − P)/|C_k − P|)`.
+  `F = clamp(F_req, field_angle.min, field_angle.max)`, puis le faisceau suit
+  (12.3). `F_req > max` : alerte « Zone non couverte » ; `F_req < min` :
+  alerte « Champ trop large ». Le champ est une valeur de construction, pas
+  un canal DMX, sauf si le mode a `zoom`.
+- **Circuits** : un par (rang, direction) : `FrontPC_Row1_L`, `FrontPC_Row1_R`,
+  `FrontPC_Row2_L`, `FrontPC_Row2_R` (4 circuits pour 12 PC). Propriété
+  `theatre_circuit` de la racine.
+- **Couleur de repos** : `rest.cct_left` pour `L`, `rest.cct_right` pour `R`
+  (chaud côté jardin, froid côté cour *(choix)*).
+
+### 13.8 Découpes — `Profile_L`, `Profile_C`, `Profile_R`
+
+Trois sur la perche de face, une par tiers de l'ouverture. Tiers `p` = 0, 1,
+2 : bornes `B_p = −Wc/2 + p·Wc/3` et `B_(p+1)`, accroche
+`(spread(p, 3), Yp, Zp)`, visée `T_p = (spread(p, 3), Ya/2, Za)`, axe `a`
+depuis `P`. Appareils statiques, un circuit chacun (`Profile_L` …).
+
+**Quatre plans de coupe** passant par la source `S` ; chacun contient une
+droite cible `(Q, u)` (point, direction unitaire) :
+
+| Coupe | Droite cible | Effet |
+|---|---|---|
+| bas | `Q = (0, 0, Hp)`, `u = (1, 0, 0)` | le faisceau finit sur le nez, rien sur l'avant-scène |
+| haut | `Q = (0, Ys + 0,05, Hp + Hc − lintel_margin)`, `u = (1, 0, 0)` | le faisceau passe sous le linteau, face avant du cadre |
+| gauche | `Q = (B_p, 0, Za)`, `u = (0, 1, 0)` | limite du tiers (cadre pour le tiers jardin) |
+| droite | `Q = (B_(p+1), 0, Za)`, `u = (0, 1, 0)` | limite du tiers (cadre pour le tiers cour) |
+
+Normale du plan : `n = (Q − S) × u / |(Q − S) × u|`, orientée vers le côté
+**sombre** : `n·a < 0` (l'axe est dans la zone éclairée).
+
+**Tube de lentille** (`lens_tubes`) :
+
+1. Premier calcul avec `S = P` : directions des coins du cadrage
+   `c = n₁ × n₂` pour les couples (bas, gauche), (bas, droite), (haut,
+   gauche), (haut, droite), signe tel que `c·a > 0`.
+   `F_req = 2·max_k angle(a, c_k)`.
+2. Tube = le plus petit de `lens_tubes` qui vérifie `tube ≥ 1,05·F_req`
+   *(choix : marge de 5 %)*. `tube_angle ≠ 0` : le tube de la liste le plus
+   proche de cette valeur. Aucun tube assez large : le plus large, alerte
+   « Découpe … : aucun tube ne couvre le cadrage ».
+3. `F = tube`. Source `S = P + a·(lens_offset − d)` avec
+   `d = r / tan(F/2)`, `r = lens_diameter/2` (14.3). Les plans et les `n` sont recalculés
+   avec ce `S`.
+
+**Lames.** Repère de la tête `(x_h, y_h, a)` (13.9). Pour la lame `k`, avec
+`ρ` la rotation du cadrage (0 en automatique) : direction « côté lame »
+`o_k = cos(side_k + ρ)·x_h + sin(side_k + ρ)·y_h`, tangente
+`q_k = −sin(side_k + ρ)·x_h + cos(side_k + ρ)·y_h`.
+`g = max(d − gate_from_lens, 0,25·d)` *(choix)* : distance de `S` au plan des
+lames. Chaque coupe de normale `n` est confiée à la lame `k` qui maximise
+`o_k·n_⊥`, `n_⊥ = n − (n·a)·a` ; deux coupes sur la même lame : alerte
+« Découpe … : lames de la fiche non adaptées au cadrage ». Pour la lame `k` :
+
+- bord : `x(y) = h_c − y·tan α`, avec `h_c = −g·(n·a)/(n·o_k)` et
+  `tan α = (n·q_k)/(n·o_k)` ; `x` est la distance à l'axe sur `o_k`, `y` sur
+  `q_k` ;
+- extrémités A (`y = −e`) et B (`y = +e`), `e = span/2` :
+  `h_A = h_c + e·tan α`, `h_B = h_c − e·tan α` ;
+- insertion normalisée `v = (open − h) / (open − closed)`, avec
+  `open`, `closed` de `blades.travel` ; valeur hors de [0, 1] ou
+  `|α| > angle_limit` : ramenée et signalée « Découpe … : lame hors course » ;
+- la lame dégagée ne mord jamais sur le faisceau :
+  `open_eff = max(open, g·tan(F/2))`.
+
+**Mode manuel** (`blades_mode = manual`) : pas de calcul de coupe ; pour la
+lame `b` de la découpe `p` : `v = <p>_blade_<b>_insertion`, `α =
+<p>_blade_<b>_angle`, `ρ = <p>_rotation`, converties en `h_c = open + v·(closed
+− open)`. Le tube reste automatique sauf `tube_angle`. Les lames manuelles
+d'un appareil `manual` ne sont pas des canaux : elles sont fixées à la
+construction.
+
+### 13.9 Visée de repos, pan et tilt
+
+Convention de montage : appareil **suspendu tête en bas** sous un tube
+parallèle à X. Repère du corps `(X_b, Y_b, Z_b)` = repère de la racine ; la
+racine porte une rotation de 180° autour de X, donc pour un vecteur du monde
+`(x, y, z)` le vecteur du corps est `(x, −y, −z)`. `Z_b` est l'axe de pan,
+dirigé de l'embase vers la tête (vers le bas dans le monde). Face du corps :
+`+Y_b`, tournée vers la salle (`−Y` du monde).
+
+- À `pan = 0` et `tilt = 0` le faisceau suit `+Z_b` (droit vers le bas). Le tilt
+  positif incline vers `+Y_b` (vers la salle), le pan positif tourne
+  dans le sens trigonométrique autour de `+Z_b`. Direction du faisceau dans le
+  repère du corps : `d_b(φ, τ) = (−sin τ·sin φ, sin τ·cos φ, cos τ)`.
+- Pour une direction visée `a` du monde, `a_b = (a_x, −a_y, −a_z)`, puis
+  `τ = acos(a_bz)` et `φ = atan2(−a_bx, a_by)` (`φ = 0` si `sin τ < 1e-6`).
+  Ces angles sont des angles **physiques**, en degrés.
+- Plages : `φ` est ramené par ± 360° dans `[pan.min, pan.max]` en prenant le
+  représentant le plus proche du milieu de la plage. Hors plage ou
+  `τ` hors de `[tilt.min, tilt.max]` : seconde solution `(φ + 180°, −τ)`.
+  Aucune des deux : angles ramenés dans la plage, alerte « Pan/tilt hors
+  course : … ». Un appareil `static` n'a pas de plage : `τ` ∈ [0°, 180°].
+- Valeur DMX normalisée : `v = (angle − min) / (max − min)`, puis arrondi
+  16 bits (12.4) : `core` rend les deux octets de chaque canal et les valeurs
+  d'angle effectivement atteintes après arrondi.
+- Dans Blender : la pièce `_Pan` tourne de `φ` autour de son Z, la pièce
+  `_Tilt` de `−τ` autour de son X (une rotation positive de Blender autour de X
+  envoie `+Z` vers `−Y`, d'où le signe). Les appareils statiques reçoivent ces
+  angles en rotations fixes ; les mobiles les reçoivent des drivers (14.7).
+- Repère de la tête : `R_h = Rx(180°)·Rz(φ)·Rx(−τ)` ; `x_h`, `y_h`, `a` = images
+  de `(1,0,0)`, `(0,1,0)`, `(0,0,1)` par `R_h`.
+
+Récapitulatif des visées de repos :
+
+| Famille | Visée `T` |
+|---|---|
+| contre | `(X_i, yr_j, Za)`, `j` = rang le plus proche en avant du contre |
+| mobiles de face | `(X_i, yr_0, Za)` |
+| mobiles des pylônes | `(−s·Wc/4, Ya·(m − ½)/movers, Za)` |
+| PC de face | `T_ij` |
+| découpes | `(spread(p, 3), Ya/2, Za)` |
+
+### 13.10 Charges, encombrement et « Cotes calculées »
+
+- **Charge** cumulée par support (perche de face, chaque porteuse lumière,
+  chaque pylône) : somme des `physical.weight`. Affichée, **sans alerte de
+  dépassement** (`BACKLOG.md`).
+- **Encombrement** : sur un même tube, deux appareils dont les axes sont à
+  moins de `(width_a + width_b)/2` en X (`dimensions.width`) → alerte
+  « Appareils qui se touchent sur la perche : … ». Aucun décalage
+  automatique.
+- Ajouts à l'encadré « Cotes calculées » : `Yp` et `Zp`, `Ya`, `nx × nr` et
+  `zw × zd`, tube et champ de chaque découpe, charges, plages de patch par
+  famille (15.1), pan et tilt (angles et valeurs DMX) de chaque mobile.
+
+## 14. Appareils dans Blender
+
+`rigbuild.py` traduit le plan de la section 13 en objets. Il ne calcule
+aucune cote. Les règles de `build.py` s'appliquent : objets marqués
+`theatre_generated`, reconstruction qui ne supprime que ces objets,
+matériaux cherchés par nom.
+
+### 14.1 Collections et noms
+
+- `Theatre_Rig` : `FrontPipe`, `Tower_L_NN` / `Tower_R_NN`,
+  `TowerArm_L_NN_MM` / `TowerArm_R_NN_MM` (`NN` = pylône, `MM` = mobile, du haut
+  vers le bas). Matériaux `TS_Batten` (tubes) et `TS_Truss`.
+- `Theatre_Fixtures` : une hiérarchie par appareil, nommée d'après la racine.
+  Racines : `Backlight_NN`, `FrontMover_NN`, `TowerMover_L_NN` /
+  `TowerMover_R_NN`, `FrontPC_L_NN` / `FrontPC_R_NN`, `Profile_L` /
+  `Profile_C` / `Profile_R`, `Hazer_01`.
+- Les deux collections sont des sous-collections de `Theatre` (section 7).
+  `NN` suit l'ordre propre à chaque famille (section 13), pas la profondeur
+  de 1 : jardin vers cour pour le contre et les mobiles de face.
+- Les données de maillage importées d'une fiche s'appellent
+  `TSF_<id>_<pièce>` (`base`, `yoke`, `head`). Comme les matériaux, elles sont
+  cherchées par nom et réutilisées, jamais écrasées ni supprimées à la
+  reconstruction (utilisateur fictif posé). Les appareils d'un même modèle
+  partagent donc leurs maillages.
+
+### 14.2 Hiérarchie et repères
+
+```
+<Racine>                    empty ; propriétés de configuration ; rotation (180°, 0, 0)
+  <Racine>_Base             maillage fixe
+  <Racine>_Pan              maillage (étrier) ; rotation Z = pan
+    <Racine>_Tilt           maillage (tête) ; origine sur l'axe de tilt ; rotation X = −tilt
+      <Racine>_Light        lumière (14.3)
+      <Racine>_Lens         disque de verre
+      <Racine>_Blades       empty ; rotation Z = blade_rot
+        <Racine>_Blade_K_Pivot    empty ; rotation Z fixe = side_k   (K = 1 à 4)
+          <Racine>_Blade_K        plan
+```
+
+- Racine : position `(X, Y, Zh − hook_height)`, repère du corps de 13.9.
+  `_Pan` à l'origine de la racine ; `_Tilt` à `(0, 0, tilt_axis_height)` dans
+  `_Pan`. Dans le repère de la tête, le faisceau suit `+Z`, la lentille est à
+  `z = lens_offset`.
+- Un appareil sans lames n'a pas `_Blades`. Un appareil `static` a les mêmes
+  pièces : `_Pan` et `_Tilt` portent les rotations fixes de 13.9. Le hazer n'a
+  que sa racine (axes simples), posée à `(−(Wk/2 − 0,50), D − 0,50, Hp)`
+  *(choix)*.
+- **Propriétés de configuration, sur la racine** (jamais sur la lumière ou
+  ses données : un driver de données qui lit une propriété de son propre objet
+  gèle, cycle objet-données) : `theatre_generated`, `theatre_fixture`,
+  `theatre_family`, `theatre_circuit`, `theatre_mode`, `max_energy` (W),
+  `field_min`, `field_max`, `beam_min`, `beam_max`, `field_angle` (champ
+  retenu), `pan_min`, `pan_max`, `tilt_min`, `tilt_max`, `cct_min`, `cct_max`,
+  `cto_r`, `cto_g`, `cto_b`, `blade_open`, `blade_closed`, `blade_half_span`,
+  `blade_rot_min`, `blade_rot_max`, `iris_min_ratio`.
+- Les drivers lisent la **scène** (`dmx_<u>_<c>`) et la **racine** (réglages
+  ci-dessus) ; les objets ne se lisent jamais eux-mêmes.
+
+### 14.3 Source de lumière
+
+`_Light`, enfant de `_Tilt`, `use_shadow` actif. `r = lens_diameter/2`.
+
+- **Profil** (`beam_type: profile`) : lumière `SPOT` quasi ponctuelle
+  (`shadow_soft_size = 0`, `spot_blend = 0,02` *(choix)*), **en retrait
+  derrière la lentille** pour que le cône passe par le bord de la lentille :
+  position `z = lens_offset − d`, `d = r / tan(F_ref/2)`, direction `+Z` de la
+  tête (rotation de 180° autour de X de la lumière, dont l'axe de tir est
+  `−Z`). `F_ref` : le tube pour une lentille fixe, `field_angle.max` pour un
+  zoom. `spot_size` = champ courant `F` (constante ou piloté par `zoom`).
+  Faisceau net aux lames, aucune ombre du corps de l'appareil.
+- **Wash et PC** (`beam_type: wash`) : lumière `AREA`, forme `DISK`, `size =
+  lens_diameter`, placée dans le plan de la lentille (`z = lens_offset`),
+  `spread` = angle de faisceau courant (constant ou piloté par `zoom`),
+  même rotation de 180° autour de X.
+- `_Lens` : disque de verre `TS_Lens` dans le plan de la lentille, tiré de
+  0,005 vers l'avant. Il ne projette pas d'ombre, de même que `_Base`, `_Pan`
+  et `_Tilt` *(choix)* : l'approximation de la source n'a pas à être ombrée
+  par un corps qui l'entoure.
+
+### 14.4 Lames
+
+Quatre plans opaques `_Blade_K` devant la source, **invisibles pour la
+caméra, ombrage actif** (visibilité de rayon : caméra décochée, ombre cochée).
+Chaque plan : bord en `x = 0`, étendue `x ∈ [0, 2·lens_diameter]` vers
+l'extérieur, `y ∈ [−E, E]` avec `E = max(span/2, 1,5·r)`, `TS_Blade` noir.
+
+Placement : plan des lames à `z = z_S + g`, avec `z_S` la position de la
+source sur l'axe et `g` de 13.8 (pour une lentille fixe) ; pour un zoom, `g`
+est calculé avec `F_ref`. `_Blade_K` : `location.x = h_c`, `rotation.z = α`
+(13.8). Appareil `manual` : valeurs constantes calculées en 13.8. Appareil
+`motorised` : drivers de 14.7 ; le zoom ne déplace pas les lames
+*(choix : la coupe reste calée sur la position du plan, ce qui n'est exact
+qu'à `F_ref`)*.
+
+### 14.5 Gobos, iris, couleur en Cycles
+
+Arbre de nœuds de la lumière, **construit seulement** si la fiche déclare
+un gobo, un iris ou `cct`. EEVEE ne le lit pas.
+
+- Direction : `Texture Coordinate > Normal`, `n`. Plan de projection
+  `p = (n_x, n_y) / (−n_z) / tan(F/2)` : le disque unité est le bord du champ.
+  Nœud `Value` `FieldTan` piloté à `tan(F/2)`. *Le sens de `Normal` pour les
+  lumières spot et surfaciques est à confirmer au premier rendu (11).*
+- Gobo : rotation de `p` par `β = gobo1_rot`, coordonnées image
+  `0,5 + 0,5·p`, une `Image Texture` par fente (`CLIP`, linéaire, images de
+  `gobos/`). Nœud `Value` `GoboIndex` : somme des `Compare(index, k, 0,5)·
+  texture_k`. Fente sans image : 1.
+- Iris : `Value` `IrisRadius = 1 − v·(1 − iris_min_ratio)` ; masque
+  `Less Than(|p|, rayon)`.
+- Couleur blanche variable : nœud `Blackbody` de température `K` (attribut
+  `cct`).
+- `Emission` : couleur = `Blackbody × gobo × masque d'iris`, force 1. La
+  puissance reste portée par `Light.energy` et la couleur RVB par
+  `Light.color`.
+
+### 14.6 Matériaux
+
+Créés seulement s'ils n'existent pas, comme en section 6 ; le choix de
+l'utilisateur sur une catégorie s'applique aux appareils comme au reste
+(6.1).
+
+### 14.7 Drivers
+
+Lecture d'un canal `a` : `v8 = c` ; `v16 = (256·c + f)/257` (12.4), `c` et
+`f` étant les variables « propriété unique » de type Scène, chemin
+`["dmx_<u>_<c>"]`. Un attribut absent du mode donne la valeur neutre de la
+colonne « Sans canal ».
+
+| Donnée portée | Propriété | Valeur | Sans canal |
+|---|---|---|---|
+| `_Pan` (objet) | `rotation_euler[2]` | `radians(pan_min + v_pan·(pan_max − pan_min))` | angle fixe 13.9 |
+| `_Tilt` (objet) | `rotation_euler[0]` | `−radians(tilt_min + v_tilt·(tilt_max − tilt_min))` | angle fixe 13.9 |
+| `_Light` (lumière) | `energy` | `max_energy · v_dimmer · shut` | `max_energy` |
+| `_Light` (lumière) | `color[0..2]` | couleur RVB ci-dessous | blanc |
+| `_Light` (lumière) | `spot_size` (profil) ou `spread` (wash) | `radians(F(z))` ou `radians(B(z))` | `field_angle` ou `beam` retenu |
+| `_Blades` (objet) | `rotation_euler[2]` | `radians(blade_rot_min + v_rot·(blade_rot_max − blade_rot_min))` | 0 |
+| `_Blade_K` (objet) | `location[0]` | `(h_A + h_B)/2` | `h_c` fixe |
+| `_Blade_K` (objet) | `rotation_euler[2]` | `atan((h_A − h_B)/(2·blade_half_span))` | `α` fixe |
+| arbre de nœuds de la lumière | `Blackbody`, `GoboIndex`, `gobo1_rot`, `IrisRadius`, `FieldTan` | formules de 14.5 | constantes |
+| `Haze_Volume` (matériau) | densité | section 15.4 | |
+
+- `z = v_zoom` (ou `1 − v_zoom` si `zoom_invert`), `F(z) = field_min +
+  z·(field_max − field_min)`, `B(z)` pareil sur `beam_min` / `beam_max`.
+- `h_A = open_eff + v_ka·(closed − open_eff)`, `h_B` pareil avec `v_kb`.
+- **Obturateur** `shut` : `B = round(255·v_strobe)`. Dans `strobe.open` ou
+  `strobe.closed` de la fiche : 1 ou 0. Dans `strobe.strobe` : fréquence
+  `f = hz_min + (B − from)/(to − from)·(hz_max − hz_min)`, `shut = 1` si
+  `fmod(t·f, 1) < 0,5`, sinon 0, avec `t = frame / fps` (`fps` : variable
+  `render.fps` de la scène). Le stroboscope ne bat que si la timeline avance.
+  Sans attribut `strobe` : 1.
+- **Couleur RVB** de `_Light` (valeurs bornées à 1) :
+  - `rgbw` : `r = color_r + color_w`, idem `g`, `b` ;
+  - `cmy` : `r = 1 − cyan`, `g = 1 − magenta`, `b = 1 − yellow` ;
+  - `emitters` : `r = Σ emitter_N · rgb_N[0]`, idem `g`, `b` ;
+  - `cto` : chaque composante multipliée par `1 − cto + cto·cto_c` (`cto_r`,
+    `cto_g`, `cto_b` = `cct_to_rgb(cto_kelvin)`) ;
+  - `cct` seul (blanc variable) : `Light.color` blanc, la température passe
+    par le nœud `Blackbody` (Cycles). En EEVEE, la température n'est pas
+    rendue.
+- Les drivers de nœuds sont portés par l'arbre de nœuds de la lumière : ce
+  n'est pas l'objet, donc pas de cycle avec la racine.
+
+### 14.8 Lumens vers puissance Blender
+
+Étalonnage fait **une fois, dans Cycles**, constantes définies dans
+`core/fixtures.py` (aucune valeur par appareil) :
+
+- profil : `Ω = 2π·(1 − cos(F/2))`, `I = flux / Ω` (cd),
+  `max_energy = EXPOSURE_GAIN · W_PER_CD_SPOT · I`. La puissance d'un spot
+  Blender ne se concentre pas avec le cône : le champ choisi intervient donc
+  par `Ω`.
+- wash et PC : `max_energy = EXPOSURE_GAIN · W_PER_LM_AREA · flux` ; le
+  resserrement de `spread` concentre alors la lumière à flux constant.
+- Valeurs de départ théoriques *(choix)*, **à remplacer par l'étalonnage** :
+  `W_PER_CD_SPOT = 4π²/683`, `W_PER_LM_AREA = π/683`, `EXPOSURE_GAIN = 1`.
+- Protocole : un plan blanc diffus (albédo 0,8) perpendiculaire à 5 m d'un
+  `etc_s4led_s3_lustr_x8` au tube 26°, plein feu ; rendu Cycles, vue
+  « Standard », exposition 0 ; mesurer la valeur linéaire au centre ; ajuster
+  `W_PER_CD_SPOT` pour la valeur de référence retenue, puis vérifier avec un
+  wash (`W_PER_LM_AREA`) que l'éclairement suit le rapport des flux. Seule la
+  photométrie **relative** des fiches est garantie ; `EXPOSURE_GAIN` règle
+  le niveau absolu contre les lumières de travail (5.9).
+- Les constantes portent *(choix)* tant que le protocole n'est pas passé et
+  que le résultat n'est pas consigné dans `docs/`.
+
+## 15. Patch DMX, repos et brume
+
+### 15.1 Patch
+
+**Le patch vit dans les paramètres de l'extension** (`patch`) : une
+reconstruction recrée les objets, un patch saisi ailleurs serait perdu.
+
+- Ordre des familles, et des appareils dans chaque famille :
+  1. `backlight` : `Backlight_01` … `NN`.
+  2. `front_movers` : `FrontMover_01` … `NN`.
+  3. `tower_movers` : `TowerMover_L_01` …, puis `TowerMover_R_01` ….
+  4. `front_pc` : par rang `j`, par direction (`L` puis `R`), par colonne `i`.
+     Chaque circuit est donc contigu.
+  5. `profiles` : `Profile_L`, `Profile_C`, `Profile_R`.
+  6. `hazer` : `Hazer_01`, seulement si `haze.dmx_driven`.
+  Une famille désactivée (`enabled` décoché, `count` ou `movers` nuls) n'a
+  aucun appareil ni patch.
+- **Adresses** : le premier appareil d'une famille prend
+  `<famille>_universe` / `<famille>_address` ; chaque suivant, l'adresse du
+  précédent plus l'empreinte (`footprint`) du **mode choisi** de la famille.
+  Le canal absolu de l'offset `o` d'un appareil à l'adresse `a` est `a + o − 1`
+  (un canal 16 bits occupe `offset` et `fine`). Propriété de scène
+  correspondante : `dmx_<univers>_<canal>`.
+- **Circuits** : un par découpe, un par (rang, direction) de PC de face
+  (13.7). Un circuit est un groupe nommé (propriété `theatre_circuit` des
+  racines ; groupes de fixtures de l'export QLC+). Les familles de mobiles
+  forment aussi chacune un groupe : `Backlight`, `FrontMovers`,
+  `TowerMovers_L`, `TowerMovers_R` *(choix)*.
+- **Alertes** : recouvrement (« Patch : X et Y se recouvrent, univers u,
+  canaux a à b ») entre deux appareils de n'importe quelles familles ;
+  dépassement (« Patch : l'univers u dépasse 512 canaux ») quand
+  `adresse + empreinte − 1 > 512`.
+- « Cotes calculées » : plage `univers : première – dernière adresse` par
+  famille, et la liste des appareils avec leur adresse.
+
+### 15.2 Valeurs de repos et « Plein feu de repos »
+
+Sans console, la scène doit déjà éclairer. **Valeurs de repos** (`core/rig.py`)
+par appareil patché et par canal, en valeur normalisée puis écrite selon
+12.4 :
+
+| Attribut | Valeur de repos |
+|---|---|
+| `dimmer` | `pc_level` (PC de face), `profile_level` (découpes), `mover_level` (mobiles et contre), `haze_level` pour `haze_density` |
+| `pan`, `tilt` | angles de 13.9 pour la visée de repos, convertis en valeur normalisée |
+| `cct` | `K` de `rest.cct_left` / `cct_right` (PC par direction) ou `cct_profile` (découpes), converti sur `colour.cct_range` ; hors plage : ramené et signalé |
+| `color_r/g/b/w`, `cyan/magenta/yellow` | couleur de `cct_to_rgb(K)` pour les PC et les découpes : `rgbw` → `(r, g, b)`, `w = 0` ; `cmy` → `(1 − r, 1 − g, 1 − b)` ; mobiles : valeur par défaut de la fiche |
+| tous les autres | valeur par défaut du canal dans la fiche |
+
+`cct_to_rgb(K)` (dans `core/fixtures.py`) : couleur d'un corps noir,
+normalisée à `max = 1`, linéaire.
+
+- **À la reconstruction** : pour chaque canal patché, la propriété de scène
+  `dmx_<u>_<c>` est **créée si elle est absente**, à la valeur de repos ;
+  une propriété existante n'est jamais modifiée. Les propriétés d'un ancien
+  patch restent en place, sans effet. La scène est marquée (`scene.update_tag()`
+  puis `view_layer.update()`).
+- **Bouton « Plein feu de repos »** (`theatre.rest_full`) : réécrit **toutes**
+  les propriétés des canaux patchés à leur valeur de repos, avec le même
+  marquage de la scène. Tant que le pont tourne et reçoit l'univers, il réécrit
+  les propriétés à chaque tick : **la console l'emporte**.
+- Les autres attributs d'un mode (gobo, iris, lames…) restent à leur valeur par
+  défaut de la fiche : lames dégagées, iris ouvert.
+
+### 15.3 Pont DMX Visualizer
+
+Le contrat se réduit aux **noms de propriétés** : l'extension n'importe
+jamais DMX Visualizer. Le pont (module `dmx_visualizer`, dépôt séparé) écoute
+plusieurs univers et écrit `dmx_<u>_<c>`, valeur = `octet/255`.
+
+- Si `bpy.types.Object` possède `dmx_patch`, l'extension remplit
+  `obj.dmx_patch.universe` et `obj.dmx_patch.address` sur la racine de chaque
+  appareil patché, pour que le panneau de patch de DMX Visualizer les liste.
+  Sinon, rien. Aucune autre propriété de `dmx_patch` n'est touchée.
+- Rien n'est image clé dans la timeline : Blender n'est qu'un visualiseur.
+- Pièges rappelés pour l'implémentation : écrire une propriété de scène ne
+  marque pas le graphe de dépendances (`scene.update_tag()` puis
+  `view_layer.update()`) ; la vérification d'un driver se fait par un rendu
+  vers un fichier, pas par `evaluated_get` ; les objets doivent être dans une
+  collection de la couche de vue active.
+
+### 15.4 Brume pilotée par le hazer
+
+Paramètres `haze.dmx_driven`, `haze.fixture`, `haze.mode` (8.6). Le volume
+reste `Haze_Volume`.
+
+- `dmx_driven` décoché : comportement de 8.6, inchangé.
+- Coché : un `Hazer_01` est créé et patché (famille `hazer`) ; la densité
+  effective du volume est `haze.density · v_haze`, `v_haze` étant la valeur
+  normalisée de son canal `haze_density`. Les drivers existants de la densité
+  (lus sur la scène) reçoivent ce facteur ; l'animation de `haze.density`
+  continue de fonctionner. Valeur de repos : `rest.haze_level` (1 : la
+  densité réglée dans le panneau).
+- Alerte « Brume DMX Visualizer (World, `DMX_Haze`) active : la brume serait
+  comptée deux fois » si le monde de la scène a un nœud Volume Scatter nommé
+  `DMX_Haze` relié à la sortie du monde. Calculée à la reconstruction ; le
+  dessin du panneau ne lit que la valeur Python.
+
+## 16. Export QLC+
+
+Un opérateur du panneau (« Exporter QLC+ », `theatre.export_qlc`) écrit un
+espace de travail QLC+ qui reprend le patch : **une seule table de canaux**
+pour Blender et pour la console. `core/qlc.py` produit le texte XML ; il ne
+dépend ni de Blender ni d'une installation de QLC+. QLC+ est installé dans
+`C:\QLC+` (définitions de fixtures annoncées en 4.13.1).
+
+### 16.1 Fichiers écrits
+
+Dans `bpy.utils.extension_path_user(__package__, path="qlc", create=True)`,
+écrasés à chaque export, jamais dans `C:\QLC+` :
+
+- `theatre_rig.qxw` ;
+- `fixtures/<Fabricant>-<Modèle>.qxf` pour chaque fiche utilisée sans
+  définition QLC+ vérifiée (16.4) : Esprite, PC, Source Four, hazer.
+
+Les `.qxf` sont à copier dans le dossier de fixtures de l'utilisateur de
+QLC+ (`%USERPROFILE%\QLC+\Fixtures` *(à vérifier à l'installation)*) avant
+d'ouvrir le `.qxw` : sans définition installée, QLC+ charge l'appareil en
+générique. Le panneau affiche le dossier d'export et un bouton pour l'ouvrir.
+
+### 16.2 Contenu du `.qxw`
+
+Squelette et conventions du fichier de projet QLC+ (adresses et indices de
+canal à base 0, univers `ID = u − 1`) :
+
+- `Creator` : `Q Light Controller Plus`, auteur `theatre_stage`.
+- `InputOutputMap` : un `Universe` par univers patché, `Name="Univers u"`,
+  sans plugin de sortie (l'utilisateur règle E1.31 / sACN dans QLC+).
+- Un `Fixture` par appareil patché : `Manufacturer`, `Model`, `Mode`
+  (définition QLC+ ou `.qxf` exporté), `ID` de 0 à n dans l'ordre du patch
+  (15.1), `Name` = nom de la racine, `Universe`, `Address = a − 1`,
+  `Channels = footprint`.
+- Un `FixtureGroup` par circuit et par famille de mobiles (15.1) :
+  `Name`, `Size X="n" Y="1"`, un `Head X="i" Y="0" Fixture="id"` par appareil,
+  contenu `0` (indice de tête).
+- Deux scènes (`Function Type="Scene"`) : `Repos - positions` (pan, pan fin,
+  tilt, tilt fin de chaque mobile, octets de 12.4) et `Repos - plein feu`
+  (tous les canaux patchés à la valeur de repos, 15.2). Format
+  `FixtureVal ID="f"` : paires `indice,valeur`.
+- **Palette de position** : une palette `PanTilt` par mobile, nommée
+  `Repos_<racine>`, valeur `pan,tilt` (entiers 16 bits, 0–65535) *(à vérifier)*.
+  Une palette porte une seule valeur pour tous les appareils sélectionnés :
+  la visée de chaque mobile étant individuelle, c'est la scène
+  `Repos - positions` qui rappelle l'ensemble, les palettes servent à
+  rappeler un appareil seul *(choix)*.
+- `VirtualConsole` : cadre racine vide, `SimpleDesk` vide.
+
+**Vérification de la grammaire avant d'écrire le code** (règle du projet de
+QLC+) : `FixtureGroup`, `Size`, `Head` et `Palette` (attributs `Type`, `Name`,
+`Value`) viennent de `fixturegroup.cpp` et `qlcpalette.cpp` ; le nom de
+l'élément `Palette`, son parent dans `Engine` et la plage des valeurs
+pan/tilt se confirment par un aller-retour dans l'interface de QLC+ (créer
+une palette, enregistrer, lire le fichier). Un nom d'élément faux est ignoré
+sans erreur.
+
+### 16.3 `.qxf` écrit depuis la fiche
+
+Un `.qxf` par fiche, structure des définitions de QLC+ : `Creator`,
+`Manufacturer`, `Model`, `Type`, des `Channel`, un `Mode` par mode de la
+fiche, `Physical`.
+
+- `Type` : `Moving Head` (familles `moving_*`), `Color Changer` (`pc`,
+  `profile`), `Smoke` (`hazer`).
+- `Channel` : un par offset ; un canal 16 bits donne deux canaux QLC+
+  (`<Nom>` et `<Nom> Fine`). Préréglages QLC+ employés quand ils existent :
+  `IntensityDimmer`, `IntensityRed`, `IntensityGreen`, `IntensityBlue`,
+  `PositionPan`, `PositionPanFine`, `PositionTilt`, `PositionTiltFine`,
+  `BeamZoomBigSmall`. Les autres (et tout attribut inconnu) : canal sans
+  préréglage, capacité unique `Min="0" Max="255"`, nom = attribut ; plages
+  du `strobe` et des `gobo` reprises de la fiche.
+- `Mode` : `Channel Number="n"` avec `n = offset − 1` (et celui du canal fin),
+  un seul `Head` listant tous les canaux.
+- `Physical` : `Bulb` (`Lumens` = `optics.flux`), `Dimensions` (`Weight` en
+  kg ; `Width`, `Height`, `Depth` en mm d'après `physical.dimensions`),
+  `Lens` (`DegreesMin`, `DegreesMax` d'après `field_angle`), `Focus` (`PanMax`,
+  `TiltMax` d'après les courses).
+
+### 16.4 MAC Aura : contrôle contre QLC+
+
+QLC+ fournit `C:\QLC+\Fixtures\Martin\Martin-MAC-Aura.qxf` : mode `Standard`
+(14 canaux : obturateur, dimmer, zoom, pan et pan fin, tilt et tilt fin,
+contrôle, roue de couleurs, R, V, B, W, CTC) et mode `Extended` (25 canaux,
+avec les effets et le second tête « Aura »).
+
+`tools/check_qlc_fixture.py <fixture.yaml> <définition.qxf>` compare, mode
+par mode : nombre de canaux, ordre, correspondance attribut ↔ canal QLC+
+(préréglage ou nom), paires gros/fin consécutives pour les 16 bits. Si un
+mode de la fiche `martin_mac_aura` coïncide avec `Standard` (ou `Extended`),
+la fiche reçoit `qlc: {manufacturer: Martin, model: MAC Aura, modes:
+{<mode de la fiche>: Standard}, verified: <date>}` : l'export n'écrit pas de
+`.qxf` pour cette fiche et le `.qxw` cite la définition de QLC+. Sinon, ou
+sans clé `qlc`, l'export écrit son propre `.qxf` ; il n'emploie jamais une
+définition de QLC+ qui n'a pas été vérifiée. Le patch par défaut de la
+famille `backlight` utilise le mode de la fiche qui correspond à `Standard`
+*(choix)*.
+
+## 17. Hors périmètre v1
 
 Voir `BACKLOG.md`.
