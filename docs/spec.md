@@ -574,11 +574,13 @@ Pour voir les faisceaux, sans alourdir le rendu.
   `D`, entre les murs (salle et cage), du sol de salle au plus haut du
   plafond de salle et du gril ; le plateau et ses volumes sont dedans. La
   brume reste homogène.
-- Étendue « plateau » : la cage `Wk`, du plancher au gril, de `D` jusqu'à
+- Étendue « plateau » : même largeur et même hauteur que la boîte « plateau
+  et salle » (une boîte limitée à la cage aurait ses côtés, son dessus et
+  son dessous en plein vide dans la zone de fondu), de `D` jusqu'à
   `Ys − falloff` côté salle. La densité décroît linéairement de la façade
   (`Y = Ys`, pleine densité) à `Ys − falloff` (zéro), par un dégradé en
   coordonnées objet. Ce volume n'est plus homogène : Cycles le parcourt pas
-  à pas et la qualité EEVEE compte ; surcoût mesuré et noté ci-dessous.
+  à pas. Surcoût mesuré et noté ci-dessous.
 - `TS_Haze` : Volume Scatter **homogène** en étendue « plateau et salle »
   (pas de texture de bruit), pas de surface. Densité et
   anisotropie viennent de la scène par **drivers**, comme l'ouverture du
