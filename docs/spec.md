@@ -422,9 +422,15 @@ porteuses lumière, à `Z = Zb`.
 - `MainCurtain_L` / `MainCurtain_R` dans le plan `Y = Yc + 0,15`, de `Z = Hp`
   à `Hp + Hc + 0,30` (le haut se cache derrière le linteau).
 - Fermé : chaque lé va du centre (chevauchement de 0,15 au-delà de l'axe)
-  jusqu'à `±(Wc/2 + 0,30)`, rentré derrière les montants. Ouvert : chaque lé
-  est ramassé contre son bord extérieur sur 15 % de sa largeur fermée,
-  plis d'amplitude 0,20 *(choix)*. Même nombre de plis dans les deux états.
+  jusqu'à `±(W/2 − 0,05)`, son bord extérieur caché derrière le montant du
+  cadre.
+- Ouvert : chaque lé est ramassé **entièrement derrière son montant**, de
+  `Wc/2 + 0,05` à `W/2 − 0,05` en valeur absolue, plis d'amplitude 0,20
+  *(choix)*. Le rideau ouvert ne mord jamais sur l'ouverture `[−Wc/2, Wc/2]`
+  (les plis partent en Y, seule l'étendue en X compte). Si le montant est
+  trop étroit (`Tc − 0,10 < 0,30`), le paquet garde 0,30 de large, déborde
+  dans l'ouverture et une alerte le signale. Même nombre de plis dans les
+  deux états.
 - Le maillage a pour forme de base l'état fermé et une clé de forme `Open`
   pour l'état ouvert. Un **driver** règle la valeur de `Open` à
   `main_opening / 100`, lu sur la propriété de scène. Des images clés posées
@@ -463,7 +469,8 @@ Calculées dans `core`, rédigées en français, affichées dans le panneau :
 - profondeur de cage insuffisante pour une porteuse ;
 - rues de moins de 0,60 m ;
 - ouverture du pendrillonnage plus large que la cage ;
-- frises sans hauteur utile.
+- frises sans hauteur utile ;
+- rideau de scène ouvert visible dans l'ouverture (montants trop étroits).
 
 ## 11. Vérification
 
