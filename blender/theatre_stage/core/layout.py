@@ -335,23 +335,51 @@ def _arrival_length(s: int, W: float, Ys: float, edges) -> float:
                default=0.0)
 
 
+def _landing_corners(theta: float, u0: float, yback: float, depth: float, width: float):
+    """Start edge (P, Q) and landing polygon in mirrored plan coordinates (u outward).
+
+    The landing is the right trapezoid between the support line (back line for
+    |theta| <= 45 degrees, flank otherwise) and the flight start edge.
+    """
+    cos, sin = math.cos(theta), math.sin(theta)
+    if abs(math.degrees(theta)) <= 45.0 + EPS:
+        vp = yback - depth - (width * sin if theta > 0 else 0.0)
+        p, q = (u0, vp), (u0 + width * cos, vp + width * sin)
+        polygon = [(u0, yback), (u0 + width * cos, yback), q, p]
+    elif theta > 0:
+        q = (u0 + depth + width * cos, yback)
+        p = (u0 + depth, yback - width * sin)
+        polygon = [(u0, yback), q, p, (u0, p[1])]
+    else:
+        p = (u0 - width * cos, yback)
+        q = (u0, yback - width * -sin)
+        polygon = [p, q, (u0 + depth, q[1]), (u0 + depth, yback)]
+    return p, q, polygon
+
+
+def _clean(polygon) -> tuple:
+    out = []
+    for point in polygon:
+        if not out or math.dist(point, out[-1]) > 1e-9:
+            out.append(point)
+    if len(out) > 1 and math.dist(out[0], out[-1]) <= 1e-9:
+        out.pop()
+    return tuple(out)
+
+
+def _area(poly) -> float:
+    return abs(sum(a[0] * b[1] - b[0] * a[1] for a, b in zip(poly, poly[1:] + poly[:1]))) / 2
+
+
 def _side_stair(s: int, W: float, Ys: float, n: int, st: Mapping) -> SideStair:
     Ws, going, offset, depth = st["width"], st["going"], st["side_offset"], st["landing_depth"]
     theta = math.radians(st["side_angle"])
     d = (s * math.sin(theta), -math.cos(theta))
-    x0 = W / 2 + offset
-    yback = Ys if offset >= 0 else 0.0
-    front_dominant = abs(st["side_angle"]) <= 45.0
-    if front_dominant:
-        box = (x0, yback - depth, x0 + Ws, yback)
-        start = (s * (x0 + Ws / 2), yback - depth)
-    else:
-        box = (x0, yback - Ws, x0 + depth, yback)
-        start = (s * (x0 + (depth if theta > 0 else 0.0)), yback - Ws / 2)
-    landing = None
-    if depth > EPS:
-        landing = tuple((s * x, y) for x, y in ((box[0], box[1]), (box[2], box[1]),
-                                                (box[2], box[3]), (box[0], box[3])))
+    p, q, polygon = _landing_corners(theta, W / 2 + offset, Ys if offset >= 0 else 0.0, depth, Ws)
+    start = (s * (p[0] + q[0]) / 2, (p[1] + q[1]) / 2)
+    landing = _clean([(s * u, v) for u, v in polygon])
+    if len(landing) < 3 or _area(landing) < 1e-9:
+        landing = None
     steps = tuple(_oriented_rect(start, d, (j - 1) * going, j * going, -Ws / 2, Ws / 2)
                   for j in range(1, n))
     length = (n - 1) * going
@@ -360,8 +388,9 @@ def _side_stair(s: int, W: float, Ys: float, n: int, st: Mapping) -> SideStair:
                  if clear > 0 else None)
     shapes = ([landing] if landing else []) + list(steps) + ([clearance] if clearance else [])
     footprint = max(abs(x) for poly in shapes for x, _ in poly) - W / 2
-    top = _oriented_rect(start, d, 0.0, 0.0, -Ws / 2, Ws / 2)
-    edges = [(landing[i], landing[(i + 1) % 4]) for i in range(4)] if landing else [(top[0], top[3])]
+    top = [(s * p[0], p[1]), (s * q[0], q[1])]
+    edges = ([(landing[i], landing[(i + 1) % len(landing)]) for i in range(len(landing))]
+             if landing else [tuple(top)])
     arrival = _arrival_length(s, W, Ys, edges)
     return SideStair(start, d, math.atan2(d[1], d[0]), landing, steps, clearance, footprint, arrival)
 
@@ -579,9 +608,8 @@ def _stairs(c: Ctx) -> Part:
         geo = _side_stair(s, c.W, c.Ys, n, st)
         sides.append((s, label, geo))
         if geo.landing:
-            objs.append(_box(f"Stairs_Landing_{tag}", "TS_Stairs", STAIRS,
-                             (min(p[0] for p in geo.landing), min(p[1] for p in geo.landing), 0.0),
-                             (max(p[0] for p in geo.landing), max(p[1] for p in geo.landing), Hp)))
+            objs.append(Prism(f"Stairs_Landing_{tag}", "TS_Stairs", STAIRS, "xy", (geo.landing,),
+                              0.0, Hp))
         origin = (*geo.start, 0.0)
         for j in range(1, n):
             a0, a1 = (j - 1) * going, j * going

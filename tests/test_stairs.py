@@ -161,3 +161,116 @@ def test_no_landing_shrinks_the_side_zone_and_flight_start_follows_the_angle_sig
     inward = layout(stairs={"side_angle": -90.0, "side_offset": -2.0})
     outward = layout(stairs={"side_angle": 90.0, "side_offset": -2.0})
     assert min(v[0] for v in step_vertices(inward, "R")) < min(v[0] for v in step_vertices(outward, "R"))
+
+
+# ------------------------------------------------- slanted (trapezoid) landing
+
+def plan_points(lay, name, z=None):
+    pts = [(round(v[0], 9), round(v[1], 9)) for v in build_mesh(lay.find(name)).vertices
+           if z is None or abs(v[2] - z) < 1e-9]
+    return list(dict.fromkeys(pts))
+
+
+def hull(points):
+    pts = sorted(set(points))
+
+    def half(seq):
+        out = []
+        for p in seq:
+            while len(out) >= 2 and ((out[-1][0] - out[-2][0]) * (p[1] - out[-2][1])
+                                     - (out[-1][1] - out[-2][1]) * (p[0] - out[-2][0])) <= 1e-12:
+                out.pop()
+            out.append(p)
+        return out
+    lower, upper = half(pts), half(pts[::-1])
+    return lower[:-1] + upper[:-1]
+
+
+def clip(subject, clipper):
+    """Sutherland-Hodgman: convex `clipper` (counter-clockwise) against `subject`."""
+    out = list(subject)
+    for a, b in zip(clipper, clipper[1:] + clipper[:1]):
+        inside = lambda p: (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0]) >= -1e-12
+        src, out = out, []
+        for p, q in zip(src, src[1:] + src[:1]):
+            if inside(p):
+                out.append(p)
+            if inside(p) != inside(q):
+                t = ((a[0] - p[0]) * (b[1] - a[1]) - (a[1] - p[1]) * (b[0] - a[0])) / (
+                    (q[0] - p[0]) * (b[1] - a[1]) - (q[1] - p[1]) * (b[0] - a[0]))
+                out.append((p[0] + t * (q[0] - p[0]), p[1] + t * (q[1] - p[1])))
+        if not out:
+            return 0.0
+    return abs(sum(p[0] * q[1] - q[0] * p[1] for p, q in zip(out, out[1:] + out[:1]))) / 2
+
+
+def is_convex(poly):
+    signs = {round(math.copysign(1, (b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0])))
+             for a, b, c in zip(poly, poly[1:] + poly[:1], poly[2:] + poly[:2])
+             if abs((b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0])) > 1e-9}
+    return len(signs) == 1
+
+
+@pytest.mark.parametrize("angle", [30.0, 45.0, 60.0])
+@pytest.mark.parametrize("offset", [0.0, -2.0])
+def test_slanted_landing_fills_the_gap_between_the_support_line_and_the_flight(angle, offset):
+    lay = layout(stairs={"side_angle": angle, "side_offset": offset})
+    ys, setback = 1.2, 1.2
+    for tag, s in (("L", -1), ("R", 1)):
+        landing = hull(plan_points(lay, f"Stairs_Landing_{tag}", z=1.2))
+        assert len(landing) == 4 and is_convex(landing)
+        yback = setback if offset >= 0 else 0.0
+        support_dir = "back" if angle <= 45.0 else "flank"
+        x0 = s * (5.8 + offset)
+        on_support = [p for p in landing if abs(p[1] - yback) < 1e-6] if support_dir == "back" else \
+            [p for p in landing if abs(p[0] - x0) < 1e-6]
+        assert len(on_support) == 2
+        sides = [(a, b) for a, b in zip(landing, landing[1:] + landing[:1])]
+        perpendicular = [a_b for a_b in sides
+                         if (abs(a_b[0][0] - a_b[1][0]) < 1e-6 if support_dir == "back"
+                             else abs(a_b[0][1] - a_b[1][1]) < 1e-6)]
+        assert len(perpendicular) == 2
+        first = plan_points(lay, f"Stairs_Step_{tag}_01", z=1.0)
+        shared = [p for p in landing if any(math.dist(p, q) < 1e-6 for q in first)]
+        assert len(shared) == 2 and math.dist(*shared) == pytest.approx(1.2)
+        step_area = 0.0
+        for j in range(1, 6):
+            step = hull(plan_points(lay, f"Stairs_Step_{tag}_{j:02d}", z=(6 - j) * 0.2))
+            step_area += clip(landing, step if step_orientation(step) else step[::-1])
+        assert step_area == pytest.approx(0.0, abs=1e-9)
+        plateau = [[(-5.8, 0.0), (5.8, 0.0), (5.8, 1.6), (-5.8, 1.6)],
+                   [(-7.0, 1.6), (7.0, 1.6), (7.0, 7.0), (-7.0, 7.0)]]
+        assert sum(clip(landing, rect) for rect in plateau) == pytest.approx(0.0, abs=1e-9)
+
+
+def step_orientation(poly):
+    area = sum(p[0] * q[1] - q[0] * p[1] for p, q in zip(poly, poly[1:] + poly[:1]))
+    return area > 0
+
+
+def test_slanted_landing_short_side_is_the_landing_depth():
+    for angle, depth in ((30.0, 1.2), (45.0, 0.5), (60.0, 0.8)):
+        lay = layout(stairs={"side_angle": angle, "landing_depth": depth})
+        landing = hull(plan_points(lay, "Stairs_Landing_R", z=1.2))
+        support = [p for p in landing if abs(p[1] - 1.2) < 1e-6] if angle <= 45.0 else \
+            [p for p in landing if abs(p[0] - 5.8) < 1e-6]
+        others = [p for p in landing if p not in support]
+        gap = min((1.2 - p[1]) if angle <= 45.0 else (p[0] - 5.8) for p in others)
+        assert gap == pytest.approx(depth)
+
+
+def test_no_landing_at_an_intermediate_angle_is_a_triangle_and_still_arrives_by_its_edge():
+    lay = layout(stairs={"side_angle": 45.0, "landing_depth": 0.0})
+    triangle = hull(plan_points(lay, "Stairs_Landing_R", z=1.2))
+    assert len(triangle) == 3
+    first = plan_points(lay, "Stairs_Step_R_01", z=1.0)
+    assert sum(any(math.dist(p, q) < 1e-6 for q in first) for p in triangle) == 2
+    assert not arrival_warnings(lay)
+
+
+def test_landing_is_unchanged_at_0_and_90_degrees():
+    zero = layout(stairs={"side_angle": 0.0, "landing_depth": 0.5})
+    assert approx_bounds(bounds(zero, "Stairs_Landing_R"), ((5.8, 7.0), (0.7, 1.2), (0.0, 1.2)))
+    assert len(plan_points(zero, "Stairs_Landing_R", z=1.2)) == 4
+    ninety = layout(stairs={"side_angle": 90.0})
+    assert approx_bounds(bounds(ninety, "Stairs_Landing_R"), ((5.8, 7.0), (0.0, 1.2), (0.0, 1.2)))
