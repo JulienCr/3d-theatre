@@ -24,6 +24,10 @@ every dimension rule, default value and object name.
 - Dev install: the extension folder is a junction from
   `%APPDATA%\Blender Foundation\Blender\5.3\extensions\user_default\theatre_stage`
   to `blender/theatre_stage`. Edit sources here, never in AppData.
+- Enable: `bpy.ops.extensions.repo_refresh_all()` then
+  `addon_enable("bl_ext.user_default.theatre_stage")` (this also syncs the
+  PyYAML wheel). Reload: disable, drop `sys.modules` entries under the
+  package, enable. "Failed to remove _yaml…pyd" on disable is harmless.
 
 ## Verify
 
