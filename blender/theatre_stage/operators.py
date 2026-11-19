@@ -14,7 +14,7 @@ from .core import presets
 SHIPPED = "shipped"
 USER = "user"
 
-_items_cache: list = []
+_item_pool: dict[tuple, tuple] = {}
 preset_warnings: list[str] = []
 _selected = ""
 
@@ -35,10 +35,12 @@ def list_presets() -> list[tuple[str, str, Path]]:
 
 
 def preset_items(self, context):
-    global _items_cache
-    _items_cache = [(ident, label, "Préréglage livré" if ident.startswith(SHIPPED)
-                     else "Préréglage utilisateur") for ident, label, _ in list_presets()]
-    return _items_cache
+    """Enum items; the tuples (and their strings) live in a module pool Blender can point at."""
+    items = []
+    for ident, label, _ in list_presets():
+        info = "Préréglage livré" if ident.startswith(SHIPPED) else "Préréglage utilisateur"
+        items.append(_item_pool.setdefault((ident, label, info), (ident, label, info)))
+    return items
 
 
 def _get_preset(self) -> int:

@@ -122,6 +122,7 @@ class THEATRE_PT_derived(_SubPanel):
         box = self.layout.box()
         col = box.column(align=True)
         col.label(text=f"Largeur hors tout : {_metres(d.total_width)}")
+        col.label(text=f"Ouverture du cadre : {_metres(d.frame_opening)}")
         col.label(text=f"Largeur de cage : {_metres(d.cage_width)}")
         col.label(text=f"Zone latérale : {_metres(d.side_zone)}")
         col.label(text=f"Contremarches : {d.risers_count} × {_metres(d.riser_height)}")
@@ -137,8 +138,7 @@ class THEATRE_PT_alerts(_SubPanel):
     def draw(self, context):
         layout = _layout(context)
         messages = list(layout.warnings)
-        messages += [f"Objet non généré laissé en place : {name}."
-                     for name in build.foreign_objects(layout)]
+        messages += [f"Objet non généré laissé en place : {name}." for name in build.foreign_names]
         messages += operators.preset_warnings
         if not messages:
             self.layout.label(text="Aucune alerte.", icon="CHECKMARK")

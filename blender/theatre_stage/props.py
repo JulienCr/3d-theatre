@@ -7,6 +7,7 @@ params dict is built. Nothing here names a parameter: the schema drives it all.
 from __future__ import annotations
 
 import math
+import traceback
 from collections.abc import Mapping
 from contextlib import contextmanager
 
@@ -22,8 +23,11 @@ from .core.params import Group, Param
 
 SCENE_ATTR = "theatre"
 
+REBUILD_DELAY = 0.15
+
 _lock_depth = 0
 _pending = False
+_deferred_scene: str | None = None
 
 
 def is_locked() -> bool:
@@ -31,8 +35,8 @@ def is_locked() -> bool:
 
 
 @contextmanager
-def batch(scene):
-    """Silence rebuild callbacks; rebuild once on exit if any param asked for it."""
+def batch(scene, deferred: bool = False):
+    """Silence rebuild callbacks; rebuild once on exit (through the timer if `deferred`)."""
     global _lock_depth, _pending
     _lock_depth += 1
     try:
@@ -41,15 +45,40 @@ def batch(scene):
         _lock_depth -= 1
         if _lock_depth == 0 and _pending:
             _pending = False
-            rebuild_scene(scene)
+            if deferred:
+                schedule_rebuild(scene)
+            else:
+                rebuild_scene(scene)
 
 
 def request_rebuild(scene) -> None:
+    """Ask for a rebuild: remembered while locked, otherwise deferred to a timer."""
     global _pending
     if _lock_depth > 0:
         _pending = True
     else:
-        rebuild_scene(scene)
+        schedule_rebuild(scene)
+
+
+def schedule_rebuild(scene) -> None:
+    """Coalesce update callbacks (a slider drag) into one timer-driven rebuild."""
+    global _deferred_scene
+    idle = _deferred_scene is None
+    _deferred_scene = scene.name
+    if idle:
+        bpy.app.timers.register(_run_deferred, first_interval=REBUILD_DELAY)
+
+
+def _run_deferred():
+    global _deferred_scene
+    name, _deferred_scene = _deferred_scene, None
+    scene = bpy.data.scenes.get(name) if name else None
+    if scene is not None:
+        try:
+            rebuild_scene(scene)
+        except Exception:
+            traceback.print_exc()
+    return None
 
 
 def rebuild_scene(scene) -> None:
@@ -92,7 +121,7 @@ def _make_update(group: Group, param: Param):
         if is_locked():
             request_rebuild(scene)
             return
-        with batch(scene):
+        with batch(scene, deferred=True):
             if mirrors and not self.symmetric:
                 _copy_set(self.left, self.right, group.side_params)
             request_rebuild(scene)
@@ -184,6 +213,10 @@ def register() -> None:
 
 
 def unregister() -> None:
+    global _deferred_scene
+    if bpy.app.timers.is_registered(_run_deferred):
+        bpy.app.timers.unregister(_run_deferred)
+    _deferred_scene = None
     delattr(bpy.types.Scene, SCENE_ATTR)
     for cls in reversed(CLASSES):
         bpy.utils.unregister_class(cls)

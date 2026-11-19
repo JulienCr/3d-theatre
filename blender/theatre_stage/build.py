@@ -26,6 +26,7 @@ ROUGHNESS = {
 }
 
 _layout_cache: tuple[str, Layout] | None = None
+foreign_names: list[str] = []
 
 
 def cached_layout(params: dict) -> Layout:
@@ -60,16 +61,15 @@ def ensure_collections(scene, layout: Layout) -> dict[str, bpy.types.Collection]
     return out
 
 
-def foreign_objects(layout: Layout) -> list[str]:
-    """Names of untagged objects sitting in the Theatre collections."""
-    root = bpy.data.collections.get(layout.root_collection)
-    if root is None:
-        return []
-    return sorted(o.name for o in root.all_objects if not is_generated(o))
+def _walk_objects(collection):
+    """Objects of a collection tree, without the `all_objects` cache."""
+    yield from collection.objects
+    for child in collection.children:
+        yield from _walk_objects(child)
 
 
 def _delete_generated(root) -> None:
-    doomed = [o for o in root.all_objects if is_generated(o)]
+    doomed = [o for o in _walk_objects(root) if is_generated(o)]
     datablocks = [(o.data, o.type) for o in doomed if o.data is not None]
     for obj in doomed:
         bpy.data.objects.remove(obj, do_unlink=True)
@@ -80,6 +80,24 @@ def _delete_generated(root) -> None:
 
 
 # --------------------------------------------------------------- materials
+
+def _setup_ceiling_material(mat: bpy.types.Material) -> None:
+    """Hide the back face in EEVEE and the viewport (culling) and in Cycles (Backfacing mix)."""
+    mat.use_backface_culling = True
+    nodes, links = mat.node_tree.nodes, mat.node_tree.links
+    bsdf = nodes.get("Principled BSDF")
+    output = next(n for n in nodes if n.type == "OUTPUT_MATERIAL")
+    geometry = nodes.new("ShaderNodeNewGeometry")
+    clear = nodes.new("ShaderNodeBsdfTransparent")
+    mix = nodes.new("ShaderNodeMixShader")
+    links.new(geometry.outputs["Backfacing"], mix.inputs["Fac"])
+    links.new(bsdf.outputs["BSDF"], mix.inputs[1])
+    links.new(clear.outputs["BSDF"], mix.inputs[2])
+    links.new(mix.outputs["Shader"], output.inputs["Surface"])
+
+
+MATERIAL_SETUP = {"TS_HouseCeiling": _setup_ceiling_material}
+
 
 def get_material(name: str, colors) -> bpy.types.Material:
     """Existing material by name, never modified; created with its colour otherwise."""
@@ -95,6 +113,8 @@ def get_material(name: str, colors) -> bpy.types.Material:
     if bsdf is not None:
         bsdf.inputs["Base Color"].default_value = color
         bsdf.inputs["Roughness"].default_value = ROUGHNESS.get(name, 0.6)
+    if name in MATERIAL_SETUP:
+        MATERIAL_SETUP[name](mat)
     return mat
 
 
@@ -245,5 +265,7 @@ def rebuild(scene: bpy.types.Scene, params: dict) -> Layout:
 
     if scene.camera is None or is_generated(scene.camera):
         scene.camera = cameras.get(wanted_camera) or cameras.get("Cam_Face")
+    foreign_names[:] = sorted(o.name for o in _walk_objects(collections[layout.root_collection])
+                              if not is_generated(o))
     scene.update_tag()
     return layout
