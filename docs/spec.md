@@ -140,8 +140,12 @@ cotes ; le plan SVG indique 1,00 × 2,40.
 
 | Clé | Libellé | Défaut | Bornes |
 |---|---|---|---|
-| `distance` | Distance au nez de scène *(choix)* | 10,00 | 2 – 60 |
-| `height` | Hauteur au-dessus du sol de salle *(choix)* | 2,50 | 0,5 – 30 |
+| `distance` | Distance au nez de scène *(choix)* | 11,00 | 2 – 60 |
+| `height` | Hauteur au-dessus du sol de salle *(choix)* | 3,00 | 0,5 – 30 |
+| `lens` | Focale (mm) *(choix)* | 22 | 10 – 200 |
+
+Valeurs réglées sur capture pour retrouver le cadrage de
+`scene-vue-artiste.png`.
 
 ### 3.8 Pendrillonnage — `masking`
 
@@ -196,10 +200,13 @@ murs de cage 0,20 ; parement de plancher 0,03 ; liseré du nez 0,05 ;
 
 ### 5.1 Salle et enceinte (matériau `TS_Enclosure`, rouge)
 
+- Profondeur de salle dessinée : `Yh = max(A, cameras.distance + 1,00)`, pour
+  que les caméras ne voient pas de vide sous elles. La salle reste un sol et
+  deux murs nus (pas de gradins).
 - `House_Floor` : dalle grise (`TS_HouseFloor`), X sur `[−Wt/2, Wt/2]`,
-  Y sur `[−A, Ys]`, Z de −0,10 à 0.
+  Y sur `[−Yh, Ys]`, Z de −0,10 à 0.
 - `House_Wall_L` / `House_Wall_R` : face intérieure à `X = ∓Wt/2`,
-  épaisseur 0,30 vers l'extérieur, Y sur `[−A, Ys]`, Z de 0 à la façade.
+  épaisseur 0,30 vers l'extérieur, Y sur `[−Yh, Ys]`, Z de 0 à la façade.
 - `Facade` : face avant à `Y = Ys`, épaisseur 0,30, rectangle
   `[−Wt/2, Wt/2] × [0, facade_height]` **percé** de
   `[−W/2, W/2] × [0, Hp + Hc + lintel_height]`. Le plateau passe dans le
@@ -314,8 +321,8 @@ dessus.
 ### 5.10 Caméras
 
 `Cam_Face` à `(0, −distance, height)`, `Cam_Jardin` et `Cam_Cour` à
-`X = ∓0,75·W/2`, même Y et Z. Toutes visent `(0, D/2, Hp + 1,00)`, objectif
-35 mm. `Cam_Face` devient la caméra de scène si la scène n'en a pas ou si la
+`X = ∓0,75·W/2`, même Y et Z. Toutes visent `(0, D/2, Hp + 1,00)`, focale
+`lens`. `Cam_Face` devient la caméra de scène si la scène n'en a pas ou si la
 caméra active est une caméra générée.
 
 ## 6. Matériaux
