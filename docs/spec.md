@@ -92,7 +92,9 @@ le nez et la façade.
 | `riser_max` | Contremarche maximale | 0,20 | 0,10 – 0,25 |
 | `going` | Giron | 0,30 | 0,20 – 0,45 |
 | `width` | Largeur des escaliers latéraux | 1,20 | 0,60 – 3 |
-| `side_angle` | Angle des escaliers latéraux (0° salle, 90° mur) | 90° | 0 – 90 |
+| `side_angle` | Angle des escaliers latéraux (−90° centre, 0° salle, 90° mur) | 90° | −90 – 90 |
+| `side_offset` | Décalage latéral du palier (+ vers le mur, − vers le centre) | 0,00 | −10 – 10 |
+| `clearance` | Dégagement au pied de l'escalier *(choix)* | 1,00 | 0 – 5 |
 | `center_width` | Largeur de l'escalier central *(choix)* | 2,00 | 0,60 – 10 |
 
 ### 3.4 Modules — `modules`
@@ -201,7 +203,8 @@ murs de cage 0,20 ; parement de plancher 0,03 ; liseré du nez 0,05 ;
   **La même valeur s'applique des deux côtés** : l'enceinte reste
   symétrique.
 - Largeur hors tout : `Wt = W + 2·Z`. Avec les escaliers à 0°, on retrouve
-  les 14,00 m des références ; à 90°, 17,00 m.
+  les 14,00 m des références ; à 90°, 19,00 m (palier 1,20 + volée 1,50 +
+  dégagement 1,00 de chaque côté).
 - Escaliers : nombre de contremarches `n = ceil(Hp / riser_max)` (avec une
   tolérance de 1e-9 pour que 1,20 / 0,20 donne 6), contremarche réelle
   `Hp / n`, `n − 1` marches sous le palier, volée de longueur
@@ -275,21 +278,32 @@ murs de cage 0,20 ; parement de plancher 0,03 ; liseré du nez 0,05 ;
 
 ### 5.6 Escaliers latéraux (`TS_Stairs`)
 
-Pour le côté `s` (−1 jardin, +1 cour), `Ws` la largeur, `θ` l'angle :
+Pour le côté `s` (−1 jardin, +1 cour), `Ws` la largeur, `θ` l'angle, `o` le
+décalage latéral :
 
 - `Stairs_Landing_L/R` : palier carré de côté `Ws`, X sur
-  `s·[W/2, W/2 + Ws]`, Y sur `[Ys − Ws, Ys]`, Z de 0 à `Hp`. Adossé à la
-  façade, au droit du nez.
+  `s·[W/2 + o, W/2 + o + Ws]`, Z de 0 à `Hp`. Entièrement hors du plateau
+  (`o ≥ 0`), il est adossé à la façade : Y sur `[Ys − Ws, Ys]`. S'il passe
+  devant le plateau (`o < 0`), il est adossé au bandeau : Y sur `[−Ws, 0]`.
+  Sans recul de façade (`Ys = 0`) les deux coïncident.
 - Direction de descente `d = (s·sin θ, −cos θ)` : 0° vers la salle, 90° vers
-  le mur latéral.
+  le mur latéral, −90° vers le centre (le long du bandeau quand le palier y
+  est adossé).
+- Dégagement : un rectangle libre de profondeur `clearance` et de largeur
+  `Ws`, au-delà de la dernière marche, dans l'axe de la volée. **Aucun
+  escalier ne finit dans un mur** : le dégagement compte dans l'emprise.
+  Il n'est pas dessiné ; sa position est vérifiée par les tests.
 - Marche `j` (1 à `n − 1`, de la plus haute à la plus basse) `Stairs_Step_L_NN` :
   boîte pleine depuis le sol, dessus à `(n − j)·Hp/n`, occupant le long de
   `d` l'intervalle `[Ws/2 + (j−1)·going, Ws/2 + j·going]` compté depuis le
   centre du palier, et `[−Ws/2, Ws/2]` en travers. Aux angles
   intermédiaires, la première marche chevauche le palier : c'est voulu, pas
   de vide.
-- Emprise latérale requise, depuis le bord du plateau :
-  `Ws/2 + sin θ·(Ws/2 + L) + cos θ·Ws/2` (`Ws` à 0°, `Ws + L` à 90°).
+- Emprise latérale requise, depuis le bord du plateau : le plus grand
+  `|x| − W/2` atteint par le palier, les marches et le dégagement (`Ws` à
+  0°, `Ws + L + clearance` à 90°, avec `o = 0`).
+- Alertes : volées jardin et cour qui se croisent ou qui touchent
+  l'escalier central ; dégagement qui sort de la salle dessinée.
 
 ### 5.7 Escalier central (`TS_Stairs`)
 
