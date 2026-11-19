@@ -10,11 +10,12 @@ import bpy
 import numpy as np
 from mathutils import Vector
 
+from . import materials
 from .core.layout import Layout, compute_layout
 from .core.meshes import Mesh, build_mesh, pleated_mesh
 from .core.primitives import Light, PleatedSurface, Tube
 
-TAG = "theatre_generated"
+TAG = materials.TAG
 OPEN_KEY = "Open"
 OPENING_PATH = "theatre.curtains.main_opening"
 OPENING_EXPRESSION = "var / 100"
@@ -27,6 +28,7 @@ ROUGHNESS = {
 
 _layout_cache: tuple[str, Layout] | None = None
 foreign_names: list[str] = []
+rebuilding = False
 
 
 def cached_layout(params: dict) -> Layout:
@@ -61,15 +63,8 @@ def ensure_collections(scene, layout: Layout) -> dict[str, bpy.types.Collection]
     return out
 
 
-def _walk_objects(collection):
-    """Objects of a collection tree, without the `all_objects` cache."""
-    yield from collection.objects
-    for child in collection.children:
-        yield from _walk_objects(child)
-
-
 def _delete_generated(root) -> None:
-    doomed = [o for o in _walk_objects(root) if is_generated(o)]
+    doomed = [o for o in materials.walk_objects(root) if is_generated(o)]
     datablocks = [(o.data, o.type) for o in doomed if o.data is not None]
     for obj in doomed:
         bpy.data.objects.remove(obj, do_unlink=True)
@@ -192,15 +187,16 @@ def _add_fabric_modifiers(obj: bpy.types.Object) -> None:
     solidify.use_even_offset = True
 
 
-def _make_geometry(primitive, scene, collections, materials) -> bpy.types.Object:
+def _make_geometry(primitive, scene, collections, slot_materials) -> bpy.types.Object:
     mesh = _new_mesh(primitive.name, build_mesh(primitive))
     if isinstance(primitive, PleatedSurface):
         _smooth(mesh, quads_only=False)
     elif isinstance(primitive, Tube):
         _smooth(mesh, quads_only=True)
-    mesh.materials.append(materials[primitive.material])
+    mesh.materials.append(slot_materials[primitive.material])
     obj = bpy.data.objects.new(primitive.name, mesh)
     obj[TAG] = True
+    obj[materials.CATEGORY] = primitive.material
     collections[primitive.collection].objects.link(obj)
     if isinstance(primitive, PleatedSurface):
         _add_fabric_modifiers(obj)
@@ -248,6 +244,17 @@ def _make_camera(spec, collections) -> bpy.types.Object:
 
 def rebuild(scene: bpy.types.Scene, params: dict) -> Layout:
     """Delete every generated object of `scene` and recreate it from `params`."""
+    global rebuilding
+    rebuilding = True
+    try:
+        return _rebuild(scene, params)
+    finally:
+        rebuilding = False
+
+
+def _rebuild(scene: bpy.types.Scene, params: dict) -> Layout:
+    materials.ensure_items(scene)
+    materials.detect(scene)
     layout = cached_layout(params)
     collections = ensure_collections(scene, layout)
 
@@ -255,17 +262,20 @@ def rebuild(scene: bpy.types.Scene, params: dict) -> Layout:
     wanted_camera = active.name if active is not None and is_generated(active) else "Cam_Face"
     _delete_generated(collections[layout.root_collection])
 
-    materials = {name: get_material(name, layout.materials)
-                 for name in {p.material for p in layout.objects}}
+    chosen = materials.overrides(scene)
+    slot_materials = {}
+    for name in {p.material for p in layout.objects}:
+        default = get_material(name, layout.materials)
+        slot_materials[name] = chosen.get(name) or default
     for primitive in layout.objects:
-        _make_geometry(primitive, scene, collections, materials)
+        _make_geometry(primitive, scene, collections, slot_materials)
     for spec in layout.lights:
         _make_light(spec, collections)
     cameras = {spec.name: _make_camera(spec, collections) for spec in layout.cameras}
 
     if scene.camera is None or is_generated(scene.camera):
         scene.camera = cameras.get(wanted_camera) or cameras.get("Cam_Face")
-    foreign_names[:] = sorted(o.name for o in _walk_objects(collections[layout.root_collection])
+    foreign_names[:] = sorted(o.name for o in materials.walk_objects(collections[layout.root_collection])
                               if not is_generated(o))
     scene.update_tag()
     return layout

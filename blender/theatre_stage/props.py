@@ -34,6 +34,11 @@ def is_locked() -> bool:
     return _lock_depth > 0
 
 
+def is_busy() -> bool:
+    """True while a rebuild runs, is scheduled, or parameters are being applied."""
+    return _lock_depth > 0 or _deferred_scene is not None or build.rebuilding
+
+
 @contextmanager
 def batch(scene, deferred: bool = False):
     """Silence rebuild callbacks; rebuild once on exit (through the timer if `deferred`)."""

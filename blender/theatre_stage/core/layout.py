@@ -47,6 +47,24 @@ MATERIAL_COLORS: dict[str, tuple[float, float, float, float]] = {
     "TS_HouseCeiling": (0.15, 0.15, 0.15, 1.0),
 }
 
+MATERIAL_LABELS: dict[str, str] = {
+    "TS_Enclosure": "Façade, murs de salle, bandeau",
+    "TS_Proscenium": "Cadre",
+    "TS_Cage": "Cage de scène",
+    "TS_StageBase": "Structure du plateau",
+    "TS_StageFloor": "Plancher",
+    "TS_Nosing": "Liseré du nez",
+    "TS_HouseFloor": "Sol de salle",
+    "TS_Stairs": "Escaliers et paliers",
+    "TS_Module": "Modules",
+    "TS_Grid": "Gril",
+    "TS_Batten": "Porteuses",
+    "TS_Masking": "Pendrillons, frises, fond",
+    "TS_MainCurtain": "Rideau de scène",
+    "TS_Cyclorama": "Cyclorama",
+    "TS_HouseCeiling": "Plafond de salle",
+}
+
 # Constants not exposed as parameters (spec section 4 and 8).
 FACADE_THICKNESS = 0.30
 PROSCENIUM_DEPTH = 0.40

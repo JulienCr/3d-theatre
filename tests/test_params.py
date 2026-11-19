@@ -102,3 +102,12 @@ def test_module_sets_mirror_left_when_symmetric():
     assert left["height"] == right["height"] == 4.0
     params["modules"]["symmetric"] = False
     assert P.module_sets(params["modules"])[1]["height"] == 3.0
+
+
+def test_every_material_category_has_a_french_label_and_is_used_by_the_layout():
+    from core.layout import MATERIAL_COLORS, MATERIAL_LABELS
+    from helpers import layout
+    assert set(MATERIAL_LABELS) == set(MATERIAL_COLORS)
+    assert all(label and label[0].isupper() for label in MATERIAL_LABELS.values())
+    used = {o.material for o in layout(stairs={"center": True}).objects}
+    assert used <= set(MATERIAL_LABELS)

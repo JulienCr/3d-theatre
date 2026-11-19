@@ -8,7 +8,7 @@ from pathlib import Path
 import bpy
 from bpy.props import StringProperty
 
-from . import props
+from . import materials, props
 from .core import presets
 
 SHIPPED = "shipped"
@@ -118,7 +118,23 @@ class THEATRE_OT_save_preset(bpy.types.Operator):
         return {"FINISHED"}
 
 
-CLASSES = (THEATRE_OT_rebuild, THEATRE_OT_load_preset, THEATRE_OT_save_preset)
+class THEATRE_OT_reset_material(bpy.types.Operator):
+    bl_idname = "theatre.reset_material"
+    bl_label = "Matériau par défaut"
+    bl_description = "Revient au matériau TS_ par défaut de cette catégorie"
+
+    category: StringProperty()  # type: ignore[valid-type]
+
+    def execute(self, context):
+        item = materials.store_of(context.scene).get(self.category)
+        if item is None:
+            return {"CANCELLED"}
+        item.material = None
+        return {"FINISHED"}
+
+
+CLASSES = (THEATRE_OT_rebuild, THEATRE_OT_load_preset, THEATRE_OT_save_preset,
+           THEATRE_OT_reset_material)
 
 
 def register() -> None:

@@ -8,8 +8,9 @@ import textwrap
 
 import bpy
 
-from . import build, operators, props
+from . import build, materials, operators, props
 from .core import params as schema
+from .core.layout import MATERIAL_LABELS
 from .core.params import Group, Param
 
 MAIN_ID = "THEATRE_PT_main"
@@ -113,6 +114,25 @@ class THEATRE_PT_main(bpy.types.Panel):
         self.layout.operator("theatre.rebuild", icon="FILE_REFRESH")
 
 
+class THEATRE_PT_materials(_SubPanel):
+    bl_idname = "THEATRE_PT_materials"
+    bl_label = "Matériaux"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw(self, context):
+        store = materials.store_of(context.scene)
+        for category, label in MATERIAL_LABELS.items():
+            item = store.get(category)
+            if item is None:
+                self.layout.label(text=f"{label} : après reconstruction")
+                continue
+            row = self.layout.row(align=True)
+            row.prop(item, "material", text=label)
+            reset = row.row(align=True)
+            reset.enabled = item.material is not None
+            reset.operator("theatre.reset_material", text="", icon="X").category = category
+
+
 class THEATRE_PT_derived(_SubPanel):
     bl_idname = "THEATRE_PT_derived"
     bl_label = "Cotes calculées"
@@ -140,6 +160,7 @@ class THEATRE_PT_alerts(_SubPanel):
         messages = list(layout.warnings)
         messages += [f"Objet non généré laissé en place : {name}." for name in build.foreign_names]
         messages += operators.preset_warnings
+        messages += materials.warnings
         if not messages:
             self.layout.label(text="Aucune alerte.", icon="CHECKMARK")
         for message in messages:
@@ -159,7 +180,7 @@ class THEATRE_PT_presets(_SubPanel):
 
 
 GROUP_PANELS = [_group_panel(g) for g in schema.SCHEMA]
-CLASSES = (THEATRE_PT_main, *GROUP_PANELS, THEATRE_PT_derived, THEATRE_PT_alerts,
+CLASSES = (THEATRE_PT_main, *GROUP_PANELS, THEATRE_PT_materials, THEATRE_PT_derived, THEATRE_PT_alerts,
            THEATRE_PT_presets)
 
 
