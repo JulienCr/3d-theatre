@@ -388,7 +388,35 @@ donc à la régénération.
 | `TS_HouseCeiling` | plafond de salle, une face (section 5.1) | gris sombre |
 
 Tous les maillages reçoivent des UV en projection boîte, **1 unité UV =
-1 m**, pour que les textures BlenderKit tombent à la bonne échelle.
+1 m**, sans étirement. Les matériaux BlenderKit procéduraux n'ont pas
+d'échelle réelle : « Wood Floor », par exemple, donne des lames minuscules à
+son échelle d'origine et se règle par son entrée `Global Scale` (0,125 sur
+le plateau par défaut). On ne normalise pas les UV par objet : ce serait
+étirer le plancher et désaccorder les objets entre eux.
+
+### 6.1 Matériaux posés par l'utilisateur
+
+La **catégorie** d'un objet généré est son matériau `TS_*` par défaut.
+
+- Poser un matériau sur un objet généré (glisser-déposer BlenderKit,
+  sélecteur de Blender) le fait **retenir pour toute la catégorie** :
+  stocké sur la scène (catégorie → matériau, donc enregistré dans le
+  .blend, pas dans les préréglages YAML), réappliqué à chaque
+  reconstruction à tous les objets de la catégorie, y compris ceux qui
+  apparaissent ensuite (une rue de plus, etc.).
+- Détection : un objet généré dont le matériau n'est ni le `TS_*` par
+  défaut ni le matériau retenu pour sa catégorie porte un nouveau choix.
+  Elle a lieu au début de chaque reconstruction et par un timer léger
+  (1 s) qui propage aussitôt le choix aux autres objets de la catégorie en
+  changeant leur matériau, **sans reconstruire**. Deux choix différents
+  dans la même catégorie : le premier objet par ordre de nom l'emporte, et
+  une alerte le signale.
+- Le timer ne parcourt que les objets marqués `theatre_generated` de la
+  collection `Theatre`, ne modifie que des emplacements de matériau et ne
+  tourne pas pendant une reconstruction.
+- Sous-panneau « Matériaux » : une ligne par catégorie (libellé français,
+  sélecteur de matériau, bouton pour revenir au `TS_*` par défaut).
+- Le `TS_*` par défaut n'est jamais modifié ni supprimé.
 
 ## 7. Régénération et panneau
 
