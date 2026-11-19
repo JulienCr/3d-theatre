@@ -143,9 +143,29 @@ cotes ; le plan SVG indique 1,00 × 2,40.
 | `distance` | Distance au nez de scène *(choix)* | 10,00 | 2 – 60 |
 | `height` | Hauteur au-dessus du sol de salle *(choix)* | 2,50 | 0,5 – 30 |
 
-### 3.8 Pendrillonnage et rideaux — `masking`, `curtains`
+### 3.8 Pendrillonnage — `masking`
 
-À compléter après le tour 3 (section 8).
+| Clé | Libellé | Défaut | Bornes |
+|---|---|---|---|
+| `style` | Style de pendrillonnage | italienne | italienne / allemande |
+| `lanes` | Nombre de rues | 3 | 1 – 8 |
+| `opening` | Ouverture entre pendrillons *(choix)* | 8,00 | 2 – 30 |
+| `front_border` | Frise de face | oui | |
+| `borders` | Frises par plan (une case par plan) | toutes cochées | 8 booléens |
+| `border_bottom` | Bas des frises, au-dessus du plateau *(choix)* | 4,50 | 1 – 20 |
+| `backdrop` | Fond de scène | rideau noir | rideau noir / mur nu / cyclorama |
+
+Le panneau n'affiche que les `lanes` premières cases de `borders`.
+
+### 3.9 Rideau de scène — `curtains`
+
+| Clé | Libellé | Défaut | Bornes |
+|---|---|---|---|
+| `main_enabled` | Rideau de scène (à la grecque) | oui | |
+| `main_opening` | Ouverture du rideau (%) — **animable** | 100 | 0 – 100 |
+
+`main_opening` est le seul paramètre qui **ne reconstruit pas** la scène : il
+n'agit que par driver (section 8.5).
 
 ## 4. Cotes dérivées
 
@@ -220,8 +240,10 @@ murs de cage 0,20 ; parement de plancher 0,03 ; liseré du nez 0,05 ;
 - Porteuses `Batten_NN` (`TS_Batten`) : tubes Ø 0,048 parallèles au nez, de
   `X = −Wc/2 + 0,10` à `Wc/2 − 0,10`, à `Z = Hp + Hg − batten_drop`.
   Première à `Yc + 0,50`, puis tous les `batten_spacing`, dernière à 0,30 au
-  moins du fond. Numérotées de la face vers le fond. **Ces noms sont stables** :
-  les projecteurs s'y accrocheront dans une version suivante.
+  moins du fond. Une porteuse à moins de 0,30 en Y d'une porteuse de
+  pendrillonnage ou du plan du rideau de scène est retirée (section 8). Les
+  restantes sont numérotées de la face vers le fond, sans trou. Les
+  projecteurs s'y accrocheront dans une version suivante (voir `BACKLOG.md`).
 
 ### 5.6 Escaliers latéraux (`TS_Stairs`)
 
@@ -317,6 +339,7 @@ donc à la régénération.
 | `TS_Grid` / `TS_Batten` | gril, porteuses | métal sombre |
 | `TS_Masking` | pendrillons, frises, rideau de fond | velours noir |
 | `TS_MainCurtain` | rideau de scène | velours rouge |
+| `TS_Cyclorama` | cyclorama | blanc mat |
 
 Tous les maillages reçoivent des UV en projection boîte, **1 unité UV =
 1 m**, pour que les textures BlenderKit tombent à la bonne échelle.
@@ -325,7 +348,7 @@ Tous les maillages reçoivent des UV en projection boîte, **1 unité UV =
 
 - Collection racine `Theatre`, sous-collections `Theatre_Architecture`,
   `Theatre_Stairs`, `Theatre_Modules`, `Theatre_Grid`, `Theatre_Masking`,
-  `Theatre_Lights`, `Theatre_Cameras`.
+  `Theatre_Curtains`, `Theatre_Lights`, `Theatre_Cameras`.
 - Chaque objet généré porte la propriété personnalisée `theatre_generated`.
   La reconstruction supprime **uniquement** ces objets et leurs données
   orphelines, puis recrée tout. Un objet non marqué trouvé dans ces
@@ -341,7 +364,75 @@ Tous les maillages reçoivent des UV en projection boîte, **1 unité UV =
 
 ## 8. Pendrillonnage et rideaux
 
-À compléter après le tour 3.
+Pendrillons, frises et rideaux sont des **surfaces plissées sans épaisseur**
+(velours) : un pli tous les 0,30 m de largeur, amplitude 0,06, sauf mention
+contraire. Le cyclorama est plat (toile tendue). Tous pendent sous une
+porteuse de pendrillonnage, de `Z = Hp` à la hauteur des porteuses
+`Zb = Hp + Hg − batten_drop`.
+
+### 8.1 Plans en profondeur
+
+- Rideau de scène : plan `Y = Yc + 0,15`.
+- Frise de face : plan `Y = Yc + 0,35`.
+- Début de zone : `Y0 = Yc + 0,50`. Si au moins un module est présent,
+  `Y0 = max(Y0, Ymod + 0,20)`, avec `Ymod` le Y maximal de l'emprise des
+  modules présents : **les rues reculent derrière les modules**.
+- Ligne de fond `Yb` : mur nu → `D` ; rideau noir → `D − 0,40` ;
+  cyclorama → `D − 1,20`.
+- Fin de zone : `Y1 = Yb − 0,30`.
+- Plans de pendrillonnage `k = 1..N` (`N = lanes`) à
+  `Y0 + k·(Y1 − Y0)/N`. La rue `k` va du plan `k − 1` (le cadre ou les
+  modules pour `k = 1`) au plan `k` ; le dernier plan masque les bords du
+  fond.
+
+### 8.2 Porteuses de pendrillonnage (`TS_Batten`)
+
+Distinctes des porteuses lumière, elles pourront porter des projecteurs
+plus tard (en perroquet, voir `BACKLOG.md`). Mêmes tube et longueur que les
+porteuses lumière, à `Z = Zb`.
+
+- `MaskingBatten_NN` au plan `k` (`NN = k`) ;
+- `MaskingBatten_00` pour la frise de face, si elle est présente ;
+- `MaskingBatten_Back` pour le rideau noir ou le cyclorama ;
+- à l'allemande, en plus, `MaskingBatten_Side_L/R`, parallèles à Y au-dessus
+  des pendrillons latéraux, de `Y0` à `Y1`.
+
+### 8.3 Pendrillons (`TS_Masking`)
+
+- **À l'italienne** : `Leg_L_NN` / `Leg_R_NN` dans le plan `k`, de
+  `X = ∓opening/2` jusqu'à `∓(Wc/2 − 0,10)`. Ils vont du bord de l'ouverture
+  au mur de cage : pas de réglage de largeur. Ouverture plus large que la
+  cage → aucun pendrillon et alerte.
+- **À l'allemande** : `Leg_L` / `Leg_R` continus, parallèles à Y, à
+  `X = ∓opening/2`, de `Y0` à `Y1`. Pas de rues ; `lanes` ne fixe plus que
+  les plans des frises.
+
+### 8.4 Frises et fond
+
+- `Border_NN` au plan `k` si `borders[k]` est coché, `Border_00` (frise de
+  face) si `front_border` : largeur `Wc − 0,20`, de `Hp + border_bottom` à
+  `Zb`, posée 0,10 côté salle du plan pour couvrir le haut des pendrillons.
+  Si `border_bottom ≥ Zb − Hp` : aucune frise et alerte.
+- Fond : rideau noir `Backdrop` (`TS_Masking`, plissé, plan `Yb`, largeur
+  `Wc − 0,20`) ; mur nu : rien, `Cage_Back` est visible ; cyclorama
+  `Cyclorama` (`TS_Cyclorama`, plat, plan `Yb`, largeur `Wc − 0,60`).
+
+### 8.5 Rideau de scène à la grecque (`TS_MainCurtain`)
+
+- `MainCurtain_L` / `MainCurtain_R` dans le plan `Y = Yc + 0,15`, de `Z = Hp`
+  à `Hp + Hc + 0,30` (le haut se cache derrière le linteau).
+- Fermé : chaque lé va du centre (chevauchement de 0,15 au-delà de l'axe)
+  jusqu'à `±(Wc/2 + 0,30)`, rentré derrière les montants. Ouvert : chaque lé
+  est ramassé contre son bord extérieur sur 15 % de sa largeur fermée,
+  plis d'amplitude 0,20 *(choix)*. Même nombre de plis dans les deux états.
+- Le maillage a pour forme de base l'état fermé et une clé de forme `Open`
+  pour l'état ouvert. Un **driver** règle la valeur de `Open` à
+  `main_opening / 100`, lu sur la propriété de scène. Des images clés posées
+  sur `main_opening` animent donc le rideau à la lecture, sans
+  reconstruction. La reconstruction recrée le driver ; les images clés,
+  portées par la scène, survivent.
+- `core` fournit les deux états (positions de plis, largeurs, amplitudes) ;
+  `build.py` construit le maillage, la clé de forme et le driver.
 
 ## 9. Préréglages YAML
 
@@ -369,7 +460,10 @@ Calculées dans `core`, rédigées en français, affichées dans le panneau :
 - baie rognée ;
 - module qui sort de la cage ;
 - zone latérale élargie automatiquement (avec la largeur obtenue) ;
-- profondeur de cage insuffisante pour une porteuse.
+- profondeur de cage insuffisante pour une porteuse ;
+- rues de moins de 0,60 m ;
+- ouverture du pendrillonnage plus large que la cage ;
+- frises sans hauteur utile.
 
 ## 11. Vérification
 
@@ -377,12 +471,16 @@ Calculées dans `core`, rédigées en français, affichées dans le panneau :
   0,20 à 1,20 ; 7 à 1,25), largeur hors tout (14,00 à 0°, 17,00 à 90°),
   symétrie de l'enceinte avec un seul escalier, modules à 0° et 90°, miroir
   gauche-droite, cellules de baies (aucune cellule dans une baie, cellules +
-  baies = face), porteuses et grille de lumières, aller-retour YAML.
+  baies = face), porteuses et grille de lumières, aller-retour YAML ; plans
+  de pendrillonnage avec et sans modules, retrait des porteuses lumière trop
+  proches, frises cochées une à une, les trois fonds, deux états du rideau
+  de scène avec le même nombre de plis.
+- Dans Blender, en plus : images clés sur `main_opening`, lecture de la
+  timeline, le rideau suit.
 - Dans Blender : capture depuis `Cam_Face` avec le préréglage
   `reference_with_modules`, à comparer avec `scene-vue-artiste.png` ; puis
   `open_space`, à comparer avec `scene-vue-artiste-ouvert.png`.
 
 ## 12. Hors périmètre v1
 
-Salle (gradins, plafond), parquet procédural, accroche de projecteurs aux
-porteuses, pans coupés du nez de scène, vantaux de porte.
+Voir `BACKLOG.md`.
