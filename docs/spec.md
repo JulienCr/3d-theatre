@@ -158,6 +158,7 @@ Valeurs réglées sur capture pour retrouver le cadrage de
 | `borders` | Frises par plan (une case par plan) | toutes cochées | 8 booléens |
 | `border_bottom` | Bas des frises, au-dessus du plateau *(choix)* | 4,50 | 1 – 20 |
 | `backdrop` | Fond de scène | rideau noir | rideau noir / mur nu / cyclorama |
+| `drape` | Drapé (irrégularité des plis) | 0,5 | 0 – 1 |
 
 Le panneau n'affiche que les `lanes` premières cases de `borders`.
 
@@ -371,9 +372,27 @@ Tous les maillages reçoivent des UV en projection boîte, **1 unité UV =
 
 ## 8. Pendrillonnage et rideaux
 
-Pendrillons, frises et rideaux sont des **surfaces plissées sans épaisseur**
-(velours) : un pli tous les 0,30 m de largeur, amplitude 0,06, sauf mention
-contraire. Le cyclorama est plat (toile tendue). Tous pendent sous une
+Pendrillons, frises, rideau de fond et rideau de scène sont des **draperies
+de velours** ; le cyclorama reste une toile tendue plate. Le modèle doit
+avoir l'allure d'un textile qui pend, pas d'une tôle ondulée :
+
+- plis irréguliers autour d'un pli tous les 0,30 m d'amplitude 0,06 (sauf
+  mention contraire) : largeur de chaque pli ±25 %, profondeur ±30 %. Le
+  tirage est **déterministe**, semé par le nom de l'objet : même forme à
+  chaque reconstruction, jardin et cour différents ;
+- tête : sur les 0,10 m du haut, plis réguliers et serrés (fronces sous la
+  porteuse) ;
+- chute : sous la tête, les plis s'ouvrent vers le bas (profondeur ×1,3 au
+  sol) et chaque pli dérive latéralement de quelques centimètres ;
+- bas : le tissu touche le plancher et s'évase sur les 0,05 m du bas ;
+- crêtes arrondies (pas une sinusoïde pure), 8 points par pli au moins, une
+  rangée tous les 0,25 m au plus ;
+- dans Blender : lissage, subdivision (1 en vue, 2 au rendu) et épaisseur de
+  3 mm, par modificateurs.
+
+`masking.drape` dose l'irrégularité ; 0 redonne des plis réguliers. Pas de
+simulation de tissu : elle n'est ni déterministe ni assez rapide pour une
+reconstruction à chaque réglage. Tous pendent sous une
 porteuse de pendrillonnage, de `Z = Hp` à la hauteur des porteuses
 `Zb = Hp + Hg − batten_drop`.
 
