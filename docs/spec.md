@@ -60,8 +60,10 @@ l'usage.
 | `width` | Largeur du plateau (nez de scène) | 11,60 | 4 – 30 |
 | `depth` | Profondeur de scène (nez → fond) | 7,00 | 3 – 30 |
 | `grid_height` | Hauteur sous gril (depuis le plancher) | 6,10 | 3 – 25 |
+| `wings` | Largeur des coulisses, de chaque côté *(choix)* | 2,00 | 0 – 15 |
 
-`grid_height` est déduite : 7,30 (façade) − 1,20 (plateau).
+`grid_height` est déduite : 7,30 (façade) − 1,20 (plateau). Les coulisses
+prolongent la cage au-delà de l'ouverture du cadre, derrière la façade.
 
 ### 3.2 Avancé — `advanced` (sous-panneau replié)
 
@@ -102,7 +104,7 @@ jeu :
 | Clé | Libellé | Défaut | Bornes |
 |---|---|---|---|
 | `enabled` | Module présent | oui | |
-| `wall_gap` | Écart de la charnière au mur de cage | 0,00 | 0 – 5 |
+| `frame_gap` | Écart de la charnière au bord du cadre (+ vers l'axe, − vers les coulisses) | 0,00 | −10 – 5 |
 | `setback` | Recul de la charnière depuis le nez | 2,05 | 0 – 30 |
 | `width` | Largeur de la face avant | 1,55 | 0,40 – 10 |
 | `depth` | Profondeur du retour *(choix)* | 2,00 | 0,10 – 20 |
@@ -116,7 +118,7 @@ jeu :
 | `window_sill` | Allège *(choix)* | 1,00 | |
 | `window_offset` | Décalage de la fenêtre | 0,00 | |
 
-Largeur 1,55 = mur de cage (5,00 de l'axe) − bord intérieur des références
+Largeur 1,55 = bord du cadre (5,00 de l'axe) − bord intérieur des références
 (3,45 de l'axe, soit l'ouverture de 6,90 m). Porte 0,94 × 2,40 du fichier de
 cotes ; le plan SVG indique 1,00 × 2,40.
 
@@ -146,6 +148,12 @@ cotes ; le plan SVG indique 1,00 × 2,40.
 
 Valeurs réglées sur capture pour retrouver le cadrage de
 `scene-vue-artiste.png`.
+
+### 3.7 bis Salle — `house`
+
+| Clé | Libellé | Défaut | Bornes |
+|---|---|---|---|
+| `ceiling` | Plafond de salle | oui | |
 
 ### 3.8 Pendrillonnage — `masking`
 
@@ -183,7 +191,9 @@ Constantes (non exposées) : épaisseur de façade 0,30 ; profondeur du cadre
 murs de cage 0,20 ; parement de plancher 0,03 ; liseré du nez 0,05 ;
 épaisseur des parois de module 0,10 ; tube de porteuse Ø 0,048.
 
-- Largeur de cage : `Wc = W − 2·Tc` (10,00 par défaut).
+- Ouverture du cadre : `Wc = W − 2·Tc` (10,00 par défaut).
+- Largeur de cage, coulisses comprises : `Wk = Wc + 2·wings` (14,00 par
+  défaut). Les murs de cage sont à `X = ±Wk/2`.
 - Avant de cage : `Yc = Ys + 0,40` (1,60 par défaut). La cage s'étend de
   `Yc` à `D`.
 - Zone latérale effective : `Z = max(side_zone_width, emprise escalier)`,
@@ -202,8 +212,15 @@ murs de cage 0,20 ; parement de plancher 0,03 ; liseré du nez 0,05 ;
 ### 5.1 Salle et enceinte (matériau `TS_Enclosure`, rouge)
 
 - Profondeur de salle dessinée : `Yh = max(A, cameras.distance + 1,00)`, pour
-  que les caméras ne voient pas de vide sous elles. La salle reste un sol et
-  deux murs nus (pas de gradins).
+  que les caméras ne voient pas de vide sous elles. La salle reste un sol,
+  deux murs nus et un plafond (pas de gradins).
+- `House_Ceiling` (`TS_HouseCeiling`, si `house.ceiling`) : une seule face
+  tournée vers le bas, à `Z = facade_height`, X sur `[−Wt/2, Wt/2]`, Y sur
+  `[−Yh, Ys]`. **Visible seulement depuis la salle** : vu d'au-dessus, on voit
+  l'intérieur à travers. Le matériau masque la face arrière en EEVEE et dans
+  la vue (backface culling) et en Cycles (mélange avec un Transparent piloté
+  par `Geometry > Backfacing`). Un matériau de remplacement (BlenderKit) qui
+  n'a pas ce réglage rend le plafond visible de dessus.
 - `House_Floor` : dalle grise (`TS_HouseFloor`), X sur `[−Wt/2, Wt/2]`,
   Y sur `[−Yh, Ys]`, Z de −0,10 à 0.
 - `House_Wall_L` / `House_Wall_R` : face intérieure à `X = ∓Wt/2`,
@@ -220,13 +237,13 @@ murs de cage 0,20 ; parement de plancher 0,03 ; liseré du nez 0,05 ;
   `Hp + Hc`, Y sur `[Ys + 0,05, Ys + 0,40]`.
 - `Proscenium_Lintel` : X sur `[−W/2, W/2]`, Z de `Hp + Hc` à
   `Hp + Hc + lintel_height`, même Y.
-- Les montants couvrent le passage de la largeur du nez (`W`) à celle de la
-  cage (`Wc`) : **aucun pan coupé** n'est dessiné en v1.
+- Les montants couvrent le passage de la largeur du nez (`W`) à l'ouverture
+  du cadre (`Wc`) : **aucun pan coupé** n'est dessiné en v1.
 
 ### 5.3 Plateau
 
 - `Stage_Base` (`TS_StageBase`, noir) : avant-plateau `W × Yc` puis plateau de
-  cage `Wc × (D − Yc)`, de Z = 0 à `Hp − 0,03`.
+  cage `Wk × (D − Yc)`, coulisses comprises, de Z = 0 à `Hp − 0,03`.
 - `Stage_Floor` (`TS_StageFloor`, bois) : même contour, parement de 0,03,
   dessus à `Z = Hp`. Contour en un seul polygone extrudé (forme en T).
 - `Stage_Front` (`TS_Enclosure`) : bandeau rouge, face avant du plateau à
@@ -235,9 +252,12 @@ murs de cage 0,20 ; parement de plancher 0,03 ; liseré du nez 0,05 ;
 
 ### 5.4 Cage (`TS_Cage`, noir)
 
-- `Cage_Wall_L` / `_R` : face intérieure à `X = ∓Wc/2`, Y sur `[Yc, D]`,
+- `Cage_Wall_L` / `_R` : face intérieure à `X = ∓Wk/2`, Y sur `[Yc, D]`,
   Z de `Hp` au toit.
-- `Cage_Back` : face avant à `Y = D`, largeur `Wc`, mêmes hauteurs. C'est le
+- `Cage_Front_L` / `_R` : entre la façade et la cage, fermeture des coulisses
+  côté salle, X de `±W/2` à `±(Wk/2 + 0,20)`, Y sur `[Ys + 0,30, Yc]`, Z de
+  `Hp` au toit (seulement si `Wk > W`).
+- `Cage_Back` : face avant à `Y = D`, largeur `Wk`, mêmes hauteurs. C'est le
   « mur nu » du fond de scène.
 - `Cage_Roof` : à `Hp + Hg + 2,00` (hauteur de circulation sur le gril).
 
@@ -246,7 +266,7 @@ murs de cage 0,20 ; parement de plancher 0,03 ; liseré du nez 0,05 ;
 - `Grid_Deck` (`TS_Grid`) : caillebotis à `Z = Hp + Hg` (dessous), lattes de
   0,05 × 0,05 parallèles à Y tous les 0,15, sur toute la cage.
 - Porteuses `Batten_NN` (`TS_Batten`) : tubes Ø 0,048 parallèles au nez, de
-  `X = −Wc/2 + 0,10` à `Wc/2 − 0,10`, à `Z = Hp + Hg − batten_drop`.
+  `X = −Wk/2 + 0,10` à `Wk/2 − 0,10`, à `Z = Hp + Hg − batten_drop`.
   Première à `Yc + 0,50`, puis tous les `batten_spacing`, dernière à 0,30 au
   moins du fond. Une porteuse à moins de 0,30 en Y d'une porteuse de
   pendrillonnage ou du plan du rideau de scène est retirée (section 8). Les
@@ -284,7 +304,10 @@ plateau qui file vers le fond. Il est ouvert côté coulisses et n'a pas de
 dessus.
 
 - Charnière (arête extérieure, côté salle) :
-  `H = (s·(Wc/2 − wall_gap), setback, Hp)`.
+  `H = (s·(Wc/2 − frame_gap), setback, Hp)`. La référence est le bord du
+  cadre, pas le mur de cage : ouvrir les coulisses ne déplace pas les
+  modules. À 90°, le retour part dans les coulisses ; il ne sort de la cage
+  que si `depth` dépasse la largeur des coulisses (alerte).
 - Repère local, `u` le long de la face vers le plateau, `v` vers l'arrière
   de la face :
   jardin `u = (cos θ, sin θ)`, `v = (−sin θ, cos θ)` ;
@@ -308,8 +331,8 @@ dessus.
 ### 5.9 Lumières de travail
 
 - `WorkLight_NN` : lumières surfaciques carrées tournées vers le bas, à
-  `Z = Hp + Hg − 0,30`. Grille sur le plateau de cage
-  (`Wc × (D − Yc)`) : `nx = max(1, round(Wc / spacing))`,
+  `Z = Hp + Hg − 0,30`. Grille sur le plateau de cage, coulisses comprises
+  (`Wk × (D − Yc)`) : `nx = max(1, round(Wk / spacing))`,
   `ny = max(1, round((D − Yc) / spacing))`, une lumière au centre de chaque
   cellule, côté = moitié de la plus petite dimension de cellule. Blanc neutre
   4000 K. Puissance proportionnelle à l'aire de la cellule × `intensity`,
@@ -348,6 +371,7 @@ donc à la régénération.
 | `TS_Masking` | pendrillons, frises, rideau de fond | velours noir |
 | `TS_MainCurtain` | rideau de scène | velours rouge |
 | `TS_Cyclorama` | cyclorama | blanc mat |
+| `TS_HouseCeiling` | plafond de salle, une face (section 5.1) | gris sombre |
 
 Tous les maillages reçoivent des UV en projection boîte, **1 unité UV =
 1 m**, pour que les textures BlenderKit tombent à la bonne échelle.
@@ -361,9 +385,20 @@ Tous les maillages reçoivent des UV en projection boîte, **1 unité UV =
   La reconstruction supprime **uniquement** ces objets et leurs données
   orphelines, puis recrée tout. Un objet non marqué trouvé dans ces
   collections est laissé en place et signalé.
-- Tout changement de paramètre reconstruit la scène (callback `update`). Un
-  verrou empêche les reconstructions en cascade pendant l'application d'un
-  préréglage ou de la symétrie : une seule reconstruction à la fin.
+- Un changement de paramètre ne reconstruit pas dans le callback `update` :
+  il programme une reconstruction différée (`bpy.app.timers`, une seule en
+  attente). Un curseur qu'on fait glisser ne donne donc qu'une
+  reconstruction par passage du timer. Les opérateurs (Reconstruire, Charger
+  un préréglage) reconstruisent directement. Un verrou empêche les
+  reconstructions en cascade pendant l'application d'un préréglage ou de la
+  symétrie.
+- Le dessin du panneau ne parcourt **aucune** collection de données Blender
+  (`all_objects`, `objects`…) : il lit des valeurs Python calculées à la
+  reconstruction (Layout, noms des objets étrangers). Le plantage du
+  2026-11-19 (`EXCEPTION_ACCESS_VIOLATION` dans
+  `pyrna_prop_collection_iter_next`, depuis le dessin des alertes qui
+  parcourait `all_objects`) a eu lieu en glissant le curseur du giron.
+- Les items d'un EnumProperty dynamique restent référencés côté Python.
 - Panneau « Théâtre » dans la barre latérale de la vue 3D : Plateau,
   Avancé (replié), Escaliers, Modules, Gril, Pendrillonnage, Rideaux,
   Lumières, Caméras, Préréglages, et un encadré **Cotes calculées** (largeur
@@ -398,18 +433,23 @@ porteuse de pendrillonnage, de `Z = Hp` à la hauteur des porteuses
 
 ### 8.1 Plans en profondeur
 
-- Rideau de scène : plan `Y = Yc + 0,15`.
-- Frise de face : plan `Y = Yc + 0,35`.
-- Début de zone : `Y0 = Yc + 0,50`. Si au moins un module est présent,
+- Rideau de scène : plan `Yr = Yc + 0,15`.
+- Frise de face : plan `Yf`, assez loin pour que rideau et frise ne se
+  touchent jamais : `Yf = Yr` + plus grand écart en Y des plis du rideau
+  (deux états, drapé maximal) + plus grand écart en Y des plis de la frise
+  + 0,10 + le décalage de 0,10 de la frise (8.4). La v3 montrait des plis du
+  rideau qui traversaient la frise.
+- Début de zone : `Y0 = Yf + 0,20`. Si au moins un module est présent,
   `Y0 = max(Y0, Ymod + 0,20)`, avec `Ymod` le Y maximal de l'emprise des
   modules présents : **les rues reculent derrière les modules**.
 - Ligne de fond `Yb` : mur nu → `D` ; rideau noir → `D − 0,40` ;
   cyclorama → `D − 1,20`.
-- Fin de zone : `Y1 = Yb − 0,30`.
+- Fin des pendrillons à l'allemande : `Y1 = Yb − 0,30`.
 - Plans de pendrillonnage `k = 1..N` (`N = lanes`) à
-  `Y0 + k·(Y1 − Y0)/N`. La rue `k` va du plan `k − 1` (le cadre ou les
-  modules pour `k = 1`) au plan `k` ; le dernier plan masque les bords du
-  fond.
+  `Y0 + (k − 1)·Δ`, avec `Δ = (Yb − Y0)/N`. **Le premier plan ferme la face
+  de la première rue**, juste derrière le cadre ou les modules ; la rue `k`
+  va du plan `k` au plan `k + 1`, la dernière du plan `N` au fond. Aucun
+  plan n'est collé au fond.
 
 ### 8.2 Porteuses de pendrillonnage (`TS_Batten`)
 
@@ -426,9 +466,9 @@ porteuses lumière, à `Z = Zb`.
 ### 8.3 Pendrillons (`TS_Masking`)
 
 - **À l'italienne** : `Leg_L_NN` / `Leg_R_NN` dans le plan `k`, de
-  `X = ∓opening/2` jusqu'à `∓(Wc/2 − 0,10)`. Ils vont du bord de l'ouverture
-  au mur de cage : pas de réglage de largeur. Ouverture plus large que la
-  cage → aucun pendrillon et alerte.
+  `X = ∓opening/2` jusqu'au mur de cage `∓Wk/2` : **chaque pendrillon touche
+  son mur**, sans jamais le traverser (dérive des plis comprise). Pas de
+  réglage de largeur. Ouverture ≥ `Wk` → aucun pendrillon et alerte.
 - **À l'allemande** : `Leg_L` / `Leg_R` continus, parallèles à Y, à
   `X = ∓opening/2`, de `Y0` à `Y1`. Pas de rues ; `lanes` ne fixe plus que
   les plans des frises.
@@ -436,11 +476,12 @@ porteuses lumière, à `Z = Zb`.
 ### 8.4 Frises et fond
 
 - `Border_NN` au plan `k` si `borders[k]` est coché, `Border_00` (frise de
-  face) si `front_border` : largeur `Wc − 0,20`, de `Hp + border_bottom` à
+  face) si `front_border` : **de mur à mur** (`Wk`, plis compris, sans
+  traverser les murs), de `Hp + border_bottom` à
   `Zb`, posée 0,10 côté salle du plan pour couvrir le haut des pendrillons.
   Si `border_bottom ≥ Zb − Hp` : aucune frise et alerte.
-- Fond : rideau noir `Backdrop` (`TS_Masking`, plissé, plan `Yb`, largeur
-  `Wc − 0,20`) ; mur nu : rien, `Cage_Back` est visible ; cyclorama
+- Fond : rideau noir `Backdrop` (`TS_Masking`, plissé, plan `Yb`, de mur à
+  mur) ; mur nu : rien, `Cage_Back` est visible ; cyclorama
   `Cyclorama` (`TS_Cyclorama`, plat, plan `Yb`, largeur `Wc − 0,60`).
 
 ### 8.5 Rideau de scène à la grecque (`TS_MainCurtain`)
