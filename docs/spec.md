@@ -497,7 +497,7 @@ porteuses lumière, à `Z = Zb`.
   ouvertes, avec 0,05 le paquet se voyait depuis `Cam_Face` derrière le
   montant. Une caméra bien plus proche du cadre peut encore l'apercevoir. Le rideau ouvert ne mord jamais sur l'ouverture `[−Wc/2, Wc/2]`
   (les plis partent en Y, seule l'étendue en X compte). Si le montant est
-  trop étroit (`Tc − 0,10 < 0,30`), le paquet garde 0,30 de large, déborde
+  trop étroit (`Tc − 0,30 < 0,30`), le paquet garde 0,30 de large, déborde
   dans l'ouverture et une alerte le signale. Même nombre de plis dans les
   deux états.
 - Le maillage a pour forme de base l'état fermé et une clé de forme `Open`
