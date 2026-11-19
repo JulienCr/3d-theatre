@@ -493,16 +493,20 @@ def _pleat_count(length: float) -> int:
     return max(1, _round_half_up(length / PLEAT_PITCH))
 
 
-def _pleated(name, collection, x0, y0, x1, y1, z0, z1, facing, material="TS_Masking"):
+def _pleated(name, collection, x0, y0, x1, y1, z0, z1, facing, material="TS_Masking",
+             drape=0.0):
     length = math.hypot(x1 - x0, y1 - y0)
     return PleatedSurface(name, material, collection,
                           PleatState((x0, y0), (x1, y1), PLEAT_AMPLITUDE), z0, z1,
-                          _pleat_count(length), facing)
+                          _pleat_count(length), facing, drape=drape)
 
 
 def _masking(c: Ctx) -> Part:
     mk, plan, Wc, Hp, zb = c.p["masking"], c.plan, c.Wc, c.Hp, c.plan.zb
     objs = []
+
+    def pleated(*args, **kwargs):
+        return _pleated(*args, drape=mk["drape"], **kwargs)
 
     def batten(name, a, b):
         objs.append(Tube(name, "TS_Batten", MASKING, (*a, zb), (*b, zb), BATTEN_RADIUS))
@@ -521,13 +525,13 @@ def _masking(c: Ctx) -> Part:
         if fits and outer - mk["opening"] / 2 > 0.10:
             for k, y in enumerate(plan.planes, start=1):
                 for tag, s in (("L", -1), ("R", 1)):
-                    objs.append(_pleated(f"Leg_{tag}_{_nn(k)}", MASKING, s * mk["opening"] / 2, y,
+                    objs.append(pleated(f"Leg_{tag}_{_nn(k)}", MASKING, s * mk["opening"] / 2, y,
                                          s * outer, y, Hp, zb, (0.0, -1.0)))
     else:
         for tag, s in (("L", -1), ("R", 1)):
             x = s * mk["opening"] / 2
             if fits and plan.y1 - plan.y0 > 0.1:
-                objs.append(_pleated(f"Leg_{tag}", MASKING, x, plan.y0, x, plan.y1, Hp, zb,
+                objs.append(pleated(f"Leg_{tag}", MASKING, x, plan.y0, x, plan.y1, Hp, zb,
                                      (-s, 0.0)))
                 batten(f"MaskingBatten_Side_{tag}", (x, plan.y0), (x, plan.y1))
 
@@ -536,15 +540,15 @@ def _masking(c: Ctx) -> Part:
         z0 = Hp + mk["border_bottom"]
         if mk["front_border"]:
             y = plan.front_plane - 0.10
-            objs.append(_pleated("Border_00", MASKING, -half, y, half, y, z0, zb, (0.0, -1.0)))
+            objs.append(pleated("Border_00", MASKING, -half, y, half, y, z0, zb, (0.0, -1.0)))
         for k, y in enumerate(plan.planes, start=1):
             if mk["borders"][k - 1]:
-                objs.append(_pleated(f"Border_{_nn(k)}", MASKING, -half, y - 0.10, half, y - 0.10,
+                objs.append(pleated(f"Border_{_nn(k)}", MASKING, -half, y - 0.10, half, y - 0.10,
                                      z0, zb, (0.0, -1.0)))
 
     if mk["backdrop"] == "black_curtain":
         half = (Wc - 0.20) / 2
-        objs.append(_pleated("Backdrop", MASKING, -half, plan.yb, half, plan.yb, Hp, zb,
+        objs.append(pleated("Backdrop", MASKING, -half, plan.yb, half, plan.yb, Hp, zb,
                              (0.0, -1.0)))
     elif mk["backdrop"] == "cyclorama":
         half = (Wc - 0.60) / 2
@@ -568,7 +572,8 @@ def _curtains(c: Ctx) -> Part:
         closed = PleatState((-s * CURTAIN_OVERLAP, y), (s * outer, y), PLEAT_AMPLITUDE)
         opened = PleatState((s * inner, y), (s * outer, y), CURTAIN_OPEN_AMPLITUDE)
         objs.append(PleatedSurface(f"MainCurtain_{tag}", "TS_MainCurtain", CURTAINS, closed,
-                                   z0, z1, count, (0.0, -1.0), opened))
+                                   z0, z1, count, (0.0, -1.0), opened,
+                                   c.p["masking"]["drape"]))
     warnings = ("Rideau de scène ouvert visible dans l'ouverture : montants du cadre "
                 "trop étroits.",) if narrow else ()
     return Part(tuple(objs), warnings=warnings)

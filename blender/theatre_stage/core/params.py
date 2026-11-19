@@ -173,6 +173,8 @@ SCHEMA: tuple[Group, ...] = (
             ("bare_wall", "Mur nu", "Le mur de cage reste visible."),
             ("cyclorama", "Cyclorama", "Toile tendue claire."),
         )),
+        Param("drape", FLOAT, 0.5, "Drapé", "Irrégularité des plis : 0 donne des plis réguliers, "
+              "1 un drapé très marqué.", 0.0, 1.0),
     )),
     Group("curtains", "Rideaux", (
         _flag("main_enabled", True, "Rideau de scène", "Rideau de scène à la grecque."),

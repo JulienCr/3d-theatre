@@ -76,6 +76,7 @@ masking:
   - true
   border_bottom: 4.5
   backdrop: black_curtain
+  drape: 0.5
 curtains:
   main_enabled: true
   main_opening: 100.0

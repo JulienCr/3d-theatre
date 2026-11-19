@@ -101,11 +101,13 @@ class PleatState:
 
 @dataclass(frozen=True)
 class PleatedSurface:
-    """Zero-thickness vertical surface with sinusoidal pleats.
+    """Zero-thickness vertical drapery following a horizontal path.
 
-    Offsets are applied perpendicular to the path in the XY plane. The mesh
-    is a (4 * pleat_count + 1) by 2 grid whose faces look toward `facing`.
-    `open_state`, when set, is a second pose with the same topology (shape key).
+    Offsets are applied perpendicular to the path in the XY plane. The mesh is
+    a grid of rows by columns (see `core.meshes.grid_shape`) whose faces look
+    toward `facing`. `drape` (0-1) doses the irregularity of the folds; the
+    random draw is seeded from `name`. `open_state`, when set, is a second pose
+    with the same topology (shape key).
     """
 
     name: str
@@ -117,6 +119,7 @@ class PleatedSurface:
     pleat_count: int
     facing: Vec2
     open_state: PleatState | None = None
+    drape: float = 0.0
 
 
 @dataclass(frozen=True)

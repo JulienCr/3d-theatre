@@ -18,6 +18,7 @@ TAG = "theatre_generated"
 OPEN_KEY = "Open"
 OPENING_PATH = "theatre.curtains.main_opening"
 OPENING_EXPRESSION = "var / 100"
+FABRIC_THICKNESS = 0.003
 
 ROUGHNESS = {
     "TS_StageFloor": 0.35, "TS_Masking": 0.95, "TS_MainCurtain": 0.9, "TS_Cyclorama": 0.8,
@@ -160,6 +161,17 @@ def _add_opening_driver(obj: bpy.types.Object, scene: bpy.types.Scene) -> None:
     driver.expression = OPENING_EXPRESSION
 
 
+def _add_fabric_modifiers(obj: bpy.types.Object) -> None:
+    """Live subdivision then thickness, so the sheet reads as velvet (kept unapplied)."""
+    subsurf = obj.modifiers.new("Subdivision", "SUBSURF")
+    subsurf.levels = 1
+    subsurf.render_levels = 2
+    solidify = obj.modifiers.new("Solidify", "SOLIDIFY")
+    solidify.thickness = FABRIC_THICKNESS
+    solidify.offset = 0.0
+    solidify.use_even_offset = True
+
+
 def _make_geometry(primitive, scene, collections, materials) -> bpy.types.Object:
     mesh = _new_mesh(primitive.name, build_mesh(primitive))
     if isinstance(primitive, PleatedSurface):
@@ -170,9 +182,11 @@ def _make_geometry(primitive, scene, collections, materials) -> bpy.types.Object
     obj = bpy.data.objects.new(primitive.name, mesh)
     obj[TAG] = True
     collections[primitive.collection].objects.link(obj)
-    if isinstance(primitive, PleatedSurface) and primitive.open_state is not None:
-        _add_open_key(obj, primitive)
-        _add_opening_driver(obj, scene)
+    if isinstance(primitive, PleatedSurface):
+        _add_fabric_modifiers(obj)
+        if primitive.open_state is not None:
+            _add_open_key(obj, primitive)
+            _add_opening_driver(obj, scene)
     return obj
 
 

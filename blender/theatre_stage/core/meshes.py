@@ -7,13 +7,29 @@ Pleated and flat surfaces are open, single-sided sheets.
 from __future__ import annotations
 
 import math
+import random
+import zlib
 from dataclasses import dataclass
 
 from .primitives import (
     Box, FlatSurface, Panel, PleatedSurface, PleatState, Prism, SlatGrid, Tube,
 )
 
-PLEAT_SAMPLES = 4
+PLEAT_SAMPLES = 8
+HEADING = 0.10
+HEM = 0.05
+MAX_ROW_STEP = 0.25
+WIDTH_JITTER = 0.25
+DEPTH_JITTER = 0.30
+OPEN_GROWTH = 0.30
+HEM_FLARE = 0.15
+IRREGULAR_RAMP = 0.50
+DRIFT = 0.03
+DRIFT_WIDTH_RATIO = 0.25
+DRIFT_WAVES = 2.4 * math.pi
+CREST_FLATTEN = 0.15
+CREST_NORM = 0.86
+MAX_DEPTH_FACTOR = (1 + DEPTH_JITTER) * (1 + OPEN_GROWTH) * (1 + HEM_FLARE)
 
 
 @dataclass(frozen=True)
@@ -195,42 +211,110 @@ def _panel_mesh(panel: Panel) -> Mesh:
     return b.result(_frame(panel.origin, panel.yaw))
 
 
-def _sheet(b: _Builder, columns, z0, z1, facing) -> None:
-    out = (facing[0], facing[1], 0.0)
-    bottom = [b.add((x, y, z0)) for x, y in columns]
-    top = [b.add((x, y, z1)) for x, y in columns]
-    for i in range(len(columns) - 1):
-        b.face([bottom[i], bottom[i + 1], top[i + 1], top[i]], out)
+def _smoothstep(x: float) -> float:
+    x = min(max(x, 0.0), 1.0)
+    return x * x * (3.0 - 2.0 * x)
 
 
-def _pleat_columns(state: PleatState, count: int) -> list[tuple[float, float]]:
+def _fold_profile(t: float) -> float:
+    """Rounded, slightly flattened crest; zero at both ends of the fold."""
+    theta = 2.0 * math.pi * t
+    return (math.sin(theta) + CREST_FLATTEN * math.sin(3.0 * theta)) / CREST_NORM
+
+
+def _row_heights(height: float) -> list[float]:
+    """Distances from the top edge, denser at the heading and at the hem."""
+    marks = {0.0, height}
+    for d in (HEADING / 2, HEADING, height - HEM, height - HEM / 2):
+        if 0.0 < d < height:
+            marks.add(d)
+    ordered = sorted(marks)
+    rows = [ordered[0]]
+    for nxt in ordered[1:]:
+        pieces = max(1, math.ceil((nxt - rows[-1]) / MAX_ROW_STEP - 1e-9))
+        start = rows[-1]
+        rows += [start + (nxt - start) * i / pieces for i in range(1, pieces + 1)]
+    return rows
+
+
+def grid_shape(surface: PleatedSurface) -> tuple[int, int]:
+    """(columns, rows) of the vertex grid; vertices are row-major, bottom row first."""
+    return PLEAT_SAMPLES * surface.pleat_count + 1, len(_row_heights(surface.z1 - surface.z0))
+
+
+class _FoldDraw:
+    """Per-fold random numbers, identical for every pose of a surface."""
+
+    def __init__(self, name: str, count: int, drape: float):
+        rng = random.Random(zlib.crc32(name.encode("utf-8")))
+        self.width = [1.0 + WIDTH_JITTER * drape * rng.uniform(-1, 1) for _ in range(count)]
+        self.depth = [1.0 + DEPTH_JITTER * drape * rng.uniform(-1, 1) for _ in range(count)]
+        self.drift = [rng.uniform(-1, 1) for _ in range(count + 1)]
+        self.phase = [rng.uniform(0, 2 * math.pi) for _ in range(count + 1)]
+        total = sum(self.width)
+        self.cumulative = [0.0]
+        for w in self.width:
+            self.cumulative.append(self.cumulative[-1] + w / total)
+
+
+def _fold_row(state: PleatState, count: int, draw: _FoldDraw, drape: float,
+              d_top: float, height: float) -> list[tuple[float, float]]:
+    """(x, y) of one row, `d_top` below the top edge of a surface `height` tall."""
     (x0, y0), (x1, y1) = state.p0, state.p1
     dx, dy = x1 - x0, y1 - y0
     length = math.hypot(dx, dy)
     nx, ny = (-dy / length, dx / length) if length > 0 else (0.0, 0.0)
-    steps = PLEAT_SAMPLES * count
-    columns = []
-    for i in range(steps + 1):
-        t = i / steps
-        off = state.amplitude * math.sin(2 * math.pi * count * t)
-        columns.append((x0 + dx * t + nx * off, y0 + dy * t + ny * off))
-    return columns
+    below_heading = d_top - HEADING
+    free = _smoothstep(below_heading / IRREGULAR_RAMP)
+    opening = _smoothstep(below_heading / max(height - HEADING, 1e-9))
+    flare = 1.0 + HEM_FLARE * _smoothstep((HEM - (height - d_top)) / HEM)
+    along = d_top / height
+    drift_max = min(DRIFT, DRIFT_WIDTH_RATIO * length / count) * drape / length
+    bounds = []
+    for k in range(count + 1):
+        regular = k / count
+        moved = regular + (draw.cumulative[k] - regular) * free
+        if 0 < k < count:
+            moved += drift_max * free * draw.drift[k] * math.sin(DRIFT_WAVES * along + draw.phase[k])
+        bounds.append(moved)
+    points = []
+    for k in range(count):
+        depth = state.amplitude * (1.0 + (draw.depth[k] - 1.0) * free)
+        depth *= (1.0 + OPEN_GROWTH * opening) * flare
+        for i in range(PLEAT_SAMPLES + (1 if k == count - 1 else 0)):
+            t = i / PLEAT_SAMPLES
+            u = bounds[k] + t * (bounds[k + 1] - bounds[k])
+            off = depth * _fold_profile(t)
+            points.append((x0 + dx * u + nx * off, y0 + dy * u + ny * off))
+    return points
 
 
 def pleated_mesh(surface: PleatedSurface, open_pose: bool = False) -> Mesh:
-    """Mesh of a pleated surface; `open_pose` uses `open_state` (same topology)."""
+    """Mesh of a drapery; `open_pose` uses `open_state` (same topology and vertex order)."""
     state = surface.open_state if open_pose else surface.state
     if state is None:
         raise ValueError(f"{surface.name} has no open state")
+    count, height = surface.pleat_count, surface.z1 - surface.z0
+    draw = _FoldDraw(surface.name, count, surface.drape)
     b = _Builder()
-    _sheet(b, _pleat_columns(state, surface.pleat_count), surface.z0, surface.z1,
-           surface.facing)
+    grid = []
+    for d_top in reversed(_row_heights(height)):
+        z = surface.z0 + (height - d_top)
+        grid.append([b.add((x, y, z)) for x, y in _fold_row(state, count, draw, surface.drape,
+                                                              d_top, height)])
+    out = (surface.facing[0], surface.facing[1], 0.0)
+    for low, high in zip(grid, grid[1:]):
+        for i in range(len(low) - 1):
+            b.face([low[i], low[i + 1], high[i + 1], high[i]], out)
     return b.result()
 
 
 def _flat_mesh(surface: FlatSurface) -> Mesh:
     b = _Builder()
-    _sheet(b, [surface.p0, surface.p1], surface.z0, surface.z1, surface.facing)
+    out = (surface.facing[0], surface.facing[1], 0.0)
+    bottom = [b.add((x, y, surface.z0)) for x, y in (surface.p0, surface.p1)]
+    top = [b.add((x, y, surface.z1)) for x, y in (surface.p0, surface.p1)]
+    b.face([bottom[0], bottom[1], top[1], top[0]], out)
     return b.result()
 
 

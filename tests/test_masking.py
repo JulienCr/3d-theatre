@@ -1,7 +1,7 @@
 import pytest
 
 from core.layout import compute_layout
-from core.meshes import build_mesh, pleated_mesh
+from core.meshes import MAX_DEPTH_FACTOR, build_mesh, grid_shape, pleated_mesh
 from helpers import layout, make, modules_off
 
 ZB = 1.2 + 6.1 - 0.5
@@ -208,19 +208,22 @@ def test_main_curtain_meshes_share_topology_between_the_two_states():
     left = layout().find("MainCurtain_L")
     closed, opened = pleated_mesh(left), pleated_mesh(left, open_pose=True)
     assert closed.faces == opened.faces
-    assert len(closed.vertices) == len(opened.vertices) == 2 * (4 * left.pleat_count + 1)
+    cols, rows = grid_shape(left)
+    assert len(closed.vertices) == len(opened.vertices) == cols * rows
     assert closed.vertices != opened.vertices
     xs = [v[0] for v in opened.vertices]
     assert min(xs) == pytest.approx(-5.75) and max(xs) == pytest.approx(-5.05)
 
 
+@pytest.mark.parametrize("drape", [0.0, 0.5, 1.0])
 @pytest.mark.parametrize("stage,advanced", [
     ({}, {}),
     ({"width": 14.0}, {"proscenium_thickness": 1.5}),
     ({"width": 9.0}, {"proscenium_thickness": 0.5}),
+    ({}, {"proscenium_thickness": 0.42}),
 ])
-def test_open_main_curtain_stays_behind_the_posts(stage, advanced):
-    lay = layout(stage=stage, advanced=advanced)
+def test_open_main_curtain_stays_behind_the_posts(stage, advanced, drape):
+    lay = layout(stage=stage, advanced=advanced, masking={"drape": drape})
     wc = lay.derived.cage_width
     for name in ("MainCurtain_L", "MainCurtain_R"):
         opened = pleated_mesh(lay.find(name), open_pose=True)
@@ -252,8 +255,116 @@ def test_pleated_surfaces_face_the_house_and_stay_in_their_plane_band():
         surface = lay.find(name)
         mesh = build_mesh(surface)
         base_y = surface.state.p0[1]
-        assert all(abs(v[1] - base_y) <= surface.state.amplitude + 1e-9 for v in mesh.vertices)
+        limit = surface.state.amplitude * MAX_DEPTH_FACTOR + 1e-9
+        assert all(abs(v[1] - base_y) <= limit for v in mesh.vertices)
         for face in mesh.faces:
             pts = [mesh.vertices[i] for i in face]
             ny = sum((a[2] - b[2]) * (a[0] + b[0]) for a, b in zip(pts, pts[1:] + pts[:1]))
             assert ny < 0
+
+
+# ------------------------------------------------------------------ drapery
+
+DRAPED = ("Leg_L_01", "Leg_R_01", "Border_01", "Border_00", "Backdrop", "MainCurtain_L")
+
+
+def rows_of(surface, open_pose=False):
+    mesh = pleated_mesh(surface, open_pose)
+    cols, rows = grid_shape(surface)
+    return [mesh.vertices[r * cols:(r + 1) * cols] for r in range(rows)]
+
+
+def pleat_shapes(row, count, samples=8):
+    """Per-pleat (x offsets, y offsets) relative to the pleat start."""
+    out = []
+    for k in range(count):
+        chunk = row[k * samples:(k + 1) * samples + 1]
+        out.append(([p[0] - chunk[0][0] for p in chunk], [p[1] - chunk[0][1] for p in chunk]))
+    return out
+
+
+def test_drapery_is_deterministic_and_seeded_by_name():
+    first, second = layout(), layout()
+    for name in DRAPED:
+        assert build_mesh(first.find(name)).vertices == build_mesh(second.find(name)).vertices
+    left, right = first.find("Leg_L_01"), first.find("Leg_R_01")
+    ys_left = [v[1] for v in build_mesh(left).vertices]
+    ys_right = [v[1] for v in build_mesh(right).vertices]
+    assert ys_left != ys_right
+    assert [abs(x) for x in (v[0] for v in build_mesh(left).vertices)] !=         [abs(x) for x in (v[0] for v in build_mesh(right).vertices)]
+
+
+def test_zero_drape_gives_identical_pleats_on_every_row():
+    lay = layout(masking={"drape": 0.0})
+    leg = lay.find("Leg_L_01")
+    for row in rows_of(leg):
+        shapes = pleat_shapes(row, leg.pleat_count)
+        for xs, ys in shapes[1:]:
+            assert xs == pytest.approx(shapes[0][0], abs=1e-9)
+            assert ys == pytest.approx(shapes[0][1], abs=1e-9)
+
+
+def test_drape_makes_pleats_differ_below_a_regular_heading():
+    leg = layout(masking={"drape": 1.0}).find("Backdrop")
+    rows = rows_of(leg)
+    top, mid = rows[-1], rows[len(rows) // 2]
+    top_shapes = pleat_shapes(top, leg.pleat_count)
+    assert all(s[1] == pytest.approx(top_shapes[0][1], abs=1e-9) for s in top_shapes)
+    mid_shapes = pleat_shapes(mid, leg.pleat_count)
+    widths = {round(s[0][-1], 4) for s in mid_shapes}
+    peaks = {round(max(s[1], key=abs), 4) for s in mid_shapes}
+    assert len(widths) > 3 and len(peaks) > 3
+
+
+@pytest.mark.parametrize("drape", [0.0, 1.0])
+def test_drapery_grid_and_vertical_extent(drape):
+    lay = layout(masking={"drape": drape})
+    for name in DRAPED:
+        surface = lay.find(name)
+        cols, rows = grid_shape(surface)
+        assert cols == 8 * surface.pleat_count + 1
+        grid = rows_of(surface)
+        zs = [r[0][2] for r in grid]
+        assert zs[0] == surface.z0 and zs[-1] == pytest.approx(surface.z1)
+        assert all(b - a <= 0.25 + 1e-9 for a, b in zip(zs, zs[1:]))
+        assert all(v[2] >= surface.z0 for r in grid for v in r)
+    plateau = lay.find("Stage_Floor").t1
+    assert min(v[2] for v in build_mesh(lay.find("Leg_L_01")).vertices) == pytest.approx(plateau)
+
+
+@pytest.mark.parametrize("drape", [0.0, 1.0])
+def test_legs_stay_within_their_own_extent(drape):
+    lay = layout(masking={"drape": drape})
+    wc = lay.derived.cage_width
+    for name in ("Leg_L_01", "Leg_R_03", "Leg_L_02"):
+        leg = lay.find(name)
+        xs = (leg.state.p0[0], leg.state.p1[0])
+        for x, y, _ in build_mesh(leg).vertices:
+            assert min(xs) - 1e-9 <= x <= max(xs) + 1e-9
+            assert abs(x) <= wc / 2 - 0.10 + 1e-9
+            assert abs(x) >= 4.0 - 1e-9
+            assert abs(y - leg.state.p0[1]) <= leg.state.amplitude * MAX_DEPTH_FACTOR + 1e-9
+
+
+def test_german_legs_stay_in_their_y_extent():
+    lay = layout(masking={"style": "german", "drape": 1.0})
+    leg = lay.find("Leg_L")
+    y0, y1 = leg.state.p0[1], leg.state.p1[1]
+    ys = [v[1] for v in build_mesh(leg).vertices]
+    assert min(ys) >= min(y0, y1) - 1e-9 and max(ys) <= max(y0, y1) + 1e-9
+
+
+@pytest.mark.parametrize("drape", [0.0, 0.5, 1.0])
+def test_main_curtain_poses_share_vertex_count_and_faces(drape):
+    lay = layout(masking={"drape": drape})
+    for name in ("MainCurtain_L", "MainCurtain_R"):
+        surface = lay.find(name)
+        closed, opened = pleated_mesh(surface), pleated_mesh(surface, open_pose=True)
+        assert len(closed.vertices) == len(opened.vertices) and closed.faces == opened.faces
+        assert [v[2] for v in closed.vertices] == [v[2] for v in opened.vertices]
+
+
+def test_drape_param_lives_in_the_masking_group():
+    from core.params import GROUPS
+    drape = next(p for p in GROUPS["masking"].params if p.key == "drape")
+    assert (drape.default, drape.min, drape.max) == (0.5, 0.0, 1.0) and drape.rebuild
