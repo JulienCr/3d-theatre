@@ -1,6 +1,6 @@
 __pycache__/
 *.pyc
 .pytest_cache/
-*.blend1
+*.blend[1-9]
 .claude/settings.local.json
 references/*.mp4
