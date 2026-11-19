@@ -21,6 +21,8 @@ stairs:
   going: 0.3
   width: 1.2
   side_angle: 90.0
+  side_offset: 0.0
+  clearance: 1.0
   center_width: 2.0
 modules:
   symmetric: true

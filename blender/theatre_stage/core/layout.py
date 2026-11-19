@@ -121,6 +121,7 @@ class Layout:
     derived: Derived
     warnings: tuple[str, ...]
     collections: tuple[str, ...] = COLLECTIONS
+    clearances: tuple[tuple[str, tuple], ...] = ()
     root_collection: str = ROOT_COLLECTION
     materials: Mapping = field(default_factory=lambda: dict(MATERIAL_COLORS))
 
@@ -142,6 +143,7 @@ class Part:
     lights: tuple = ()
     cameras: tuple = ()
     warnings: tuple[str, ...] = ()
+    clearances: tuple = ()
 
 
 @dataclass(frozen=True)
@@ -266,6 +268,61 @@ def _module_spec(tag, s, label, m, Wc, Wk, Yc, D, Hp):
     return spec, y_max, warnings
 
 
+Poly = tuple[tuple[float, float], ...]
+
+
+@dataclass(frozen=True)
+class SideStair:
+    """Plan geometry of one lateral stair (side `s`), shared by the context and the builder."""
+
+    centre: tuple[float, float]
+    direction: tuple[float, float]
+    yaw: float
+    landing: Poly
+    steps: tuple[Poly, ...]
+    clearance: Poly | None
+    footprint: float
+
+
+def _oriented_rect(centre, d, a0, a1, b0, b1) -> Poly:
+    perp = (-d[1], d[0])
+    return tuple((centre[0] + a * d[0] + b * perp[0], centre[1] + a * d[1] + b * perp[1])
+                 for a, b in ((a0, b0), (a1, b0), (a1, b1), (a0, b1)))
+
+
+def _side_stair(s: int, W: float, Ys: float, n: int, st: Mapping) -> SideStair:
+    Ws, going, offset = st["width"], st["going"], st["side_offset"]
+    theta = math.radians(st["side_angle"])
+    x0 = W / 2 + offset
+    ylo, yhi = (Ys - Ws, Ys) if offset >= 0 else (-Ws, 0.0)
+    centre = (s * (x0 + Ws / 2), (ylo + yhi) / 2)
+    d = (s * math.sin(theta), -math.cos(theta))
+    landing = tuple((s * x, y) for x, y in ((x0, ylo), (x0 + Ws, ylo), (x0 + Ws, yhi), (x0, yhi)))
+    steps = tuple(_oriented_rect(centre, d, Ws / 2 + (j - 1) * going, Ws / 2 + j * going,
+                                 -Ws / 2, Ws / 2) for j in range(1, n))
+    length = (n - 1) * going
+    clear = st["clearance"]
+    clearance = (_oriented_rect(centre, d, Ws / 2 + length, Ws / 2 + length + clear, -Ws / 2, Ws / 2)
+                 if clear > 0 else None)
+    shapes = [landing, *steps] + ([clearance] if clearance else [])
+    corners = [p for poly in shapes for p in poly]
+    footprint = max(abs(x) for x, _ in corners) - W / 2
+    return SideStair(centre, d, math.atan2(d[1], d[0]), landing, steps, clearance, footprint)
+
+
+def _polys_overlap(a: Poly, b: Poly) -> bool:
+    """Separating-axis test for two convex polygons (touching edges do not overlap)."""
+    for poly in (a, b):
+        for i in range(len(poly)):
+            (x0, y0), (x1, y1) = poly[i], poly[(i + 1) % len(poly)]
+            axis = (y0 - y1, x1 - x0)
+            pa = [p[0] * axis[0] + p[1] * axis[1] for p in a]
+            pb = [p[0] * axis[0] + p[1] * axis[1] for p in b]
+            if max(pa) <= min(pb) + 1e-9 or max(pb) <= min(pa) + 1e-9:
+                return False
+    return True
+
+
 def _make_context(raw) -> tuple[Ctx, list[str]]:
     p, warnings = validate_params(raw)
     st, adv, stairs = p["stage"], p["advanced"], p["stairs"]
@@ -287,9 +344,7 @@ def _make_context(raw) -> tuple[Ctx, list[str]]:
     n = max(n, 1)
     riser_h = Hp / n
     stair_len = (n - 1) * stairs["going"]
-    theta = math.radians(stairs["side_angle"])
-    Ws = stairs["width"]
-    footprint = (Ws / 2 + math.sin(theta) * (Ws / 2 + stair_len) + math.cos(theta) * Ws / 2)
+    footprint = _side_stair(1, W, Ys, n, stairs).footprint
     lateral = stairs["left"] or stairs["right"]
     Z = adv["side_zone_width"]
     if lateral and footprint > Z + EPS:
@@ -452,28 +507,46 @@ def _architecture(c: Ctx) -> Part:
 def _stairs(c: Ctx) -> Part:
     st = c.p["stairs"]
     n, going, Hp, Ws = c.risers, st["going"], c.Hp, st["width"]
-    theta = math.radians(st["side_angle"])
-    objs, warnings = [], []
+    objs: list = []
+    warnings: list = []
+    clearances: list = []
+    center_poly = None
+    if st["center"]:
+        cw = st["center_width"]
+        center_poly = ((-cw / 2, -(n - 1) * going), (cw / 2, -(n - 1) * going), (cw / 2, 0.0),
+                       (-cw / 2, 0.0))
+    sides = []
     for tag, s in (("L", -1), ("R", 1)):
         if not st["left" if s < 0 else "right"]:
             continue
+        label = "jardin" if s < 0 else "cour"
+        geo = _side_stair(s, c.W, c.Ys, n, st)
+        sides.append((s, label, geo))
+        xs = [p[0] for p in geo.landing]
         objs.append(_box(f"Stairs_Landing_{tag}", "TS_Stairs", STAIRS,
-                         (min(s * c.W / 2, s * (c.W / 2 + Ws)), c.Ys - Ws, 0.0),
-                         (max(s * c.W / 2, s * (c.W / 2 + Ws)), c.Ys, Hp)))
-        centre = (s * (c.W / 2 + Ws / 2), c.Ys - Ws / 2, 0.0)
-        d = (s * math.sin(theta), -math.cos(theta))
-        yaw = math.atan2(d[1], d[0])
-        min_y = c.Ys - Ws
+                         (min(xs), min(p[1] for p in geo.landing), 0.0),
+                         (max(xs), max(p[1] for p in geo.landing), Hp)))
+        origin = (*geo.centre, 0.0)
         for j in range(1, n):
             a0, a1 = Ws / 2 + (j - 1) * going, Ws / 2 + j * going
-            top = (n - j) * Hp / n
             objs.append(_box(f"Stairs_Step_{tag}_{_nn(j)}", "TS_Stairs", STAIRS,
-                             (a0, -Ws / 2, 0.0), (a1, Ws / 2, top), centre, yaw))
-            for a in (a0, a1):
-                for b in (-Ws / 2, Ws / 2):
-                    min_y = min(min_y, centre[1] + a * d[1] + b * d[0])
-        if min_y < -c.A - EPS:
-            warnings.append(f"L'escalier {'jardin' if s < 0 else 'cour'} dépasse de l'avant-scène.")
+                             (a0, -Ws / 2, 0.0), (a1, Ws / 2, (n - j) * Hp / n), origin, geo.yaw))
+        if min(p[1] for poly in geo.steps for p in poly) < -c.A - EPS:
+            warnings.append(f"L'escalier {label} dépasse de l'avant-scène.")
+        if geo.clearance:
+            clearances.append((f"Stairs_Clearance_{tag}", geo.clearance))
+        if geo.clearance and min(p[1] for p in geo.clearance) < -c.Yh - EPS:
+            warnings.append(f"Le dégagement de l'escalier {label} sort de la salle dessinée.")
+        drawn = (geo.landing, *geo.steps)
+        if center_poly and any(_polys_overlap(poly, center_poly) for poly in drawn):
+            warnings.append(f"L'escalier {label} chevauche l'escalier central.")
+    if len(sides) == 2 and any(abs(p[0]) < EPS or p[0] * sides[0][0] < 0
+                               for poly in (sides[0][2].landing, *sides[0][2].steps) for p in poly):
+        warnings.append("Les escaliers jardin et cour se croisent.")
+    else:
+        for s, label, geo in sides:
+            if any(p[0] * s < -EPS for poly in (geo.landing, *geo.steps) for p in poly):
+                warnings.append(f"L'escalier {label} dépasse l'axe de la scène.")
     if st["center"]:
         cw = st["center_width"]
         for j in range(1, n):
@@ -481,7 +554,7 @@ def _stairs(c: Ctx) -> Part:
                              (-cw / 2, -j * going, 0.0), (cw / 2, -(j - 1) * going, (n - j) * Hp / n)))
         if (n - 1) * going > c.A + EPS or cw > c.Wt + EPS:
             warnings.append("L'escalier central dépasse de l'avant-scène.")
-    return Part(tuple(objs), warnings=tuple(warnings))
+    return Part(tuple(objs), warnings=tuple(warnings), clearances=tuple(clearances))
 
 
 def _modules(c: Ctx) -> Part:
@@ -642,12 +715,13 @@ FAMILIES: tuple[Callable[[Ctx], Part], ...] = (
 def compute_layout(params: Mapping | None = None) -> Layout:
     """Full scene description for `params` (nested dict, validated and clamped)."""
     ctx, warnings = _make_context(params)
-    objects, lights, cameras = [], [], []
+    objects, lights, cameras, clearances = [], [], [], []
     for family in FAMILIES:
         part = family(ctx)
         objects.extend(part.objects)
         lights.extend(part.lights)
         cameras.extend(part.cameras)
+        clearances.extend(part.clearances)
         warnings.extend(part.warnings)
     masking_battens = sum(1 for o in objects if o.name.startswith("MaskingBatten_"))
     derived = Derived(
@@ -657,4 +731,5 @@ def compute_layout(params: Mapping | None = None) -> Layout:
         masking_batten_count=masking_battens, masking_y0=ctx.plan.y0, masking_y1=ctx.plan.y1,
         backdrop_y=ctx.plan.yb, lane_width=ctx.plan.lane_width, modules_max_y=ctx.ymod,
     )
-    return Layout(tuple(objects), tuple(lights), tuple(cameras), derived, tuple(warnings))
+    return Layout(tuple(objects), tuple(lights), tuple(cameras), derived, tuple(warnings),
+                  clearances=tuple(clearances))

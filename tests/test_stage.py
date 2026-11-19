@@ -24,7 +24,7 @@ def test_step_count_and_tops_follow_the_risers():
 
 def test_total_width_depends_on_the_side_angle():
     assert layout(stairs={"side_angle": 0.0}).derived.total_width == pytest.approx(14.0)
-    assert layout(stairs={"side_angle": 90.0}).derived.total_width == pytest.approx(17.0)
+    assert layout(stairs={"side_angle": 90.0}).derived.total_width == pytest.approx(19.0)
     assert layout().derived.frame_opening == pytest.approx(10.0)
     assert layout().derived.cage_width == pytest.approx(14.0)
     assert layout(stage={"wings": 0.5}).derived.cage_width == pytest.approx(11.0)
@@ -38,7 +38,7 @@ def test_enclosure_stays_symmetric_with_a_single_side_stair():
     assert wr[0][0] == pytest.approx(lay.derived.total_width / 2)
     fx = bounds(lay, "Facade")[0]
     assert fx[0] == pytest.approx(-fx[1])
-    assert lay.derived.total_width == pytest.approx(17.0)
+    assert lay.derived.total_width == pytest.approx(19.0)
 
 
 def test_side_zone_widens_with_a_warning_only_when_stairs_need_it():
@@ -105,7 +105,7 @@ def test_proscenium_and_facade_dimensions():
     lay = layout()
     assert approx_bounds(bounds(lay, "Proscenium_Post_L"), ((-5.8, -5.0), (1.25, 1.6), (1.2, 6.2)))
     assert approx_bounds(bounds(lay, "Proscenium_Lintel"), ((-5.8, 5.8), (1.25, 1.6), (6.2, 7.0)))
-    assert approx_bounds(bounds(lay, "Facade"), ((-8.5, 8.5), (1.2, 1.5), (0.0, 7.3)))
+    assert approx_bounds(bounds(lay, "Facade"), ((-9.5, 9.5), (1.2, 1.5), (0.0, 7.3)))
 
 
 def test_facade_without_side_zone_is_a_plain_lintel_band():
@@ -258,7 +258,7 @@ def test_ceiling_is_a_single_face_pointing_down_over_the_house():
     assert ceiling.material == "TS_HouseCeiling"
     mesh = build_mesh(ceiling)
     assert len(mesh.faces) == 1
-    assert approx_bounds(bounds(lay, "House_Ceiling"), ((-8.5, 8.5), (-12.0, 1.2), (7.3, 7.3)))
+    assert approx_bounds(bounds(lay, "House_Ceiling"), ((-9.5, 9.5), (-12.0, 1.2), (7.3, 7.3)))
     pts = [mesh.vertices[i] for i in mesh.faces[0]]
     nz = sum((a[0] - b[0]) * (a[1] + b[1]) for a, b in zip(pts, pts[1:] + pts[:1]))
     assert nz < 0
