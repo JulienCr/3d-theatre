@@ -170,8 +170,26 @@ Valeurs réglées sur capture pour retrouver le cadrage de
 | `border_bottom` | Bas des frises, au-dessus du plateau *(choix)* | 4,50 | 1 – 20 |
 | `backdrop` | Fond de scène | rideau noir | rideau noir / mur nu / cyclorama |
 | `drape` | Drapé (irrégularité des plis) | 0,5 | 0 – 1 |
+| `leg_angle` | Inclinaison des pendrillons (à l'italienne) | 0° | 0 – 20 |
+| `convergence` | Convergence de l'ouverture vers le lointain (à l'italienne) | 0° | 0 – 20 |
+| `borders_mode` | Hauteur des frises | calées sur la découverte | calées sur la découverte / manuelle |
 
 Le panneau n'affiche que les `lanes` premières cases de `borders`.
+`border_bottom` ne sert qu'en mode manuel. Parallèles = 0° / 0°, en biais =
+inclinaison / 0°, convergents = inclinaison / convergence.
+
+### 3.8 bis Découverte — `sightlines`
+
+| Clé | Libellé | Défaut | Bornes |
+|---|---|---|---|
+| `seat_distance` | Premier rang : distance au nez *(choix)* | 2,00 | 0,50 – 30 |
+| `seat_wall_gap` | Fauteuil extrême : écart au mur de salle *(choix)* | 0,50 | 0 – 10 |
+| `eye_height` | Hauteur d'œil, assis, au-dessus du sol de salle *(choix)* | 1,10 | 0,80 – 3 |
+
+Source de la méthode : machinerie-spectacle.org, « Tracer une découverte »
+(fauteuil de référence au premier rang, à l'extrémité jardin ou cour, tracé
+en plan puis en coupe, plan par plan vers le lointain). La page ne donne
+aucun chiffre : les trois valeurs ci-dessus sont des choix.
 
 ### 3.9 Rideau de scène — `curtains`
 
@@ -539,10 +557,25 @@ porteuses lumière, à `Z = Zb`.
 
 ### 8.3 Pendrillons (`TS_Masking`)
 
-- **À l'italienne** : `Leg_L_NN` / `Leg_R_NN` dans le plan `k`, de
-  `X = ∓opening/2` jusqu'au mur de cage `∓Wk/2` : **chaque pendrillon touche
-  son mur**, sans jamais le traverser (dérive des plis comprise). Pas de
-  réglage de largeur. Ouverture ≥ `Wk` → aucun pendrillon et alerte.
+- **À l'italienne** : `Leg_L_NN` / `Leg_R_NN` au plan `k`, du bord
+  intérieur jusqu'au mur de cage `∓Wk/2` : **chaque pendrillon touche son
+  mur**, sans jamais le traverser (dérive des plis comprise). Pas de réglage
+  de largeur. Ouverture ≥ `Wk` → aucun pendrillon et alerte.
+  - Bord intérieur (pivot) : `I_k = (s·a_k, Y_k)` avec
+    `a_k = opening/2 + (Y_k − Y_1)·tan(convergence)` : le premier plan garde
+    l'ouverture nominale, les suivants s'écartent vers le lointain.
+  - Direction vers le mur : `(s·cos α, −sin α)` avec `α = leg_angle` : le bord
+    extérieur avance vers le public. Longueur `(Wk/2 − a_k)/cos α`.
+  - Incliné (`α > 0`), un pendrillon ne pend plus sous la porteuse droite de
+    son plan : il reçoit sa propre perche `LegPipe_L_NN` / `_R_NN` (tube de
+    porteuse, `TS_Batten`, à `Zb`, le long de son bord haut). La porteuse
+    `MaskingBatten_NN` reste droite et porte la frise.
+  - Collision : le bord extérieur d'un pendrillon incliné ne doit croiser ni
+    un module, ni le plan de la frise de face, ni le plan du rideau de
+    scène. Sinon alerte « Pendrillon … : trop incliné pour la rue ». Deux
+    pendrillons inclinés successifs ne se croisent jamais (droites
+    parallèles, bords intérieurs qui s'écartent).
+  - Inclinaison et convergence ne s'appliquent pas à l'allemande.
 - **À l'allemande** : `Leg_L` / `Leg_R` continus, parallèles à Y, à
   `X = ∓opening/2`, de `Y0` à `Y1`. Pas de rues ; `lanes` ne fixe plus que
   les plans des frises.
@@ -551,9 +584,10 @@ porteuses lumière, à `Z = Zb`.
 
 - `Border_NN` au plan `k` si `borders[k]` est coché, `Border_00` (frise de
   face) si `front_border` : **de mur à mur** (`Wk`, plis compris, sans
-  traverser les murs), de `Hp + border_bottom` à
-  `Zb`, posée 0,10 côté salle du plan pour couvrir le haut des pendrillons.
-  Si `border_bottom ≥ Zb − Hp` : aucune frise et alerte.
+  traverser les murs), du bas de frise à `Zb`, posée 0,10 côté salle du plan
+  pour couvrir le haut des pendrillons. Les frises restent parallèles au
+  cadre. Bas de frise : `Hp + border_bottom` en mode manuel, calculé par la
+  découverte sinon (8.7). Bas de frise ≥ `Zb` : aucune frise et alerte.
 - Fond : rideau noir `Backdrop` (`TS_Masking`, plissé, plan `Yb`, de mur à
   mur) ; mur nu : rien, `Cage_Back` est visible ; cyclorama
   `Cyclorama` (`TS_Cyclorama`, plat, plan `Yb`, largeur `Wc − 0,60`).
@@ -632,6 +666,42 @@ Pour voir les faisceaux, sans alourdir le rendu.
   échantillons et plage début/fin ne changent pas l'image, même avec le
   dégradé (écart maximal 0,004 entre légère et fine) : on garde « légère ».
   La densité s'anime : le driver suit des images clés sur `haze.density`.
+
+### 8.7 Découverte depuis le fauteuil de référence
+
+Calculée dans `core`, testée, sans rien dessiner dans la scène.
+
+- **Œil de coupe** `E = (Y = −seat_distance, Z = eye_height)` (sol de salle
+  à 0). **Fauteuils de plan** `S_jardin = (−(Wt/2 − seat_wall_gap),
+  −seat_distance)` et `S_cour` en miroir ; les coulisses cour se contrôlent
+  depuis `S_jardin`, et inversement.
+- **En coupe, à cacher** : le dessous du gril (`Z = Hp + Hg`) et toutes les
+  porteuses (lumière et pendrillonnage, à `Zb`), de `Yc` jusqu'au fond
+  (`Yb`). **Écrans** : le bas du linteau (`Hp + Hc`, plan du cadre), puis le
+  bas de chaque frise présente, de la face vers le lointain. Un point `P`
+  est caché si le segment `E → P` passe au-dessus du bas d'un écran situé
+  devant lui (hauteur de la ligne au plan de l'écran ≥ bas de l'écran).
+- **Frises calées sur la découverte** (mode par défaut) : de la face vers le
+  lointain, chaque frise présente prend le bas **le plus haut** qui cache
+  encore tout ce qui se trouve entre son plan et l'écran suivant (ou le
+  fond) : `Z_k = min` sur ces points `P` de
+  `E_z + (P_z − E_z)·(Y_k − E_y)/(P_y − E_y)`. Une frise décochée reporte
+  sa zone sur la précédente. Valeurs affichées dans « Cotes calculées ».
+  Bas calculé sous `Hp + 2,20` *(choix : passage d'un comédien et d'un
+  décor)* → alerte « Frise … très basse ». La frise de face et le linteau
+  participent ; le linteau est fixe.
+- **Mode manuel** : mêmes calculs, mais en contrôle seulement ; alerte
+  « Découverte verticale : porteuse … visible depuis le premier rang ».
+- **En plan** : pour chaque rue `k` et chaque côté, la ligne qui part du
+  fauteuil opposé et rase le bord intérieur de l'écran de devant (bord du
+  cadre, module ou pendrillon `k`) donne la profondeur de coulisse visible
+  au plan suivant. Elle est affichée dans « Cotes calculées » ; si la ligne
+  atteint le mur de cage avant le plan suivant, alerte « Découverte en
+  coulisse … rue k : le mur de cage se voit ». Avec des pendrillons qui
+  vont jusqu'au mur, rien d'autre ne peut se voir au-delà.
+- Tests : géométrie de référence calculée à la main (un plan, une porteuse),
+  frise décochée, mode manuel qui alerte quand on remonte une frise, plan :
+  profondeur visible qui croît avec la convergence.
 
 ## 9. Préréglages YAML
 
