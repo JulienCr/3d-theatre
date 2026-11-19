@@ -1,0 +1,19 @@
+schema_version = "1.0.0"
+
+id = "theatre_stage"
+version = "0.1.0"
+name = "Théâtre"
+tagline = "Parametric theatre stage mock-up with masking and curtains"
+maintainer = "3d-theatre"
+type = "add-on"
+
+tags = ["3D View", "Object"]
+
+blender_version_min = "5.3.0"
+license = ["SPDX:GPL-3.0-or-later"]
+
+platforms = ["windows-x64"]
+wheels = ["./wheels/pyyaml-6.0.3-cp313-cp313-win_amd64.whl"]
+
+[permissions]
+files = "Read shipped presets and write user presets"
