@@ -296,9 +296,10 @@ décalage latéral :
   d'appui (`|θ| ≤ 45°`) ou du bord `x = s·(W/2 + o)` (`|θ| > 45°`). Devant la
   scène à 0°, la première contremarche est le bandeau et le plateau sert de
   dernière marche : l'escalier arrive droit sur le nez, sans promontoire.
-- Arrivée : le bord par lequel on quitte l'escalier (bord arrière du palier,
-  ou haut de la volée sans palier) doit toucher le plateau sur au moins
-  0,60 m (nez de scène, ou flanc de l'avant-plateau entre `0` et `Ys`).
+- Arrivée : un bord du palier (n'importe lequel : le palier par défaut
+  touche le plateau par son flanc, pas par son bord arrière), ou le haut de
+  la volée sans palier, doit toucher le plateau sur au moins 0,60 m (nez de
+  scène, ou flanc de l'avant-plateau entre `0` et `Ys`).
   Sinon alerte : « L'escalier X n'arrive pas sur le plateau : ajouter un
   palier ou le décaler devant la scène. »
 - Volée : centrée en travers sur le palier pour `|θ| ≤ 45°`, adossée à la
