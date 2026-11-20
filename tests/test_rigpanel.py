@@ -1,5 +1,7 @@
 """Panel text of the computed rig (spec 13.10, 15.1)."""
 
+from dataclasses import replace
+
 import pytest
 
 from core.layout import compute_layout
@@ -37,6 +39,13 @@ def test_sixteen_bit_pan_is_shown_as_one_integer(rig):
     mover = next(f for f in rig.fixtures if f.moving and len(f.pan_dmx) == 2)
     value = mover.pan_dmx[0] * 256 + mover.pan_dmx[1]
     assert f"(DMX {value})" in next(line for line in mover_lines(rig) if line.startswith(mover.name))
+
+
+def test_a_mover_without_pan_channel_says_so_instead_of_none(rig):
+    mover = next(f for f in rig.fixtures if f.moving)
+    bare = replace(rig, fixtures=(replace(mover, pan_dmx=None),))
+    line = mover_lines(bare)[0]
+    assert "None" not in line and "pan " in line and "(sans canal)" in line.split("tilt")[0]
 
 
 def test_patch_rows_follow_the_patch_order(rig):

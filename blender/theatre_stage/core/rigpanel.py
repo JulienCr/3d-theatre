@@ -43,9 +43,12 @@ def dimension_lines(rig: Rig) -> list[str]:
     return lines
 
 
+def _dmx_text(data: tuple[int, ...] | None) -> str:
+    return "sans canal" if data is None else f"DMX {_dmx_value(data)}"
+
+
 def _aim_line(f: RigFixture, pan: float, tilt: float) -> str:
-    return (f"{f.name} : pan {_number(pan)}° (DMX {_dmx_value(f.pan_dmx)}), "
-            f"tilt {_number(tilt)}° (DMX {_dmx_value(f.tilt_dmx)})")
+    return f"{f.name} : pan {_number(pan)}° ({_dmx_text(f.pan_dmx)}), tilt {_number(tilt)}° ({_dmx_text(f.tilt_dmx)})"
 
 
 def mover_lines(rig: Rig) -> list[str]:
