@@ -109,11 +109,15 @@ rig_front:
   ceiling_gap: 0.3
   auto_position: true
   y: -1.4
+  movers_offset: 1.5
+  movers_height_mode: auto
+  movers_z: 6.75
 backlight:
   enabled: true
   fixture: martin_mac_aura
   mode: default
   count: 6
+  position: upstage
   distance: 3.1
 front_movers:
   enabled: true

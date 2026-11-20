@@ -143,6 +143,8 @@ cotes ; le plan SVG indique 1,00 × 2,40.
 | `batten_spacing` | Espacement des porteuses *(choix)* | 1,00 | 0,20 – 5 |
 | `batten_drop` | Porteuses sous le gril | 0,50 | 0 – 10 |
 
+La porteuse de la dernière rue (fond de scène) vient en plus de ce réseau régulier : section 5.5.
+
 ### 3.6 Lumières de travail — `lights`
 
 | Clé | Libellé | Défaut | Bornes |
@@ -231,9 +233,16 @@ section 13). `enabled` décoché : aucun objet de la section 13, aucun patch.
 | `ceiling_gap` | Écart de la perche sous le plafond de salle *(choix)* | 0,30 | 0,05 – 2 |
 | `auto_position` | Position en Y calculée | oui | |
 | `y` | Position en Y, mode manuel | −1,40 | −30 – 5 |
+| `movers_offset` | Recul de la seconde perche, celle des mobiles de face *(choix)* | 1,50 | 0,50 – 10 |
+| `movers_height_mode` | Hauteur de la seconde perche | `auto` | énumération (1) |
+| `movers_z` | Hauteur de la seconde perche, mode manuel | 6,75 | 2 – 15 |
 
-Le défaut manuel est la valeur que donne le calcul avec les défauts
-(section 13.2).
+(1) `auto` (« Calculée ») : la plus haute hauteur dont aucun faisceau ne
+rencontre un appareil (13.2 bis) ; `manual` (« Manuelle ») : `movers_z`. Le
+panneau n'affiche `movers_z` que dans ce second mode.
+
+Les défauts manuels (`y`, `movers_z`) sont les valeurs que donne le calcul avec
+les défauts (sections 13.2 et 13.2 bis).
 
 ### 3.12 Contre — `backlight`
 
@@ -243,7 +252,8 @@ Le défaut manuel est la valeur que donne le calcul avec les défauts
 | `fixture` | Appareil | `martin_mac_aura` | énumération (1) |
 | `mode` | Mode DMX | mode par défaut de la fiche | énumération (2) |
 | `count` | Nombre d'appareils | 6 | 1 – 24 |
-| `distance` | Distance au nez de la porteuse visée *(choix)* | 3,10 | 0,50 – 30 |
+| `position` | Position | `upstage` | énumération (3) |
+| `distance` | Distance au nez de la porteuse visée *(choix)*, seulement en mode `distance` | 3,10 | 0,50 – 30 |
 
 (1) Énumération **dynamique** : les `id` des fiches de la bibliothèque dont la
 famille convient (section 12.2), relue au chargement de l'extension et par le
@@ -251,10 +261,14 @@ bouton « Recharger la bibliothèque ». Un `id` inconnu dans un préréglage do
 le défaut du paramètre et un avertissement.
 (2) Énumération dynamique : `default` (mode par défaut de la fiche) et les noms
 des modes de l'appareil choisi.
+(3) `upstage` (« Perche fond de scène », défaut) : la porteuse lumière la plus
+reculée qui reste devant la ligne de fond `Yb` (5.5) ; `distance` : la
+porteuse la plus proche de `distance` (13.4). Le panneau n'affiche `distance`
+que dans ce second mode.
 
-Défaut 3,10 *(choix)* : avec le pendrillonnage par défaut, seules les
-porteuses lumière à Y = 2,10 et 3,10 subsistent ; 4,00 se ramenait à 3,10 avec
-une alerte.
+Défaut `upstage` *(choix)* : un contre accroché à mi-scène (Y = 3,10 avec le
+pendrillonnage par défaut) n'est pas à la perche du fond, où l'on attend le
+contre. `distance` garde 3,10 *(choix)* pour le mode `distance`.
 
 ### 3.13 Mobiles de face — `front_movers`
 
@@ -453,6 +467,16 @@ murs de cage 0,20 ; parement de plancher 0,03 ; liseré du nez 0,05 ;
   pendrillonnage ou du plan du rideau de scène est retirée (section 8). Les
   restantes sont numérotées de la face vers le fond, sans trou. Les
   projecteurs s'y accrochent selon la section 13, par position en Y.
+- **Porteuse de la dernière rue** : la dernière rue va du dernier plan de
+  pendrillonnage à la ligne de fond `Yb` (8.1). Si aucune porteuse restante
+  n'y est (`plan_N < Y < Yb`), on en ajoute une au **milieu de l'intervalle
+  libre** de la rue, `[plan_N + 0,30 ; Yb − 0,30]` *(choix : 0,30, comme le
+  retrait ci-dessus)*, donc à 0,30 m au moins de toute porteuse de
+  pendrillonnage. C'est une porteuse lumière ordinaire, numérotée par Y avec
+  les autres (par défaut Y = 6,21, `Batten_03`). Rue trop étroite (intervalle
+  vide) : pas de porteuse et l'alerte « Dernière rue trop étroite pour une
+  porteuse lumière : aucune porteuse au fond de scène ». Avec la porteuse
+  de la dernière rue, le contre (13.4) a une perche de fond.
 
 ### 5.6 Escaliers latéraux (`TS_Stairs`)
 
@@ -643,7 +667,7 @@ La **catégorie** d'un objet généré est son matériau `TS_*` par défaut.
 - Collection racine `Theatre`, sous-collections `Theatre_Architecture`,
   `Theatre_Stairs`, `Theatre_Modules`, `Theatre_Grid`, `Theatre_Masking`,
   `Theatre_Curtains`, `Theatre_Lights`, `Theatre_Cameras`, `Theatre_Rig`
-  (perche de face, pylônes, bras), `Theatre_Fixtures` (hiérarchies d'appareils,
+  (perches de face, pylônes, bras), `Theatre_Fixtures` (hiérarchies d'appareils,
   section 14).
 - Chaque objet généré porte la propriété personnalisée `theatre_generated`.
   La reconstruction supprime **uniquement** ces objets et leurs données
@@ -939,10 +963,13 @@ Calculées dans `core`, rédigées en français, affichées dans le panneau :
 - bibliothèque : fiche invalide ou introuvable (12.7) ;
 - implantation : zone de jeu raccourcie (13.1) ; perche de face hors de la
   salle (13.2) ; point d'accroche hors du tube (13.3) ; porteuse à plus de
-  0,50 m de la distance demandée pour le contre, ou aucune porteuse (13.4) ;
+  0,50 m de la distance demandée pour le contre (mode `distance`), ou aucune
+  porteuse (13.4) ; dernière rue trop étroite pour une porteuse (5.5) ;
   pylône trop bas, sur un escalier ou hors de la salle (13.6) ; rang de PC
   dont la porteuse est trop en arrière (13.7) ; appareils qui se touchent sur
-  un tube (13.10) ;
+  un tube (13.10) ; seconde perche hors de la salle, ou sans hauteur qui
+  dégage les faisceaux (13.2 bis) ; faisceau gêné par un appareil, débattement
+  de pan et tilt qui touche un appareil d'un autre support (13.11) ;
 - photométrie : zone non couverte ou champ trop large, hors de la plage de
   zoom (13.7) ; découpe sans tube assez large, lame hors course ou lames non
   adaptées (13.8) ; pan/tilt hors course (13.9) ; température de couleur de
@@ -974,7 +1001,10 @@ Calculées dans `core`, rédigées en français, affichées dans le panneau :
     valides, outil GDTF sur un petit GDTF construit dans le test (offsets
     multiples → 16 bits, attributs inconnus gardés) ;
   - implantation : `Yp = −1,40` avec les défauts ; 16 PC et 4 circuits, aucune alerte avec
-    les trois préréglages livrés ; azimut par rang ; coupe haute (comédien ou linteau) ;
+    les trois préréglages livrés ; `Y2 = −2,90`, `Z2 = 6,75`, mobiles sur
+    `FrontPipe_02` ; hauteur automatique : la plus haute qui dégage, et
+    `Zp` quand rien ne gêne ; rayon de l'enveloppe contre les sommets des
+    modèles ; faisceau gêné par un obstacle, débattement qui touche ; azimut par rang ; coupe haute (comédien ou linteau) ;
     décalage en X `ΔY·tan(azimut)` et faisceaux parallèles en plan par
     direction ; champ requis, bornage au zoom et alerte ; accroche par Y
     (première porteuse, retrait d'une porteuse qui renumérote, contre à plus de
@@ -1324,11 +1354,39 @@ Tube Ø 0,048 (`TS_Batten`) sous le plafond de salle, parallèle au nez, X sur
 - Alertes : `Zp ≤ Za` ; `Yp` hors de `[−Yh + 0,30, Ys − 0,30]` (perche hors de
   la salle sous le plafond).
 - Aucune suspente n'est dessinée en v1.
+- `FrontPipe` porte les 8 PC du rang 0 et les 3 découpes (13.7, 13.8) ; les
+  mobiles de face sont sur la seconde perche (13.2 bis).
+
+### 13.2 bis Seconde perche — `FrontPipe_02`
+
+Tube identique à `FrontPipe` (Ø 0,048, `TS_Batten`, même longueur), parallèle
+au nez, **derrière** la première du point de vue du plateau, côté salle. Elle
+n'existe que si les mobiles de face sont posés. Raison : des mobiles ne
+peuvent pas bouger en réalité à côté des PC (sur la première perche, l'écart
+posé le plus petit était de 0,08 m avec les mobiles dessus, il est de 0,29 m
+sans), et leurs faisceaux doivent passer entre les corps.
+
+- `Y2 = Yp − movers_offset` (1,50 par défaut *(choix)* : `Y2 = −2,90`). Alerte
+  « Perche des mobiles hors de la salle » si `Y2 < −Yh + 0,30`.
+- **Hauteur `Z2`**. Mode `manual` : `Z2 = movers_z`. Mode `auto` : parmi
+  `Zp, Zp − 0,05, Zp − 0,10, …` jusqu'à `Hp + Hc` (hauteur du linteau
+  *(choix)*), la **première** valeur pour laquelle les contrôles de 13.11 ne
+  trouvent aucun faisceau gêné ni débattement qui touche un appareil. Aucune
+  ne convient : alerte « Perche des mobiles de face : aucune hauteur de … à …
+  ne dégage … » ; la hauteur retenue est celle qui laisse le moins de cas
+  bloqués (à égalité, le jeu le moins mauvais), et les cas bloqués sont
+  rapportés un à un par les alertes de 13.11. Valeur avec les défauts :
+  `Z2 = 6,75`, soit 0,25 m sous `Zp` : à `Zp`, le faisceau d'un mobile visant
+  le fond cour ou jardin frôle le corps des PC de la première perche.
+- Les calculs de la perche, `Zh`, l'accroche et le rangement sont ceux de
+  13.3 et 13.10 avec `(Y2, Z2)` ; la visée de repos des mobiles ne change pas
+  (13.5).
 
 ### 13.3 Points d'accroche sur les tubes
 
-Un appareil a un `Zh` : `Zp` pour la perche de face, `Zb` pour une porteuse
-lumière. Un `X` hors du tube (`±(Wt/2 − 0,10)` pour la perche,
+Un appareil a un `Zh` : `Zp` pour la perche de face, `Z2` pour la seconde
+perche, `Zb` pour une porteuse lumière. Un `X` hors du tube (`±(Wt/2 − 0,10)`
+pour les perches,
 `±(Wk/2 − 0,10)` pour une porteuse) est ramené à l'extrémité et signalé :
 « Point d'accroche hors de la perche : … ».
 
@@ -1336,17 +1394,23 @@ lumière. Un `X` hors du tube (`±(Wt/2 − 0,10)` pour la perche,
 
 `N = count` MAC Aura (par défaut), `NN` de 01 (jardin) à `N`.
 
-- `Yg = nearest_batten(distance).Y`, `Zh = Zb`, `X_i = spread(i, N)`. Alerte
-  si `|Yg − distance| > 0,50` (« Aucune porteuse à moins de 0,50 m de … :
-  contre posé à … m »). Sans aucune porteuse : pas de contre, alerte.
+- `Zh = Zb`, `X_i = spread(i, N)`. Porteuse : `position = upstage` (défaut) :
+  la plus reculée des porteuses lumière devant `Yb`, c'est-à-dire la
+  porteuse de la dernière rue (5.5). `position = distance` :
+  `Yg = nearest_batten(distance).Y`, avec l'alerte si
+  `|Yg − distance| > 0,50` (« Aucune porteuse à moins de 0,50 m de … : contre
+  posé à … m »). Sans aucune porteuse : pas de contre, alerte.
 - **Visée de repos** : `T = (X_i, yr_j, Za)` où `j` est le rang dont le centre
   est le plus grand `yr_j < Yg` (zone devant le contre, côté face) ; à
-  défaut `j = 0`.
+  défaut `j = 0`. Depuis la perche du fond (Y = 6,21, Z = 6,80), les contres
+  visent le rang 2 (Y = 4,50) : pan 0°, tilt 25,4° vers la salle, soit un
+  faisceau à 65° au-dessus de l'horizontale.
 
 ### 13.5 Mobiles de face — `FrontMover_NN`
 
 `N = count` Esprite (par défaut), `NN` de 01 à `N`, jardin vers cour. Accroche
-`(spread(i, N), Yp, Zp)` sur `FrontPipe`. Visée de repos `T = (X_i, yr_0, Za)`.
+`(spread(i, N), Y2, Z2)` sur `FrontPipe_02` (13.2 bis). Visée de repos
+`T = (X_i, yr_0, Za)`. Le patch reste l'univers 2 (15.1).
 
 ### 13.6 Pylônes — `Tower_L_NN`, `Tower_R_NN`
 
@@ -1389,12 +1453,14 @@ Deux appareils par zone, un par direction `d` : `L` (accroché côté jardin,
   azimut `az_j` pour tous les appareils d'une direction d'un rang : faisceaux
   parallèles en plan ; le site varie avec le rang.
 - **Azimut par rang** *(choix)* : avec 4 colonnes, le croisement place sur un même
-  tube des PC de directions opposées à quelques centimètres l'un de l'autre
-  (`FrontPC_L_07` et `FrontPC_R_05` sur `Batten_01`, 0,2 m). Pour chaque rang,
+  tube des PC de directions opposées proches l'un de l'autre
+  (`FrontPC_L_07` et `FrontPC_R_05` sur `Batten_01`, 0,34 m) et, panotés de
+  ±132°, leurs têtes s'entrecoupent. Pour chaque rang,
   `az_j` est l'azimut le plus proche de `azimuth` (pas de 0,5°, en alternant
-  + et −, jusqu'à ±10°) tel que deux PC du tube ne soient jamais à moins de
-  `(width_a + width_b)/2` en X, que les points d'accroche restent sur le tube et
-  que chaque zone tienne dans le champ le plus large de la fiche. Les deux
+  + et −, jusqu'à ±10°) tel que les **empreintes posées** (13.10) de deux PC du
+  tube ne se recouvrent jamais, que les points d'accroche restent sur le tube et
+  que chaque zone tienne dans le champ le plus large de la fiche. Par défaut :
+  45° au rang 1, 50° au rang 2. Les deux
   directions du rang utilisent ce même `az_j`. Aucun azimut ne convient :
   alerte « Rang j : aucun azimut … » et azimut nominal conservé. L'azimut de
   chaque rang est affiché dans « Cotes calculées ». Le rangement des autres
@@ -1531,26 +1597,88 @@ Récapitulatif des visées de repos :
 
 ### 13.10 Charges, encombrement et « Cotes calculées »
 
-- **Charge** cumulée par support (perche de face, chaque porteuse lumière,
-  chaque pylône) : somme des `physical.weight`. Affichée, **sans alerte de
+- **Charge** cumulée par support (chaque perche de face, chaque porteuse
+  lumière, chaque pylône) : somme des `physical.weight`. Affichée, **sans alerte de
   dépassement** (`BACKLOG.md`).
-- **Encombrement et rangement** : sur un même tube (la perche de face ou une
-  porteuse lumière), deux appareils dont les axes sont à moins de
-  `(width_a + width_b)/2` en X (`dimensions.width`) se touchent. Les PC de
-  face gardent **leur X exact** (faisceaux parallèles, 13.7). Tout autre
-  appareil du tube (contre, mobiles de face, découpes), dans l'ordre contre,
-  mobiles de face, découpes puis numéro, est placé au X libre **le plus
-  proche** de son X voulu, cherché par pas de 0,05 m en alternant les côtés
-  (le côté du centre du tube d'abord), sans sortir du tube. Sa visée reste le
+- **Empreinte posée** : la largeur de la fiche ne suffit pas, une tête panotée
+  et inclinée déborde de son corps. L'empreinte d'un appareil sur son support
+  est l'intervalle des sommets de son modèle (14.2 : embase, étrier, tête)
+  projetés sur l'axe du support, une fois le modèle placé : racine, rotation
+  de 180° autour de X, pan puis tilt (13.9), agrandi de 0,02 m de chaque
+  côté *(choix)*. Par simplification, on projette les huit coins de la boîte
+  englobante de chaque pièce, ce qui majore l'intervalle ; le modèle pris est
+  celui du tube de lentille par défaut de la fiche. L'axe est X pour une
+  perche ou une porteuse, Z pour les mobiles empilés d'un pylône. Deux
+  appareils d'un même support **se touchent** quand leurs intervalles se
+  recouvrent. Pan et tilt sont ceux de la visée de repos, à la position
+  d'accroche essayée.
+- **Enveloppe d'un appareil à pan et tilt** (contre, mobiles de face, mobiles
+  de pylône) : il ne reste pas à sa visée de repos, donc son empreinte est le
+  volume balayé sur toute sa course, quel que soit le pan. Rayon
+  `R` = plus grande distance à l'axe de pan des coins des boîtes englobantes
+  de la base, de l'étrier et de la tête, la tête étant tournée de
+  `tilt.min` à `tilt.max` par pas de 1°. Hauteurs : de `root_z − z_max` à
+  `root_z − z_min`, `z` étant la cote le long de `Z_b` des mêmes coins.
+  Intervalle sur le tube : `[x − R, x + R]`, sur un bras de pylône l'intervalle
+  en Z ; marge de 0,02 m de chaque côté. Esprite : `R = 0,365 m`, hauteur
+  0,76 m. C'est cet intervalle qui sert au rangement et à l'empilement des
+  pylônes ; les boîtes englobantes majorent les sommets (Esprite : 12 %).
+- **Encombrement et rangement** : sur un même tube (une perche de face ou une
+  porteuse lumière), deux appareils dont les empreintes posées se recouvrent
+  se touchent. Les PC de face gardent **leur X exact** (faisceaux parallèles,
+  13.7). Tout autre appareil du tube (contre, découpes, mobiles de face),
+  dans cet ordre puis par numéro, est placé au X libre **le plus proche** de
+  son X voulu, cherché par pas de 0,05 m en alternant les côtés (le côté du
+  centre du tube d'abord), sans sortir du tube ; l'empreinte se recalcule à
+  chaque X essayé. *(choix)* Les découpes passent avant les mobiles : leurs
+  lames ne tolèrent qu'un petit écart en X (inclinaison limitée à 20°), alors
+  qu'un mobile reprend sa visée par son pan et son tilt. Sa visée reste le
   point cible de sa famille (13.4, 13.5, 13.8) ; pan, tilt, tube et lames se
   calculent depuis le point d'accroche déplacé. Alerte « Appareils qui se
   touchent sur la perche : … » seulement si aucune position libre n'existe, ou
   entre deux PC dont le X est imposé. L'azimut par rang (13.7) a déjà écarté
-  les PC entre eux quand une solution existe. Les mobiles des pylônes ont chacun leur
-  bras et ne sont pas rangés.
-- Ajouts à l'encadré « Cotes calculées » : `Yp` et `Zp`, `Ya`, `nx × nr` et
-  `zw × zd`, azimut `az_j` de chaque rang de PC, tube et champ de chaque découpe, charges, plages de patch par
+  les PC entre eux quand une solution existe. Les mobiles d'un pylône ont
+  chacun leur bras et ne sont pas rangés : alerte « Appareils qui se touchent
+  sur le pylône … » si leurs empreintes en Z se recouvrent.
+- Ajouts à l'encadré « Cotes calculées » : `Yp` et `Zp`, `Y2` et `Z2`, `Ya`,
+  `nx × nr` et `zw × zd`, rayon `R` des mobiles de face, jeu minimal des
+  faisceaux (13.11), azimut `az_j` de chaque rang de PC, tube et champ de chaque découpe, charges, plages de patch par
   famille (15.1), pan et tilt (angles et valeurs DMX) de chaque mobile.
+
+### 13.11 Faisceaux et débattement
+
+Un faisceau est le cône de sommet la source (14.3), d'axe l'axe de la tête, de
+demi-angle la moitié du champ de la fiche (champ de repos pour un mobile :
+valeur par défaut du canal de zoom *(choix)*). Il va de la lentille au point
+visé : un appareil derrière le point visé ne coupe pas la lumière qui y arrive
+*(choix)*, et la portée est de 30 m au plus.
+
+- **Corps rencontrés** : pour tout autre appareil, les 27 points (coins,
+  milieux d'arêtes, centres de faces, centre) de la boîte englobante de chaque
+  pièce, posée avec le pan et le tilt de repos (13.10) ; pour un appareil à
+  pan et tilt, les points de son enveloppe (13.10), parce qu'il peut être
+  ailleurs. Hazer exclu.
+- **Jeu** d'un faisceau : plus petite distance signée des points entre la
+  lentille et le point visé au bord du cône, négative dedans. Le faisceau est
+  **gêné** si ce jeu est inférieur à 0,05 m *(choix)*.
+- **Visées contrôlées** : la visée de repos de chaque appareil ; de plus, pour
+  chaque mobile de face, les neuf points `X ∈ {−Wc/2, 0, Wc/2}`,
+  `Y ∈ {0, Ya/2, Ya}`, `Z = Za`. Pan et tilt sont ceux de ces visées, ramenés
+  dans la course (13.9). Un mobile de pylône ou de contre n'est contrôlé qu'à
+  sa visée de repos.
+- **Débattement** : l'enveloppe d'un appareil à pan et tilt ne doit contenir
+  aucun point d'un appareil posé sur un **autre** support (le même support est
+  réglé par le rangement, 13.10) ; deux enveloppes se touchent quand leurs
+  cylindres se recouvrent.
+- **Alertes** : « Faisceau de `A` vers (X ; Y ; Z) gêné par `B` : jeu … pour
+  0,05 m minimum. » (les huit plus mauvais, puis le nombre des autres) ;
+  « Débattement de pan et tilt : `A` et `B` se touchent. ». Le préréglage par
+  défaut et les deux préréglages livrés n'en lèvent aucune ; jeu minimal avec
+  les défauts : 0,06 m (visée `(±5,00 ; 6,00 ; 2,90)` d'un mobile de face,
+  corps d'un PC de la première perche).
+- Limites : le cône est celui du champ de la fiche, sans les lames d'une
+  découpe ni le gobo ; seuls les appareils sont des obstacles, pas les
+  tubes, le cadre ni les pylônes.
 
 ## 14. Appareils dans Blender
 
@@ -1561,7 +1689,8 @@ matériaux cherchés par nom.
 
 ### 14.1 Collections et noms
 
-- `Theatre_Rig` : `FrontPipe`, `Tower_L_NN` / `Tower_R_NN`,
+- `Theatre_Rig` : `FrontPipe`, `FrontPipe_02` (si les mobiles de face sont
+  posés), `Tower_L_NN` / `Tower_R_NN`,
   `TowerArm_L_NN_MM` / `TowerArm_R_NN_MM` (`NN` = pylône, `MM` = mobile, du haut
   vers le bas). Matériaux `TS_Batten` (tubes) et `TS_Truss`.
 - `Theatre_Fixtures` : une hiérarchie par appareil, nommée d'après la racine.

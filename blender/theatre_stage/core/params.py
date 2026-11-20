@@ -325,13 +325,29 @@ SCHEMA: tuple[Group, ...] = (
         _length("y", -1.40, -30.0, 5.0, "Position en Y",
                 "Position en Y de la perche, mode manuel (négatif : côté salle).",
                 shown_when=("auto_position", False)),
+        _length("movers_offset", 1.50, 0.5, 10.0, "Recul de la perche des mobiles",
+                "Distance en Y entre la perche de face et la seconde perche, côté salle, "
+                "qui porte les mobiles de face."),
+        _enum("movers_height_mode", "auto", "Hauteur de la perche des mobiles",
+              "Hauteur de la seconde perche : calculée pour dégager faisceaux et corps, ou imposée.", (
+                  ("auto", "Calculée", "La plus haute hauteur dont aucun faisceau ne rencontre un appareil."),
+                  ("manual", "Manuelle", "Hauteur imposée par « Hauteur de la perche des mobiles »."),
+              )),
+        _length("movers_z", 6.75, 2.0, 15.0, "Hauteur manuelle",
+                "Hauteur de la seconde perche, mode manuel.",
+                shown_when=("movers_height_mode", "manual")),
     )),
     Group("backlight", "Contre", (
         _flag("enabled", True, "Contre", "Appareils de contre, accrochés à une porteuse."),
         *_fixture_pair("martin_mac_aura", ("moving_wash",), "le contre"),
         _int("count", 6, 1, 24, "Nombre d'appareils", "Nombre d'appareils de contre."),
+        _enum("position", "upstage", "Position", "Porteuse qui reçoit le contre.", (
+            ("upstage", "Perche fond de scène", "La porteuse lumière la plus reculée."),
+            ("distance", "Distance au nez", "La porteuse la plus proche de la distance réglée."),
+        )),
         _length("distance", 3.10, 0.50, 30.0, "Distance au nez",
-                "Distance au nez de scène de la porteuse visée."),
+                "Distance au nez de scène de la porteuse visée.",
+                shown_when=("position", "distance")),
     )),
     Group("front_movers", "Mobiles de face", (
         _flag("enabled", True, "Mobiles de face", "Mobiles accrochés à la perche de face."),

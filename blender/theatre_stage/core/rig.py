@@ -8,7 +8,8 @@ degrees in the records, lengths in metres, 3-vectors are `(x, y, z)` tuples.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+import struct
+from dataclasses import dataclass, field, replace
 from functools import lru_cache
 from collections.abc import Mapping
 
@@ -16,6 +17,7 @@ from .fixtures import (
     SHIPPED_DIR, Blades, Channel, Dimensions, Fixture, Library, Mode, Mount, Optics, Range,
     cct_to_rgb, discover, encode,
 )
+from .fixture_models import fixture_model
 from .layout import (
     BATTEN_RADIUS, EPS, PROSCENIUM_RECESS, Ctx, Part, _metres, _nn, _polys_overlap,
     _side_stair,
@@ -47,6 +49,17 @@ MAX_PATCH_ALERTS = 8
 MAX_CHANNEL = 512
 AZIMUTH_STEP = 0.5
 AZIMUTH_SEARCH = 10.0
+FOOTPRINT_MARGIN = 0.02
+PIPE2_NAME = "FrontPipe_02"
+HEIGHT_STEP = 0.05
+TILT_STEP = 1.0
+BEAM_RANGE = 30.0
+BEAM_MARGIN = 0.05
+BEAM_NEAR = 0.50
+MAX_BEAM_ALERTS = 8
+GRID_X = (-0.5, 0.0, 0.5)
+GRID_Y = (0.0, 0.5, 1.0)
+_MODEL_ERRORS = (OSError, ValueError, KeyError, IndexError, struct.error)
 
 FAMILY_LABELS = {
     "backlight": "contre", "front_movers": "mobiles de face", "tower_movers": "mobiles de pylône",
@@ -57,7 +70,7 @@ FAMILY_GROUPS = {
     "front_pc": "front_pc", "profiles": "profiles", "hazer": "haze",
 }
 MOVER_GROUPS = {"backlight": "Backlight", "front_movers": "FrontMovers"}
-PACK_ORDER = {"backlight": 0, "front_movers": 1, "profiles": 2}
+PACK_ORDER = {"backlight": 0, "profiles": 1, "front_movers": 2}
 CUT_NAMES = ("bottom", "top", "left", "right")
 
 
@@ -197,7 +210,8 @@ class HazeLink:
 class RigDims:
     """Panel values of spec 13.10; `profiles` is (name, tube, field), `patch_ranges` (family, u, first, last).
 
-    `pc_azimuths` is the crossing azimuth used by each hung PC row.
+    `pc_azimuths` is the crossing azimuth used by each hung PC row. The `movers_*` fields are
+    None without a second pipe; `beam_clearance` is the smallest beam gap found (spec 13.11).
     """
 
     pipe_y: float
@@ -207,6 +221,10 @@ class RigDims:
     profiles: tuple[tuple[str, str | None, float], ...]
     patch_ranges: tuple[tuple[str, int, int, int], ...]
     pc_azimuths: tuple[float, ...] = ()
+    movers_pipe_y: float | None = None
+    movers_pipe_z: float | None = None
+    mover_radius: float | None = None
+    beam_clearance: float | None = None
 
 
 @dataclass(frozen=True)
@@ -340,6 +358,10 @@ class _Work:
         self.objects: list = []
         self.zones, self.za, self.ya = zones, za, ya
         self.azimuths: list[float] = []
+        self.models: dict = {}
+        self.boxes: dict = {}
+        self.envelopes: dict = {}
+        self.mover_radius: float | None = None
         self.uncovered: list[tuple[str, float, float]] = []
         self.too_wide: list[tuple[str, float, float]] = []
 
@@ -405,6 +427,12 @@ def _nearest_batten(c: Ctx, y: float) -> int | None:
     return min(range(len(c.light_batten_ys)), key=lambda i: abs(c.light_batten_ys[i] - y))
 
 
+def _upstage_batten(c: Ctx) -> int | None:
+    """Most upstage light batten still in front of the back line, else the most upstage one."""
+    front = [i for i, y in enumerate(c.light_batten_ys) if y < c.plan.yb]
+    return front[-1] if front else len(c.light_batten_ys) - 1 if c.light_batten_ys else None
+
+
 def _batten(c: Ctx, index: int) -> _Support:
     name = f"Batten_{_nn(index + 1)}"
     return _Support(name, c.light_batten_ys[index], c.plan.zb, c.Wk / 2 - PIPE_END_MARGIN,
@@ -440,18 +468,135 @@ def _front_pipe(w: _Work, zones: Zones, za: float) -> tuple[_Support, float]:
     return _Support("FrontPipe", yp, zp, c.Wt / 2 - PIPE_END_MARGIN, "la perche"), drop
 
 
+# ---------------------------------------------------------------- footprints
+
+@dataclass(frozen=True)
+class _Boxes:
+    """Bounding-box corners of the base, pan and tilt parts of a model, each in its own frame (14.2)."""
+
+    base: tuple[Vec3, ...]
+    pan: tuple[Vec3, ...]
+    tilt: tuple[Vec3, ...]
+    pivot: Vec3
+
+
+def _corners(mesh) -> tuple[Vec3, ...]:
+    if not mesh.vertices:
+        return ()
+    lo = [min(v[i] for v in mesh.vertices) for i in range(3)]
+    hi = [max(v[i] for v in mesh.vertices) for i in range(3)]
+    return tuple((x, y, z) for x in (lo[0], hi[0]) for y in (lo[1], hi[1]) for z in (lo[2], hi[2]))
+
+
+def _boxes(w: _Work, sheet: _Sheet) -> _Boxes | None:
+    """Corner boxes of the sheet's default model, or None when its model cannot be built."""
+    key = sheet.fixture.id
+    if key not in w.boxes:
+        try:
+            model = fixture_model(sheet.fixture, None, w.models)
+            w.boxes[key] = _Boxes(_corners(model.base), _corners(model.pan), _corners(model.tilt),
+                                  model.tilt_pivot)
+        except _MODEL_ERRORS:
+            w.boxes[key] = None
+    return w.boxes[key]
+
+
+def posed_points(boxes: _Boxes, root: Vec3, pan: float, tilt: float) -> list[Vec3]:
+    """World corners of the posed parts: the tilt part by `Rz(pan)(pivot + Rx(-tilt) v)`, then the
+    root's 180 degree turn about X (spec 13.9)."""
+    cp, sp = math.cos(math.radians(pan)), math.sin(math.radians(pan))
+    ct, st = math.cos(math.radians(tilt)), math.sin(math.radians(tilt))
+    px, py, pz = boxes.pivot
+    out: list[Vec3] = []
+    for part, corners in (("base", boxes.base), ("pan", boxes.pan), ("tilt", boxes.tilt)):
+        for x, y, z in corners:
+            if part == "tilt":
+                x, y, z = x + px, y * ct + z * st + py, -y * st + z * ct + pz
+            if part != "base":
+                x, y = cp * x - sp * y, sp * x + cp * y
+            out.append((root[0] + x, root[1] - y, root[2] - z))
+    return out
+
+
+@dataclass(frozen=True)
+class _Envelope:
+    """Volume swept by a moving head about its pan axis, in the body frame (spec 13.10).
+
+    `radius` is the horizontal reach; `low` and `high` bound the extent along Z_b (toward the
+    head), so the world heights are `root_z - high` to `root_z - low`.
+    """
+
+    radius: float
+    low: float
+    high: float
+
+
+def _swept(sheet: _Sheet, boxes: _Boxes | None) -> _Envelope:
+    if boxes is None:
+        d = sheet.dimensions
+        return _Envelope(math.hypot(d.width, d.depth) / 2, 0.0, d.height)
+    fixed = [*boxes.base, *boxes.pan]
+    px, py, pz = boxes.pivot
+    tilt = sheet.fixture.pan_tilt[1] if sheet.fixture.pan_tilt else Range(0.0, 0.0)
+    steps = max(1, math.ceil((tilt.max - tilt.min) / TILT_STEP))
+    for k in range(steps + 1):
+        t = math.radians(tilt.min + (tilt.max - tilt.min) * k / steps)
+        ct, st = math.cos(t), math.sin(t)
+        fixed += [(x + px, y * ct + z * st + py, -y * st + z * ct + pz) for x, y, z in boxes.tilt]
+    return _Envelope(max(math.hypot(x, y) for x, y, _ in fixed), min(z for *_, z in fixed),
+                     max(z for *_, z in fixed))
+
+
+def _envelope(w: _Work, sheet: _Sheet) -> _Envelope:
+    """Envelope of a moving head over its whole tilt range, whatever its pan (spec 13.10)."""
+    key = sheet.fixture.id
+    if key not in w.envelopes:
+        w.envelopes[key] = _swept(sheet, _boxes(w, sheet))
+    return w.envelopes[key]
+
+
+def _span_at(w: _Work, sheet: _Sheet, hang: Vec3, target: Vec3, axis: int = 0) -> tuple[float, float]:
+    """Interval of the posed model on a world axis (0 = X along a pipe, 2 = Z on a tower arm),
+    margin included; the swept envelope for a moving head (spec 13.10)."""
+    mount = sheet.mount
+    root = (hang[0], hang[1], hang[2] - mount.hook_height)
+    if sheet.fixture.pan_tilt is not None:
+        env = _envelope(w, sheet)
+        lo, hi = ((root[0] - env.radius, root[0] + env.radius) if axis == 0
+                  else (root[2] - env.high, root[2] - env.low))
+        return lo - FOOTPRINT_MARGIN, hi + FOOTPRINT_MARGIN
+    pivot = (root[0], root[1], root[2] - mount.tilt_axis_height)
+    pan, tilt, _ = _pan_tilt(sheet.fixture, _unit(_sub(target, pivot)))
+    boxes = _boxes(w, sheet)
+    if boxes is None:
+        half = sheet.dimensions.width / 2
+        values = [root[0] - half, root[0] + half] if axis == 0 else [root[2] - sheet.dimensions.height, root[2]]
+    else:
+        values = [p[axis] for p in posed_points(boxes, root, pan, tilt)]
+    return min(values) - FOOTPRINT_MARGIN, max(values) + FOOTPRINT_MARGIN
+
+
+def _overlaps(a: tuple[float, float], b: tuple[float, float]) -> bool:
+    return a[0] < b[1] - EPS and b[0] < a[1] - EPS
+
+
+def _slot_span(w: _Work, s: _Slot, x: float, axis: int = 0) -> tuple[float, float]:
+    return _span_at(w, s.sheet, (x, s.y, s.z), s.target, axis)
+
+
 # ------------------------------------------------------------------ families
 
 def _plan_backlight(w: _Work, zones: Zones, za: float) -> None:
     c, node = w.c, w.c.p["backlight"]
     if not node["enabled"] or (sheet := w.sheet("backlight", node)) is None:
         return
-    index = _nearest_batten(c, node["distance"])
+    upstage = node["position"] == "upstage"
+    index = _upstage_batten(c) if upstage else _nearest_batten(c, node["distance"])
     if index is None:
         w.warn("Aucune porteuse lumière : pas de contre.")
         return
     tube = _batten(c, index)
-    if abs(tube.y - node["distance"]) > BATTEN_TOLERANCE + EPS:
+    if not upstage and abs(tube.y - node["distance"]) > BATTEN_TOLERANCE + EPS:
         w.warn(f"Aucune porteuse à moins de {_metres(BATTEN_TOLERANCE)} de "
                f"{_metres(node['distance'])} : contre posé à {_metres(tube.y)}.")
     rows = [j for j, yr in enumerate(zones.ys) if yr < tube.y - EPS]
@@ -464,16 +609,24 @@ def _plan_backlight(w: _Work, zones: Zones, za: float) -> None:
                     circuit=MOVER_GROUPS["backlight"]))
 
 
-def _plan_front_movers(w: _Work, zones: Zones, za: float, pipe: _Support) -> None:
+def _plan_front_movers(w: _Work, zones: Zones, za: float, front: _Support) -> _Support | None:
+    """Hang the front movers on the second pipe, provisionally at the height of the first (13.2 bis)."""
     node = w.c.p["front_movers"]
     if not node["enabled"] or (sheet := w.sheet("front_movers", node)) is None:
-        return
+        return None
+    y = front.y - w.c.p["rig_front"]["movers_offset"]
+    if y < -w.c.Yh + FRAME_OFFSET:
+        w.warn(f"Perche des mobiles hors de la salle : Y = {_metres(y)}.")
+    pipe = _Support(PIPE2_NAME, y, front.z, front.limit, "la seconde perche de face")
     n = node["count"]
     for i in range(n):
         x, name = spread(i, n, w.c.Wc), f"FrontMover_{_nn(i + 1)}"
         w.add(_Slot(name, "front_movers", sheet, _clamp_x(w, name, x, pipe), pipe.y, pipe.z,
                     (x, zones.ys[0], za), pipe.name, pipe.name, pipe.limit,
                     circuit=MOVER_GROUPS["front_movers"]))
+    if sheet.fixture.pan_tilt is not None:
+        w.mover_radius = _envelope(w, sheet).radius
+    return pipe
 
 
 def _row_x(zones: Zones, drop: float, azimuth: float) -> list[tuple[str, int, float]]:
@@ -484,19 +637,22 @@ def _row_x(zones: Zones, drop: float, azimuth: float) -> list[tuple[str, int, fl
 
 
 def _row_azimuth(w: _Work, tube: _Support, yr: float, nominal: float, sheet: _Sheet,
-                 taken: list[float]) -> float | None:
-    """Azimuth nearest to `nominal` (+-0.5 deg steps, +-10 deg) where no PC of the row touches
-    another on the tube and every zone stays within the widest field of the sheet."""
+                 taken: list[tuple[float, float]]) -> float | None:
+    """Azimuth nearest to `nominal` (+-0.5 deg steps, +-10 deg) where no posed PC of the row
+    overlaps another on the tube (`taken`: intervals of earlier rows) and every zone stays
+    within the widest field of the sheet."""
     zones = w.zones
-    width, drop, za = sheet.dimensions.width, yr - tube.y, w.za
+    drop, za = yr - tube.y, w.za
     mount, widest = sheet.mount, sheet.optics.widest_field
     z = tube.z - mount.hook_height - mount.tilt_axis_height
     for k in range(int(AZIMUTH_SEARCH / AZIMUTH_STEP) + 1):
         for delta in ((0.0,) if k == 0 else (k * AZIMUTH_STEP, -k * AZIMUTH_STEP)):
             row = _row_x(zones, drop, nominal + delta)
-            xs = [x for _, _, x in row] + taken
-            clear = all(abs(x) <= tube.limit + EPS for x in xs) and all(
-                abs(a - b) >= width - EPS for n, a in enumerate(xs) for b in xs[n + 1:])
+            clear = all(abs(x) <= tube.limit + EPS for _, _, x in row)
+            if clear:
+                spans = [_span_at(w, sheet, (x, tube.y, tube.z), (zones.xs[i], yr, za))
+                         for _, i, x in row] + taken
+                clear = not any(_overlaps(a, b) for n, a in enumerate(spans) for b in spans[n + 1:])
             if clear and all(
                     _wash_required(w, (zones.xs[i], yr), za, (x, tube.y, z),
                                    _unit(_sub((zones.xs[i], yr, za), (x, tube.y, z)))) <= widest + EPS
@@ -509,7 +665,7 @@ def _plan_front_pc(w: _Work, zones: Zones, za: float, pipe: _Support, drop_auto:
     c, node = w.c, w.c.p["front_pc"]
     if not node["enabled"] or (sheet := w.sheet("front_pc", node)) is None:
         return
-    on_tube: dict[str, list[float]] = {}
+    on_tube: dict[str, list[tuple[float, float]]] = {}
     for j, yr in enumerate(zones.ys):
         if j == 0:
             tube = pipe
@@ -533,7 +689,7 @@ def _plan_front_pc(w: _Work, zones: Zones, za: float, pipe: _Support, drop_auto:
         for tag, i, x in _row_x(zones, drop, azimuth):
             name = f"FrontPC_{tag}_{_nn(j * zones.nx + i + 1)}"
             x = _clamp_x(w, name, x, tube)
-            taken.append(x)
+            taken.append(_span_at(w, sheet, (x, tube.y, tube.z), (zones.xs[i], yr, za)))
             w.add(_Slot(name, "front_pc", sheet, x, tube.y, tube.z, (zones.xs[i], yr, za),
                         tube.name, tube.name, tube.limit, movable=False,
                         circuit=f"FrontPC_Row{j + 1}_{tag}",
@@ -632,18 +788,16 @@ def _plan_hazer(w: _Work) -> None:
 
 # ------------------------------------------------------------------- packing
 
-def _gap(a: _Slot, b: _Slot) -> float:
-    return (a.width + b.width) / 2
-
-
-def _free_x(slot: _Slot, placed: list[_Slot]) -> float | None:
-    """Nearest X to the wanted one where `slot` touches nothing; None when the tube is full."""
+def _free_x(w: _Work, slot: _Slot, placed: list[tuple[_Slot, tuple[float, float]]]) -> float | None:
+    """Nearest X to the wanted one where the posed `slot` overlaps nothing; None when the tube is full."""
     sign = -1.0 if slot.x > 0 else 1.0
     for k in range(int(2 * slot.limit / PACK_STEP) + 2):
         for delta in ((0.0,) if k == 0 else (sign * k * PACK_STEP, -sign * k * PACK_STEP)):
             x = slot.x + delta
-            if abs(x) <= slot.limit + EPS and all(abs(x - t.x) >= _gap(slot, t) - EPS for t in placed):
-                return x
+            if abs(x) <= slot.limit + EPS:
+                span = _slot_span(w, slot, x)
+                if not any(_overlaps(span, other) for _, other in placed):
+                    return x
     return None
 
 
@@ -651,17 +805,31 @@ def _pack(w: _Work, tubes: Mapping[str, _Support]) -> None:
     """Per tube: PCs keep their X, every other fixture moves to the nearest free X (spec 13.10)."""
     for name, tube in tubes.items():
         group = [s for s in w.slots if s.group == name]
-        placed: list[_Slot] = []
+        placed: list[tuple[_Slot, tuple[float, float]]] = []
         movable = sorted((s for s in group if s.movable), key=lambda s: PACK_ORDER[s.family])
         for slot in [s for s in group if not s.movable] + movable:
             if slot.movable:
-                x = _free_x(slot, placed)
+                x = _free_x(w, slot, placed)
                 if x is not None:
                     slot.x = x
-            for other in placed:
-                if abs(slot.x - other.x) < _gap(slot, other) - EPS:
+            span = _slot_span(w, slot, slot.x)
+            for other, other_span in placed:
+                if _overlaps(span, other_span):
                     w.warn(f"Appareils qui se touchent sur {tube.label} : {other.name} et {slot.name}.")
-            placed.append(slot)
+            placed.append((slot, span))
+
+
+def _check_stacks(w: _Work) -> None:
+    """Alert when posed movers of one tower overlap along Z (spec 13.10)."""
+    stacks: dict[str, list[tuple[_Slot, tuple[float, float]]]] = {}
+    for s in w.slots:
+        if s.family == "tower_movers":
+            stacks.setdefault(s.load, []).append((s, _slot_span(w, s, s.x, axis=2)))
+    for name, stack in stacks.items():
+        for n, (a, span_a) in enumerate(stack):
+            for b, span_b in stack[n + 1:]:
+                if _overlaps(span_a, span_b):
+                    w.warn(f"Appareils qui se touchent sur le pylône {name} : {a.name} et {b.name}.")
 
 
 # ------------------------------------------------------------ pan/tilt, field
@@ -674,21 +842,27 @@ def _fit(phi: float, tau: float, pan: Range, tilt: Range) -> tuple[float, float]
     return min(reps, key=lambda r: abs(r - mid)), tau
 
 
-def _solve_pan_tilt(w: _Work, name: str, fx: Fixture, axis: Vec3) -> tuple[float, float]:
+def _pan_tilt(fx: Fixture, axis: Vec3) -> tuple[float, float, tuple[float, float] | None]:
+    """Physical `(pan, tilt)` for a world direction and the `(pan, tilt)` asked when out of travel."""
     phi, tau = aim_angles(axis)
     ranges = fx.pan_tilt
     if ranges is None:
-        return phi, tau
+        return phi, tau, None
     pan_range, tilt_range = ranges
     solution = _fit(phi, tau, pan_range, tilt_range) or _fit(phi + 180, -tau, pan_range, tilt_range)
     if solution is not None:
-        return solution
+        return solution[0], solution[1], None
     mid = (pan_range.min + pan_range.max) / 2
     near = min((phi + 360 * k for k in range(-3, 4)), key=lambda r: abs(r - mid))
-    pan = min(max(near, pan_range.min), pan_range.max)
-    tilt = min(max(tau, tilt_range.min), tilt_range.max)
-    w.warn(f"Pan/tilt hors course : {name} demande pan {phi:.1f}°, tilt {tau:.1f}°, "
-           f"ramenés à {pan:.1f}° et {tilt:.1f}°.")
+    return (min(max(near, pan_range.min), pan_range.max),
+            min(max(tau, tilt_range.min), tilt_range.max), (phi, tau))
+
+
+def _solve_pan_tilt(w: _Work, name: str, fx: Fixture, axis: Vec3) -> tuple[float, float]:
+    pan, tilt, asked = _pan_tilt(fx, axis)
+    if asked is not None:
+        w.warn(f"Pan/tilt hors course : {name} demande pan {asked[0]:.1f}°, tilt {asked[1]:.1f}°, "
+               f"ramenés à {pan:.1f}° et {tilt:.1f}°.")
     return pan, tilt
 
 
@@ -1032,7 +1206,7 @@ def _build_fixture(w: _Work, s: _Slot, levels, done: set) -> RigFixture:
         field_angle = _mover_field(mode, optics)
         tube = None
         f_ref = optics.widest_field
-        kind, source_z, d = _source(optics, None if optics.field_angle else optics.lens_tubes[-1], f_ref)
+        kind, source_z, d = _mover_source(optics)
         source = _add(pivot, _mul(axis, source_z))
         if fx.blades is not None:
             blades = _blade_set(w, s, fx.blades, source, axis, frame, f_ref, d, source_z)
@@ -1044,6 +1218,11 @@ def _build_fixture(w: _Work, s: _Slot, levels, done: set) -> RigFixture:
         _beam_for(optics, tube, field_angle), tube.name if tube else None, optics.aperture(tube),
         kind, source_z, source, blades, s.circuit, kelvin, s.universe, s.address, mode.footprint,
         _channel_values(s, over), fx.physical.weight, s.width)
+
+
+def _mover_source(optics: Optics) -> tuple[str, float, float]:
+    """Source of a moving head, taken at its widest field (spec 14.3)."""
+    return _source(optics, None if optics.field_angle else optics.lens_tubes[-1], optics.widest_field)
 
 
 def _mover_field(mode: Mode, optics: Optics) -> float:
@@ -1066,6 +1245,234 @@ def _blade_rest(sheet: Blades, blades: BladeSet) -> dict[str, float]:
     if rot is not None:
         out["blade_rot"] = _clamp01(rot.fraction(blades.rotation))
     return out
+
+
+# ---------------------------------------------------------------- clearance
+
+@dataclass(frozen=True)
+class _Cylinder:
+    """Swept envelope of a moving head: a vertical cylinder, margin included (spec 13.10)."""
+
+    x: float
+    y: float
+    radius: float
+    low: float
+    high: float
+
+
+@dataclass(frozen=True)
+class _Body:
+    """A fixture seen as an obstacle: sample points, their bounding sphere, `reach` for a mover."""
+
+    name: str
+    support: str
+    points: tuple[Vec3, ...]
+    centre: Vec3
+    radius: float
+    reach: _Cylinder | None = None
+
+
+@dataclass(frozen=True)
+class _Beam:
+    """Cone of a fixture aimed at `target`: apex, unit axis, half angle (as cos and sin). Only the
+    part from `start` (the lens plane) to `length` (the target, 30 m at most) along the axis counts."""
+
+    owner: str
+    target: Vec3
+    apex: Vec3
+    axis: Vec3
+    cos: float
+    sin: float
+    start: float
+    length: float
+
+
+def _make_beam(owner: str, target: Vec3, apex: Vec3, axis: Vec3, field_angle: float, start: float) -> _Beam:
+    half = math.radians(field_angle) / 2
+    length = min(BEAM_RANGE, _dot(_sub(target, apex), axis))
+    return _Beam(owner, target, apex, axis, math.cos(half), math.sin(half), start, length)
+
+
+def _cloud(name: str, support: str, points, reach: _Cylinder | None = None) -> _Body:
+    points = tuple(points)
+    lo = [min(p[i] for p in points) for i in range(3)]
+    hi = [max(p[i] for p in points) for i in range(3)]
+    centre = tuple((a + b) / 2 for a, b in zip(lo, hi))
+    return _Body(name, support, points, centre, max(math.dist(p, centre) for p in points), reach)
+
+
+def _grid(corners: tuple[Vec3, ...]) -> tuple[Vec3, ...]:
+    """27 samples (corners, edge middles, face centres, centre) of the box whose 8 corners are given."""
+    if not corners:
+        return ()
+    lo, hi = corners[0], corners[-1]
+    axes = [(lo[i], (lo[i] + hi[i]) / 2, hi[i]) for i in range(3)]
+    return tuple((x, y, z) for x in axes[0] for y in axes[1] for z in axes[2])
+
+
+def _static_body(w: _Work, f: RigFixture, sheet: _Sheet) -> _Body:
+    boxes = _boxes(w, sheet)
+    if boxes is None:
+        d, (x, y, z) = sheet.dimensions, f.root
+        points = _grid(tuple((x + sx * d.width / 2, y + sy * d.depth / 2, z - sz * d.height)
+                             for sx in (-1, 1) for sy in (-1, 1) for sz in (0, 1)))
+    else:
+        dense = _Boxes(_grid(boxes.base), _grid(boxes.pan), _grid(boxes.tilt), boxes.pivot)
+        points = posed_points(dense, f.root, f.pan or 0.0, f.tilt or 0.0)
+    return _cloud(f.name, f.support, points)
+
+
+def _mover_body(w: _Work, s: _Slot) -> _Body:
+    """Swept envelope of a moving head as a cylinder sampled on three levels and two rings."""
+    env = _envelope(w, s.sheet)
+    top = s.z - s.sheet.mount.hook_height
+    r = env.radius + FOOTPRINT_MARGIN
+    low, high = top - env.high - FOOTPRINT_MARGIN, top - env.low + FOOTPRINT_MARGIN
+    ring = [(math.cos(k * math.pi / 6), math.sin(k * math.pi / 6)) for k in range(12)]
+    points = [(s.x + k * r * c, s.y + k * r * sn, z) for z in (low, (low + high) / 2, high)
+              for k, c, sn in [(0.0, 1.0, 0.0)] + [(k, c, sn) for k in (0.5, 1.0) for c, sn in ring]]
+    return _cloud(s.name, s.load, points, _Cylinder(s.x, s.y, r, low, high))
+
+
+def _grid_targets(w: _Work) -> list[Vec3]:
+    return [(fx * w.c.Wc, fy * w.ya, w.za) for fy in GRID_Y for fx in GRID_X]
+
+
+def _mover_beams(w: _Work, s: _Slot) -> list[_Beam]:
+    """Beams of a moving head at its rest aim; front movers add the 3 x 3 grid of the play area."""
+    fx, optics, mount = s.sheet.fixture, s.sheet.optics, s.sheet.mount
+    pivot = (s.x, s.y, s.z - mount.hook_height - mount.tilt_axis_height)
+    field_angle, source_z = _mover_field(s.sheet.mode, optics), _mover_source(optics)[1]
+    start = optics.lens_offset - source_z
+    out = []
+    for target in [s.target] + (_grid_targets(w) if s.family == "front_movers" else []):
+        pan, tilt, _ = _pan_tilt(fx, _unit(_sub(target, pivot)))
+        axis = head_frame(pan, tilt)[2]
+        out.append(_make_beam(s.name, target, _add(pivot, _mul(axis, source_z)), axis, field_angle, start))
+    return out
+
+
+def _scene(w: _Work, slots, built: Mapping[str, RigFixture]) -> tuple[list[_Beam], list[_Body]]:
+    """Beams and obstacle bodies of `slots`; static fixtures come from their built record."""
+    beams: list[_Beam] = []
+    bodies: list[_Body] = []
+    for s in slots:
+        if s.family == "hazer":
+            continue
+        if s.sheet.fixture.pan_tilt is not None:
+            beams += _mover_beams(w, s)
+            bodies.append(_mover_body(w, s))
+            continue
+        f = built[s.name]
+        bodies.append(_static_body(w, f, s.sheet))
+        if f.field_angle is not None:
+            beams.append(_make_beam(f.name, f.aim, f.source, f.axis, f.field_angle,
+                                    s.sheet.optics.lens_offset - f.source_z))
+    return beams, bodies
+
+
+def _cone_gap(beam: _Beam, p: Vec3) -> float:
+    """Signed distance from `p` to the side of the cone, negative inside (a lower bound outside)."""
+    v = _sub(p, beam.apex)
+    a = _dot(v, beam.axis)
+    return math.sqrt(max(_dot(v, v) - a * a, 0.0)) * beam.cos - a * beam.sin
+
+
+def _body_gap(beam: _Beam, body: _Body) -> float | None:
+    """Smallest cone gap of the body's points between the lens and the end of the beam, else None.
+    A body farther than `BEAM_NEAR` from the cone is skipped (`_cone_gap` is 1-Lipschitz)."""
+    if _cone_gap(beam, body.centre) - body.radius >= BEAM_NEAR:
+        return None
+    (ox, oy, oz), (ax, ay, az), cos, sin = beam.apex, beam.axis, beam.cos, beam.sin
+    best = None
+    for x, y, z in body.points:
+        x, y, z = x - ox, y - oy, z - oz
+        a = x * ax + y * ay + z * az
+        if a <= beam.start or a > beam.length:
+            continue
+        gap = math.sqrt(max(x * x + y * y + z * z - a * a, 0.0)) * cos - a * sin
+        if best is None or gap < best:
+            best = gap
+    return best
+
+
+def _gaps(beams: list[_Beam], bodies: list[_Body]) -> list[tuple[_Beam, _Body, float]]:
+    return [(beam, body, gap) for beam in beams for body in bodies
+            if body.name != beam.owner and (gap := _body_gap(beam, body)) is not None]
+
+
+def _inside(c: _Cylinder, p: Vec3) -> bool:
+    return math.hypot(p[0] - c.x, p[1] - c.y) < c.radius and c.low < p[2] < c.high
+
+
+def _touch(a: _Body, b: _Body) -> bool:
+    """Whether the swept envelope of `a` meets `b` (an envelope or the points of a posed body)."""
+    if math.dist(a.centre, b.centre) > a.radius + b.radius:
+        return False
+    if a.reach is None:
+        a, b = b, a
+    if (ca := a.reach) is None:
+        return False
+    if (cb := b.reach) is None:
+        return any(_inside(ca, p) for p in b.points)
+    return (math.hypot(ca.x - cb.x, ca.y - cb.y) < ca.radius + cb.radius
+            and ca.low < cb.high and cb.low < ca.high)
+
+
+def _reach_hits(first: list[_Body], second: list[_Body]) -> list[tuple[_Body, _Body]]:
+    """Pairs on different supports where a swept envelope meets the other body."""
+    hits: dict[tuple[str, str], tuple[_Body, _Body]] = {}
+    for a in first:
+        for b in second:
+            if a.support != b.support and (a.reach or b.reach) and _touch(a, b):
+                hits[(min(a.name, b.name), max(a.name, b.name))] = (a, b)
+    return list(hits.values())
+
+
+def _movers_height(w: _Work, pipe: _Support, slots, built: Mapping[str, RigFixture]) -> float:
+    """Height of the second pipe (spec 13.2 bis): manual, or the highest one that clears every beam."""
+    rf = w.c.p["rig_front"]
+    if rf["movers_height_mode"] == "manual":
+        return rf["movers_z"]
+    movers = [s for s in slots if s.family == "front_movers"]
+    fixed_beams, fixed = _scene(w, [s for s in slots if s.family != "front_movers"], built)
+    low = w.c.Hp + w.c.Hc
+    steps = max(0, int((pipe.z - low) / HEIGHT_STEP + EPS))
+    best_score, best_z = (math.inf, 0.0), pipe.z
+    for z in (pipe.z - k * HEIGHT_STEP for k in range(steps + 1)):
+        for s in movers:
+            s.z = z
+        beams, bodies = _scene(w, movers, built)
+        gaps = _gaps(beams, fixed + bodies) + _gaps(fixed_beams, bodies)
+        failed = len(_reach_hits(bodies, fixed + bodies)) + sum(g < BEAM_MARGIN for *_, g in gaps)
+        if not failed:
+            return z
+        score = (failed, -min((g for *_, g in gaps), default=0.0))
+        if score < best_score:
+            best_score, best_z = score, z
+    w.warn(f"Perche des mobiles de face : aucune hauteur de {_metres(pipe.z)} à {_metres(low)} ne "
+           f"dégage les faisceaux et les appareils, hauteur retenue {_metres(best_z)}.")
+    return best_z
+
+
+def _point(p: Vec3) -> str:
+    return "(" + " ; ".join(f"{v:.2f}".replace(".", ",") for v in p) + ")"
+
+
+def _clearance_alerts(w: _Work, slots, built: Mapping[str, RigFixture]) -> float | None:
+    """Alert on every beam closer than the margin to a body and on every envelope that meets one
+    (spec 13.11); returns the smallest beam gap found."""
+    beams, bodies = _scene(w, slots, built)
+    gaps = _gaps(beams, bodies)
+    failing = sorted((g for g in gaps if g[2] < BEAM_MARGIN), key=lambda g: g[2])
+    for beam, body, gap in failing[:MAX_BEAM_ALERTS]:
+        w.warn(f"Faisceau de {beam.owner} vers {_point(beam.target)} gêné par {body.name} : jeu "
+               f"{_metres(gap)} pour {_metres(BEAM_MARGIN)} minimum.")
+    if len(failing) > MAX_BEAM_ALERTS:
+        w.warn(f"Faisceaux : {len(failing) - MAX_BEAM_ALERTS} autres gênés par un appareil.")
+    for a, b in _reach_hits(bodies, bodies):
+        w.warn(f"Débattement de pan et tilt : {a.name} et {b.name} se touchent.")
+    return min((g for *_, g in gaps), default=None)
 
 
 # ----------------------------------------------------------- patch and totals
@@ -1099,7 +1506,7 @@ def _check_patch(w: _Work, entries: list[PatchEntry]) -> None:
 
 
 def _support_order(name: str) -> tuple[int, str]:
-    return (0 if name == "FrontPipe" else 1 if name.startswith("Batten") else 2, name)
+    return (0 if name.startswith("FrontPipe") else 1 if name.startswith("Batten") else 2, name)
 
 
 def _loads(fixtures: list[RigFixture]) -> tuple[SupportLoad, ...]:
@@ -1151,9 +1558,9 @@ def _field_alerts(w: _Work) -> None:
                f"autour de leur zone ({names}).")
 
 
-def _pipe_part(w: _Work, pipe: _Support) -> None:
-    w.objects.insert(0, Tube("FrontPipe", MATERIAL_TUBE, RIG_COLLECTION, (-pipe.limit, pipe.y, pipe.z),
-                             (pipe.limit, pipe.y, pipe.z), BATTEN_RADIUS))
+def _pipe_part(w: _Work, pipe: _Support, index: int) -> None:
+    w.objects.insert(index, Tube(pipe.name, MATERIAL_TUBE, RIG_COLLECTION, (-pipe.limit, pipe.y, pipe.z),
+                                 (pipe.limit, pipe.y, pipe.z), BATTEN_RADIUS))
 
 
 def compute_rig(c: Ctx, library: Library) -> tuple[Rig, Part]:
@@ -1170,23 +1577,36 @@ def compute_rig(c: Ctx, library: Library) -> tuple[Rig, Part]:
                f"{_metres(c.plan.yb)}.")
     pipe, drop = _front_pipe(w, zones, za)
     _plan_backlight(w, zones, za)
-    _plan_front_movers(w, zones, za, pipe)
+    pipe2 = _plan_front_movers(w, zones, za, pipe)
     _plan_front_pc(w, zones, za, pipe, drop)
     _plan_profiles(w, zones, za, pipe, ya)
     _plan_towers(w, za, ya)
     _plan_hazer(w)
+    _check_stacks(w)
     tubes = {pipe.name: pipe}
+    if pipe2 is not None:
+        tubes[pipe2.name] = pipe2
     tubes.update({f"Batten_{_nn(i + 1)}": _batten(c, i) for i in range(len(c.light_batten_ys))})
     _pack(w, tubes)
     _assign_addresses(w)
     levels, done = _levels(c.p), set()
     order = {key: n for n, (key, _, _) in enumerate(PATCH_FAMILIES)}
     slots = sorted(w.slots, key=lambda s: order[s.family])
-    fixtures = [_build_fixture(w, s, levels, done) for s in slots]
+    built = {s.name: _build_fixture(w, s, levels, done) for s in slots if s.family != "front_movers"}
+    if pipe2 is not None:
+        pipe2 = replace(pipe2, z=_movers_height(w, pipe2, slots, built))
+        for s in slots:
+            if s.family == "front_movers":
+                s.z = pipe2.z
+    built.update({s.name: _build_fixture(w, s, levels, done) for s in slots if s.family == "front_movers"})
+    fixtures = [built[s.name] for s in slots]
+    clearance = _clearance_alerts(w, slots, built)
     _field_alerts(w)
     entries = [PatchEntry(f.name, f.family, f.universe, f.address, f.footprint) for f in fixtures]
     _check_patch(w, entries)
-    _pipe_part(w, pipe)
+    _pipe_part(w, pipe, 0)
+    if pipe2 is not None:
+        _pipe_part(w, pipe2, 1)
     circuits: dict[str, list[str]] = {}
     for f in fixtures:
         if f.circuit:
@@ -1195,7 +1615,8 @@ def compute_rig(c: Ctx, library: Library) -> tuple[Rig, Part]:
                    for k, _, _ in PATCH_FAMILIES if (grp := [e for e in entries if e.family == k]))
     profiles = tuple((f.name, f.tube, f.field_angle) for f in fixtures
                      if f.family == "profiles" and f.field_angle is not None)
-    dims = RigDims(pipe.y, pipe.z, ya, drop, profiles, ranges, tuple(w.azimuths))
+    dims = RigDims(pipe.y, pipe.z, ya, drop, profiles, ranges, tuple(w.azimuths),
+                   pipe2.y if pipe2 else None, pipe2.z if pipe2 else None, w.mover_radius, clearance)
     rig = Rig(True, zones, tuple(fixtures), tuple(entries), _rest_map(fixtures), _loads(fixtures),
               tuple((k, tuple(v)) for k, v in circuits.items()), _haze_link(w, fixtures), dims,
               tuple(w.warnings))

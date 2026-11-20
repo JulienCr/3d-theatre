@@ -630,7 +630,15 @@ def _light_battens(p, Yc, D, plan):
         y = first + i * spacing
         if not any(abs(y - b) < BATTEN_CLEARANCE - EPS for b in blocked):
             ys.append(y)
-    return tuple(ys), []
+    warnings = []
+    lo, hi = plan.planes[-1] + BATTEN_CLEARANCE, plan.yb - BATTEN_CLEARANCE
+    if not any(plan.planes[-1] < y < plan.yb for y in ys):
+        if hi < lo - EPS:
+            warnings.append("Dernière rue trop étroite pour une porteuse lumière : "
+                            "aucune porteuse au fond de scène.")
+        else:
+            ys.append((lo + hi) / 2)
+    return tuple(ys), warnings
 
 
 def _box(name, material, collection, lo, hi, origin=(0.0, 0.0, 0.0), yaw=0.0):
