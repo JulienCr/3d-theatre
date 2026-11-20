@@ -114,6 +114,7 @@ backlight:
   fixture: martin_mac_aura
   mode: default
   count: 6
+  position: upstage
   distance: 3.1
 front_movers:
   enabled: true

@@ -178,6 +178,42 @@ def test_light_battens_near_masking_planes_are_removed_and_renumbered():
         assert f"Batten_{len(got) + 1:02d}" not in lay.names()
 
 
+def battens(lay):
+    return [plane_y(lay, f"Batten_{i:02d}") for i in range(1, lay.derived.batten_count + 1)]
+
+
+def test_the_last_rue_gets_a_light_batten_in_the_middle_of_its_free_interval():
+    lay = layout()
+    last_plane, back = plane_y(lay, "MaskingBatten_03"), plane_y(lay, "MaskingBatten_Back")
+    ys = battens(lay)
+    assert ys[:2] == pytest.approx([2.1, 3.1]) and len(ys) == 3
+    assert ys[2] == pytest.approx(((last_plane + 0.30) + (back - 0.30)) / 2)
+    assert all(abs(ys[2] - plane_y(lay, f"MaskingBatten_{k}")) >= 0.30 for k in ("03", "Back"))
+    assert lay.find("Batten_03").start[2] == pytest.approx(ZB)
+
+
+def test_a_regular_light_batten_in_the_last_rue_is_kept_without_an_addition():
+    lay = no_modules(masking={"backdrop": "bare_wall", "front_border": False, "lanes": 1},
+                     curtains={"main_enabled": False})
+    assert battens(lay) == pytest.approx([2.1, 3.1, 4.1, 5.1, 6.1])
+
+
+@pytest.mark.parametrize("backdrop", ["bare_wall", "black_curtain", "cyclorama"])
+def test_the_added_batten_keeps_its_distance_from_every_masking_batten(backdrop):
+    lay = no_modules(masking={"backdrop": backdrop, "lanes": 3}, curtains={"main_enabled": False})
+    masking = [plane_y(lay, n) for n in lay.names() if n.startswith("MaskingBatten_") and "Side" not in n]
+    last_plane = max(m for m in masking if m < lay.derived.backdrop_y)
+    assert [y for y in battens(lay) if last_plane < y < lay.derived.backdrop_y]
+    assert all(abs(y - m) >= 0.30 - 1e-9 for y in battens(lay) for m in masking)
+
+
+def test_a_last_rue_too_narrow_for_a_batten_adds_none_and_alerts():
+    lay = layout(masking={"lanes": 8})
+    assert [y for y in battens(lay) if y > plane_y(lay, "MaskingBatten_08")] == []
+    assert any("Dernière rue trop étroite" in w for w in lay.warnings)
+    assert not any("Dernière rue" in w for w in layout().warnings)
+
+
 def test_the_main_curtain_plane_is_far_enough_to_keep_the_first_light_batten():
     lay = no_modules(masking={"backdrop": "bare_wall", "front_border": False, "lanes": 1},
                      curtains={"main_enabled": True})

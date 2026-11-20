@@ -411,6 +411,12 @@ def _batten(c: Ctx, index: int) -> _Support:
                  f"la porteuse {name}")
 
 
+def _upstage_batten(c: Ctx) -> int | None:
+    """Most upstage light batten still in front of the back line, else the most upstage one."""
+    front = [i for i, y in enumerate(c.light_batten_ys) if y < c.plan.yb]
+    return front[-1] if front else len(c.light_batten_ys) - 1 if c.light_batten_ys else None
+
+
 def _zones(c: Ctx, ya: float) -> Zones:
     pc = c.p["front_pc"]
     if pc["zone_mode"] == "manual":
@@ -446,12 +452,13 @@ def _plan_backlight(w: _Work, zones: Zones, za: float) -> None:
     c, node = w.c, w.c.p["backlight"]
     if not node["enabled"] or (sheet := w.sheet("backlight", node)) is None:
         return
-    index = _nearest_batten(c, node["distance"])
+    upstage = node["position"] == "upstage"
+    index = _upstage_batten(c) if upstage else _nearest_batten(c, node["distance"])
     if index is None:
         w.warn("Aucune porteuse lumière : pas de contre.")
         return
     tube = _batten(c, index)
-    if abs(tube.y - node["distance"]) > BATTEN_TOLERANCE + EPS:
+    if not upstage and abs(tube.y - node["distance"]) > BATTEN_TOLERANCE + EPS:
         w.warn(f"Aucune porteuse à moins de {_metres(BATTEN_TOLERANCE)} de "
                f"{_metres(node['distance'])} : contre posé à {_metres(tube.y)}.")
     rows = [j for j, yr in enumerate(zones.ys) if yr < tube.y - EPS]

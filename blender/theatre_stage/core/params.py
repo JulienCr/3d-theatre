@@ -330,8 +330,13 @@ SCHEMA: tuple[Group, ...] = (
         _flag("enabled", True, "Contre", "Appareils de contre, accrochés à une porteuse."),
         *_fixture_pair("martin_mac_aura", ("moving_wash",), "le contre"),
         _int("count", 6, 1, 24, "Nombre d'appareils", "Nombre d'appareils de contre."),
+        _enum("position", "upstage", "Position", "Porteuse qui reçoit le contre.", (
+            ("upstage", "Perche fond de scène", "La porteuse lumière la plus reculée."),
+            ("distance", "Distance au nez", "La porteuse la plus proche de la distance réglée."),
+        )),
         _length("distance", 3.10, 0.50, 30.0, "Distance au nez",
-                "Distance au nez de scène de la porteuse visée."),
+                "Distance au nez de scène de la porteuse visée.",
+                shown_when=("position", "distance")),
     )),
     Group("front_movers", "Mobiles de face", (
         _flag("enabled", True, "Mobiles de face", "Mobiles accrochés à la perche de face."),

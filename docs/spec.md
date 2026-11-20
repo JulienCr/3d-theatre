@@ -143,6 +143,8 @@ cotes ; le plan SVG indique 1,00 × 2,40.
 | `batten_spacing` | Espacement des porteuses *(choix)* | 1,00 | 0,20 – 5 |
 | `batten_drop` | Porteuses sous le gril | 0,50 | 0 – 10 |
 
+La porteuse de la dernière rue (fond de scène) vient en plus de ce réseau régulier : section 5.5.
+
 ### 3.6 Lumières de travail — `lights`
 
 | Clé | Libellé | Défaut | Bornes |
@@ -243,7 +245,8 @@ Le défaut manuel est la valeur que donne le calcul avec les défauts
 | `fixture` | Appareil | `martin_mac_aura` | énumération (1) |
 | `mode` | Mode DMX | mode par défaut de la fiche | énumération (2) |
 | `count` | Nombre d'appareils | 6 | 1 – 24 |
-| `distance` | Distance au nez de la porteuse visée *(choix)* | 3,10 | 0,50 – 30 |
+| `position` | Position | `upstage` | énumération (3) |
+| `distance` | Distance au nez de la porteuse visée *(choix)*, seulement en mode `distance` | 3,10 | 0,50 – 30 |
 
 (1) Énumération **dynamique** : les `id` des fiches de la bibliothèque dont la
 famille convient (section 12.2), relue au chargement de l'extension et par le
@@ -251,10 +254,14 @@ bouton « Recharger la bibliothèque ». Un `id` inconnu dans un préréglage do
 le défaut du paramètre et un avertissement.
 (2) Énumération dynamique : `default` (mode par défaut de la fiche) et les noms
 des modes de l'appareil choisi.
+(3) `upstage` (« Perche fond de scène », défaut) : la porteuse lumière la plus
+reculée qui reste devant la ligne de fond `Yb` (5.5) ; `distance` : la
+porteuse la plus proche de `distance` (13.4). Le panneau n'affiche `distance`
+que dans ce second mode.
 
-Défaut 3,10 *(choix)* : avec le pendrillonnage par défaut, seules les
-porteuses lumière à Y = 2,10 et 3,10 subsistent ; 4,00 se ramenait à 3,10 avec
-une alerte.
+Défaut `upstage` *(choix)* : un contre accroché à mi-scène (Y = 3,10 avec le
+pendrillonnage par défaut) n'est pas à la perche du fond, où l'on attend le
+contre. `distance` garde 3,10 *(choix)* pour le mode `distance`.
 
 ### 3.13 Mobiles de face — `front_movers`
 
@@ -453,6 +460,16 @@ murs de cage 0,20 ; parement de plancher 0,03 ; liseré du nez 0,05 ;
   pendrillonnage ou du plan du rideau de scène est retirée (section 8). Les
   restantes sont numérotées de la face vers le fond, sans trou. Les
   projecteurs s'y accrochent selon la section 13, par position en Y.
+- **Porteuse de la dernière rue** : la dernière rue va du dernier plan de
+  pendrillonnage à la ligne de fond `Yb` (8.1). Si aucune porteuse restante
+  n'y est (`plan_N < Y < Yb`), on en ajoute une au **milieu de l'intervalle
+  libre** de la rue, `[plan_N + 0,30 ; Yb − 0,30]` *(choix : 0,30, comme le
+  retrait ci-dessus)*, donc à 0,30 m au moins de toute porteuse de
+  pendrillonnage. C'est une porteuse lumière ordinaire, numérotée par Y avec
+  les autres (par défaut Y = 6,21, `Batten_03`). Rue trop étroite (intervalle
+  vide) : pas de porteuse et l'alerte « Dernière rue trop étroite pour une
+  porteuse lumière : aucune porteuse au fond de scène ». Avec la porteuse
+  de la dernière rue, le contre (13.4) a une perche de fond.
 
 ### 5.6 Escaliers latéraux (`TS_Stairs`)
 
@@ -939,7 +956,8 @@ Calculées dans `core`, rédigées en français, affichées dans le panneau :
 - bibliothèque : fiche invalide ou introuvable (12.7) ;
 - implantation : zone de jeu raccourcie (13.1) ; perche de face hors de la
   salle (13.2) ; point d'accroche hors du tube (13.3) ; porteuse à plus de
-  0,50 m de la distance demandée pour le contre, ou aucune porteuse (13.4) ;
+  0,50 m de la distance demandée pour le contre (mode `distance`), ou aucune
+  porteuse (13.4) ; dernière rue trop étroite pour une porteuse (5.5) ;
   pylône trop bas, sur un escalier ou hors de la salle (13.6) ; rang de PC
   dont la porteuse est trop en arrière (13.7) ; appareils qui se touchent sur
   un tube (13.10) ;
@@ -1336,12 +1354,17 @@ lumière. Un `X` hors du tube (`±(Wt/2 − 0,10)` pour la perche,
 
 `N = count` MAC Aura (par défaut), `NN` de 01 (jardin) à `N`.
 
-- `Yg = nearest_batten(distance).Y`, `Zh = Zb`, `X_i = spread(i, N)`. Alerte
-  si `|Yg − distance| > 0,50` (« Aucune porteuse à moins de 0,50 m de … :
-  contre posé à … m »). Sans aucune porteuse : pas de contre, alerte.
+- `Zh = Zb`, `X_i = spread(i, N)`. Porteuse : `position = upstage` (défaut) :
+  la plus reculée des porteuses lumière devant `Yb`, c'est-à-dire la
+  porteuse de la dernière rue (5.5). `position = distance` :
+  `Yg = nearest_batten(distance).Y`, avec l'alerte si
+  `|Yg − distance| > 0,50` (« Aucune porteuse à moins de 0,50 m de … : contre
+  posé à … m »). Sans aucune porteuse : pas de contre, alerte.
 - **Visée de repos** : `T = (X_i, yr_j, Za)` où `j` est le rang dont le centre
   est le plus grand `yr_j < Yg` (zone devant le contre, côté face) ; à
-  défaut `j = 0`.
+  défaut `j = 0`. Depuis la perche du fond (Y = 6,21, Z = 6,80), les contres
+  visent le rang 2 (Y = 4,50) : pan 0°, tilt 25,4° vers la salle, soit un
+  faisceau à 65° au-dessus de l'horizontale.
 
 ### 13.5 Mobiles de face — `FrontMover_NN`
 

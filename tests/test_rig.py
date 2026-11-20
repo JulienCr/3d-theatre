@@ -251,8 +251,27 @@ def test_hang_point_off_the_tube_is_clamped_with_an_alert():
 
 # ------------------------------------------------------------------ backlight
 
-def test_backlight_snaps_to_the_nearest_batten_and_aims_in_front():
+def test_backlight_hangs_on_the_upstage_batten_by_default_and_tilts_toward_the_audience():
     lay = rig_layout()
+    last = lay.derived.batten_count
+    tube = lay.find(f"Batten_{last:02d}")
+    backs = lay.rig.by_family("backlight")
+    assert len(backs) == 6 and tube.start[1] > lay.derived.masking_y1 - 1.0
+    for f in backs:
+        assert f.support == tube.name and f.hang[1] == pytest.approx(tube.start[1])
+        assert f.aim[1] < f.hang[1] and f.axis[1] < 0 and f.axis[2] < 0
+        assert 0 < f.tilt < 90 and not has(lay.warnings, "Pan/tilt hors course")
+
+
+def test_upstage_backlight_stays_in_front_of_the_back_curtain():
+    lay = rig_layout(masking={"backdrop": "cyclorama"})
+    ys = {f.hang[1] for f in lay.rig.by_family("backlight")}
+    assert len(ys) == 1 and ys.pop() < lay.derived.backdrop_y
+    assert not has(lay.rig.warnings, "Aucune porteuse")
+
+
+def test_backlight_snaps_to_the_nearest_batten_and_aims_in_front():
+    lay = rig_layout(backlight={"position": "distance", "distance": 4.0})
     backs = lay.rig.by_family("backlight")
     ys = [b.end[1] for b in (lay.find(n) for n in lay.names() if n.startswith("Batten_"))]
     assert len(backs) == 6
@@ -264,7 +283,7 @@ def test_backlight_snaps_to_the_nearest_batten_and_aims_in_front():
 
 
 def test_backlight_alerts_without_a_close_batten_or_any_batten():
-    lay = rig_layout(grid={"batten_spacing": 5.0}, backlight={"distance": 5.0})
+    lay = rig_layout(grid={"batten_spacing": 5.0}, backlight={"position": "distance", "distance": 5.0})
     assert has(lay.warnings, "Aucune porteuse à moins de 0,50 m")
     ctx, _ = _make_context(make(**SYNTH))
     rig, _ = compute_rig(replace(ctx, light_batten_ys=()), LIB)
