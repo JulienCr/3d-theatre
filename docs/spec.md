@@ -32,6 +32,7 @@ blender/theatre_stage/
     layout.py                paramètres -> cotes et volumes (dataclasses)
     presets.py               lecture / écriture YAML, validation
     fixtures.py              fiches d'appareils, attributs DMX, 8/16 bits, photométrie
+    meshio.py                lecture .obj et .glb (sommets, faces) sans bpy
     rig.py                   implantation (perche, pylônes, zones, visées, lames), patch
     qlc.py                   génération texte des .qxw et .qxf (XML)
   props.py                   PropertyGroup généré depuis le schéma
@@ -665,7 +666,12 @@ La **catégorie** d'un objet généré est son matériau `TS_*` par défaut.
   (16), « Recharger la bibliothèque » (12.1).
 - Les énumérations `fixture` et `mode` sont dynamiques (items référencés côté
   Python, section 3.12) ; le dessin du panneau ne relit pas le disque : la
-  bibliothèque est lue au chargement et au bouton.
+  bibliothèque est lue au chargement et au bouton. Le schéma les déclare avec
+  les types `fixture` (familles acceptées) et `mode` (clé `fixture` de
+  référence). La valeur stockée est un **texte** : la PropertyGroup porte une
+  chaîne et une énumération d'affichage `<clé>_pick` ; un `id` absent de la
+  bibliothèque reste affiché « <id> (introuvable) » au lieu de faire échouer
+  l'écriture, et une bibliothèque vide laisse le panneau intact.
 - Une reconstruction qui change l'implantation recrée les appareils, leurs
   drivers et les propriétés de scène absentes (15.2) ; elle ne touche à
   aucune propriété `dmx_<u>_<c>` existante.
@@ -1026,7 +1032,7 @@ obligatoire à `null` (laissée ainsi par l'outil GDTF) rend la fiche invalide.
 | `id` | texte ASCII `a-z0-9_` | oui | identifiant, égal au nom du dossier |
 | `manufacturer`, `model` | texte | oui | identité |
 | `family` | `moving_wash` / `moving_profile` / `pc` / `profile` / `hazer` | oui | famille. Détermine les énumérations de la section 3 : `backlight` → `moving_wash` ; `front_movers`, `towers` → `moving_wash` ou `moving_profile` ; `front_pc` → `pc` ; `profiles` → `profile` ; `haze.fixture` → `hazer` |
-| `sources` | liste de `{kind, url, note}` | oui | `kind` : `datasheet`, `gdtf`, `ies`, `other`. `url` : adresse ou chemin relatif |
+| `sources` | liste (au moins une) de `{kind, url, note}` | oui | `kind` : `datasheet`, `gdtf`, `ies`, `other`. `url` : adresse ou chemin relatif |
 | `physical.weight` | kg | oui | poids, avec accessoires de la fiche |
 | `physical.dimensions` | `{width, depth, height}` | si pas `hazer` | encombrement en position neutre, `height` de la face de fixation au point le plus bas |
 | `physical.mount.hook_height` | m | si pas `hazer` | de l'axe du tube à la face de fixation de l'embase |
@@ -1035,9 +1041,9 @@ obligatoire à `null` (laissée ainsi par l'outil GDTF) rend la fiche invalide.
 | `optics.lens_diameter` | m | si pas `hazer` | diamètre utile de la lentille |
 | `optics.lens_offset` | m | si pas `hazer` | de l'axe de tilt à la face avant de la lentille, le long du faisceau |
 | `optics.flux` | lm | si pas `hazer` | flux total, pleine intensité, blanc |
-| `optics.field_angle` | `{min, max}` | si zoom (DMX ou mécanique) | angle de champ plein (bord à 10 %) aux deux extrémités du zoom |
+| `optics.field_angle` | `{min, max}` | si pas `lens_tubes` | angle de champ plein (bord à 10 %) aux deux extrémités du zoom, DMX ou mécanique ; un appareil sans zoom ni tubes donne `min` = `max` |
 | `optics.beam_angle` | `{min, max}` | si `wash` | angle de faisceau plein (50 %), mêmes extrémités |
-| `optics.lens_tubes` | liste d'angles de champ | si lentilles fixes | exclusif de `field_angle` |
+| `optics.lens_tubes` | liste d'angles de champ, strictement croissante | si pas `field_angle` | lentilles fixes ; exclusif de `field_angle` : exactement l'un des deux |
 | `optics.zoom_invert` | booléen | non (`false`) | `false` : 0 = `min` ; `true` : 0 = `max` |
 | `optics.ies` | chemin | non | profil IES, Cycles seulement |
 | `colour.systems` | liste parmi `rgbw`, `cmy`, `cto`, `cct`, `emitters` | non (vide = blanc fixe) | systèmes de couleur présents |
@@ -1046,7 +1052,7 @@ obligatoire à `null` (laissée ainsi par l'outil GDTF) rend la fiche invalide.
 | `colour.emitters` | liste de `{attribute, rgb}` | si `emitters` | une émission par attribut `emitter_N`, `rgb` linéaire 0–1 de l'émetteur à pleine intensité |
 | `motion.type` | `moving` / `static` | si pas `hazer` | `static` : visée fixée à la construction |
 | `motion.pan`, `motion.tilt` | `{min, max}` | si `moving` | course physique, en degrés, zéro compris (convention 13.9) |
-| `blades.count` | entier (4) | non | absent = pas de lames |
+| `blades.count` | entier (4) | non | la section `blades` absente = pas de lames ; `count` vaut 4 par défaut |
 | `blades.mode` | `motorised` / `manual` | si lames | `manual` : réglées à la construction |
 | `blades.gate_from_lens` | m | si lames | du plan des lames à la face avant de la lentille, vers l'arrière |
 | `blades.span` | m | si lames | longueur du bord d'une lame ; `e = span/2` |
@@ -1054,7 +1060,7 @@ obligatoire à `null` (laissée ainsi par l'outil GDTF) rend la fiche invalide.
 | `blades.sides` | 4 angles | si lames | direction « côté lame » de chaque lame, rotation du cadrage nulle, de +X vers +Y de la tête (13.8) |
 | `blades.angle_limit` | angle | si lames | inclinaison maximale du bord, ± |
 | `blades.rotation` | `{min, max}` | si `motorised` | course de `blade_rot` |
-| `gobos.wheels` | liste de `{name, rotation_range, slots}` | non | `name` : `gobo1` ou `gobo2` ; `rotation_range` : degrés pour `gobo1_rot` (360 par défaut) ; `slots` : liste de `{name, image, dmx}` |
+| `gobos.wheels` | liste de `{name, rotation_range, slots}` | non | `name` : `gobo1` ou `gobo2` ; `rotation_range` : degrés pour `gobo1_rot` (360 par défaut) ; `slots` : liste de `{name, image, dmx}`, `image` facultatif (absent ou `null` : fente ouverte), `dmx` : `[octet_min, octet_max]` |
 | `iris.min_ratio` | 0–1 | non | rapport du diamètre d'iris fermé au diamètre ouvert |
 | `strobe` | `{open, closed, strobe}` | non | `open`, `closed` : `[octet_min, octet_max]` ; `strobe` : `{from, to, hz_min, hz_max}` |
 | `modes` | liste | oui | modes DMX (ci-dessous) |
@@ -1072,10 +1078,13 @@ uniques et inférieurs ou égaux à `footprint`.
 `model3d` :
 
 - `kind: procedural` : `shape` (`pc`, `profile`, `box`), `body` `{width,
-  depth, height}`, `barrel` `{diameter, length}` (profils), `yoke`
-  `{gap, height}` ; tout en mètres. Le dessin se déduit de ces cotes.
-- `kind: mesh` : `parts` `{base, yoke, head}`, chacune `{file, offset}`.
-  `file` : `.glb` ou `.obj`, en mètres. `offset` : position de l'origine de la
+  depth, height}`, `barrel` `{diameter, length}` (obligatoire pour `profile`),
+  `yoke` `{gap, height}` (facultatif) ; tout en mètres. Le dessin se déduit de
+  ces cotes.
+- `kind: mesh` : `parts` `{base, yoke, head}` (les trois sont obligatoires),
+  chacune `{file, offset}`. `file` : `.glb` ou `.obj`, en mètres. Un `.glb` est
+  lu en Y vers le haut et converti en Z vers le haut, comme l'importeur de
+  Blender : `(x, y, z)` devient `(x, −z, y)`. `offset` : position de l'origine de la
   pièce dans le repère de la pièce parente (`base` : face de fixation ;
   `yoke` : dans `base` ; `head` : dans `yoke`, à l'axe de tilt). Si un
   fichier ne s'importe pas, repli sur un `procedural` déclaré dans la même
@@ -1130,8 +1139,9 @@ Une propriété de scène `dmx_<u>_<c>` vaut `octet / 255` (contrat du pont).
   propriété `N/255` ; 16 bits `N = round(65535·v)`, octets `N >> 8` et
   `N & 255`, propriétés `octet/255`. L'erreur maximale est une demi-unité du
   dernier bit : 0,004° sur un pan de 540°.
-- `core` fournit `encode(v, bits)` → octets et `decode(c, f, bits)` → `v` ;
-  l'aller-retour est testé.
+- `core` fournit `encode(v, bits)` → octets, `to_properties(v, bits)` → valeurs
+  de propriétés (`octet / 255`) et `decode(c, f, bits)` → `v` (`c` et `f` étant
+  des propriétés) ; l'aller-retour est testé.
 
 ### 12.5 Les six fiches livrées
 
@@ -1168,9 +1178,30 @@ blender/theatre_stage/library/fixtures/<id>/` (Python système, `zipfile` et
   géométrie de faisceau (`LuminousFlux`, `BeamRadius`), `optics.beam_type` ;
 - `gobos.wheels` : fentes, plages DMX, images extraites dans `gobos/` ;
 - `strobe`, `iris.min_ratio` d'après les fonctions de canal ;
-- `model3d.kind: mesh` : fichiers de `Models` copiés dans `meshes/`,
-  `offset` d'après l'arbre de géométries ; `physical.dimensions` et
-  `physical.weight` quand le GDTF les porte.
+- `model3d.kind: mesh` : fichiers de `Models` placés dans `meshes/`, `offset`
+  d'après l'arbre de géométries (translation seule, relative à la pièce
+  parente) ; `physical.weight` d'après `Properties/Weight`, et
+  `physical.dimensions` d'après l'encombrement des maillages placés.
+  - `.glb` : copié tel quel.
+  - `.3ds` : converti en `.obj` par un lecteur de blocs 3DS écrit dans l'outil
+    (principal `0x4D4D`, éditeur `0x3D3D`, objet `0x4000`, maillage `0x4100`,
+    sommets `0x4110`, faces `0x4120`). La matrice locale `0x4160` n'est pas
+    appliquée : un 3DS stocke ses sommets en repère monde.
+  - **Unités.** Un GDTF est en mètres, mais ses `.3ds` sont le plus souvent en
+    millimètres (MAC Aura). L'outil compare les dimensions `Length`, `Width`,
+    `Height` du `<Model>` à la boîte englobante du maillage et retient le
+    facteur (1, 0,001, 0,01 ou 0,0254) le plus proche ; sans dimensions, 0,001.
+    Les `.obj` écrits sont donc en mètres. Pour un `.glb`, un autre facteur
+    n'est que signalé.
+- `colour.systems` (d'après les attributs présents), `colour.cct_range` (bornes
+  de `CTC`), `colour.cto_kelvin` (borne basse de `CTO`), `optics.zoom_invert`
+  (vrai si `PhysicalFrom` du zoom dépasse `PhysicalTo`) et `blades.rotation`
+  (bornes de `BladeRot` ou `ShaperRot`) sont pré-remplis, à confirmer.
+- Un canal dont l'attribut du vocabulaire est déjà pris dans le mode (second
+  `Dimmer` de la géométrie « Auras ») est gardé sous `<géométrie>_<attribut>`,
+  en minuscules (`auras_dimmer`), comme un attribut inconnu. Les rotations par
+  lame `Blade1Rot` à `Blade4Rot` et `Gobo2Pos` restent inconnus (`blade1rot`,
+  `gobo2pos`) : l'auteur de la fiche les renomme à la main s'il veut les rendre.
 
 | Attribut GDTF | Attribut de la fiche |
 |---|---|
@@ -1185,14 +1216,15 @@ blender/theatre_stage/library/fixtures/<id>/` (Python système, `zipfile` et
 | `Gobo1Pos` | `gobo1_rot` |
 | `Iris` | `iris` |
 | `Blade1A`, `Blade1B` … `Blade4A`, `Blade4B` | `blade_1a`, `blade_1b` … `blade_4a`, `blade_4b` |
-| `BladeRot` | `blade_rot` |
+| `BladeRot`, `ShaperRot` | `blade_rot` |
 
-**Complété à la main** (laissé à `null` quand obligatoire) : `family`, URLs
-des fiches techniques, `physical.mount`, `optics.lens_offset`,
-`optics.field_angle` (le GDTF ne donne que le faisceau), `zoom_invert`,
-`colour` (systèmes, plage CCT, CTO, rgb des émetteurs), toute la géométrie des
-lames (`gate_from_lens`, `span`, `travel`, `sides`, `angle_limit`,
-`rotation`), `model3d` procédural ou son repli, `qlc`, `optics.ies`.
+**Complété à la main** (laissé à `null  # à compléter` quand obligatoire) :
+`family`, URLs des fiches techniques, `physical.mount`, `optics.lens_offset`,
+`optics.lens_diameter` quand le GDTF a plusieurs sources (MAC Aura),
+`optics.field_angle` (le GDTF ne donne que le faisceau), `colour.emitters`,
+la géométrie des lames (`gate_from_lens`, `span`, `travel`, `sides`,
+`angle_limit`), `model3d` procédural ou son repli, `qlc`, `optics.ies`. L'outil
+écrit `fixture.yaml` sans PyYAML ; il importe `core/meshio.py` du dépôt.
 
 ### 12.7 Validation
 
@@ -1202,7 +1234,9 @@ d'erreurs en français. Contrôles : clés obligatoires (conditions du tableau
 16 bits dont `fine` est libre ; `default_mode` existant ; `min` ≤ `max` ;
 `lens_tubes` triés et sans doublon ; `blades.sides` à quatre angles distincts ;
 un attribut du vocabulaire n'apparaît qu'une fois par mode (sauf attributs
-inconnus) ; fichiers cités présents.
+inconnus) ; exactement l'un de `field_angle` et `lens_tubes` ; au moins une
+source ; fichiers cités présents (images de gobos, maillages, IES, sources
+données par un chemin relatif).
 
 ## 13. Implantation lumière
 
@@ -1686,7 +1720,8 @@ par appareil patché et par canal, en valeur normalisée puis écrite selon
 | tous les autres | valeur par défaut du canal dans la fiche |
 
 `cct_to_rgb(K)` (dans `core/fixtures.py`) : couleur d'un corps noir,
-normalisée à `max = 1`, linéaire.
+normalisée à `max = 1`, linéaire (approximation de Kim et al. du lieu de
+Planck, valable de 1667 à 25000 K, `K` ramené dans cette plage).
 
 - **À la reconstruction** : pour chaque canal patché, la propriété de scène
   `dmx_<u>_<c>` est **créée si elle est absente**, à la valeur de repos ;
