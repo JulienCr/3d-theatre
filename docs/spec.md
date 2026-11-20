@@ -1911,6 +1911,94 @@ sans fiche ou avec `front_pc.barn_doors = none`). Même idée que les lames
   estimations signalées dans les fiches ; elles respectent la règle des
   feuilles ouvertes de 12.7.
 
+### 13.13 Égalisation de la face — `core/face_eq.py`, `core/ies.py`
+
+Régler la face, c'est la rendre le plus homogène possible : le moteur calcule,
+pour chaque PC de face, un **décalage de visée**, un **zoom** et un **niveau**.
+Python pur, sans `bpy` ni `RigFixture` : l'appelant construit des `Emitter` et
+des `Probe` depuis le plan de feux (13.7). Pas encore branché au rig.
+
+**Photométrie** (`core/ies.py`).
+
+- Lecture LM-63 (1995 et 2002), type C. Candela = valeur du fichier × le
+  multiplicateur de la ligne 1 ; les facteurs de ballast sont ignorés, comme
+  dans `ies_axis_candela` (14.8). Symétries : un seul plan (révolution),
+  `0–90`, `0–180`, `90–270` et `0–360`. Interpolation bilinéaire en `(θ, φ)` ;
+  `θ` hors du tableau donne 0. `φ` part de `up` et tourne autour de l'axe, règle
+  de la main droite : `φ = 0` est `up`, `φ = 90°` est `axe × up`.
+- **Zoom** *(choix)* : le profil au champ `F` lit les deux fiches IES voisines
+  `F₀ < F < F₁` à `θ·F_k/F` (leur bord à 10 % tombe sur `F`) et les pondère par
+  `(1−t)·(F₀/F)²` et `t·(F₁/F)²`. Un mélange simple de deux profils donnerait
+  deux faisceaux superposés. Hors de la plage des fiches IES (13,0° contre
+  13,1° ; 85° contre 83,8°), le profil d'extrémité est mis à l'échelle seul.
+- **Repli sans IES** *(choix)* : `I(θ) = I₀·exp(−ln2·(θ/(β/2))^k)`, qui vaut 50 %
+  à `β/2` (faisceau) et 10 % à `F/2` (champ) : `k = ln(ln10/ln2) / ln(F/β)`,
+  plafonné à 20 (`F ≥ 1,06·β`). `I₀` est calé pour que le flux total soit celui
+  de la fiche. `β(F)` vient de la fiche (`optics.beam_angle`, interpolé).
+- Les candelas des IES sont prises telles quelles (pas recalées sur
+  `optics.flux`) : le zoom fait varier le flux mesuré (7 000 à 8 860 lm pour le T15).
+
+**Mesure.**
+
+- `face_grid` : sondes à `Za`, normale `(0, −1, 0)` vers la salle, pas de
+  0,50 m *(choix)*, centres de cellules (les bords sont à 0,25 m), sur `Y ∈ [0,
+  Ya]` ; les rangées de l'avancée (`Y < Ys`) vont jusqu'à `±W/2`, les autres
+  jusqu'à `±Wc/2`. Défauts : 246 sondes.
+- Éclairement vertical `E = niveau · I(θ, φ) · max(0, s·n) / d²` (lux), `s`
+  unitaire vers la source. Ni ombre, ni réflexion, ni brume.
+- **Lames** : `cut_planes` donne des plans `(point, normale)` par le centre de
+  la lentille ; une sonde du côté sombre d'un plan reçoit 0 *(choix : coupure
+  franche, sans pénombre)*. Les plans restent fixes dans le repère de la scène :
+  ils ne suivent pas un décalage de visée *(choix)*.
+
+**Critère.** Pour chaque direction seule (jardin, cour) et pour leur somme,
+`U = Emin / Emoy` (à maximiser) et `CV = σ / Emoy` (à minimiser). Les deux
+directions d'une zone ne sont jamais couplées (ADEC) : elles pèsent chacune
+autant que la somme. Perte minimisée :
+`Σ_g (1 − U_g) + CV_g − 0,5 · Emoy_g / Emoy_g(plein)`, `g ∈ {L, R, somme}`.
+
+**Leviers et bornes.**
+
+| Levier | Plage |
+|---|---|
+| Décalage de visée `(dx, dy)` au plan `Za` | `± ¼` de zone en X et en Y *(choix)* |
+| Zoom (champ) | plage de la fiche (`optics.field_angle`) |
+| Niveau | `[0, 1]` ; part du niveau donné, jamais au-dessus de 1 |
+
+**Compromis sur la moyenne.** Égaliser en dimmant ou en ouvrant le zoom coûte de
+la lumière sur le plateau. L'éclairement moyen de chaque direction et de la
+somme reste au moins à `min_mean_ratio` (0,85 par défaut *(choix)*) de celui
+du rig plein, niveaux à 1 et réglage de départ ; le terme `0,5 · Emoy` de la
+perte pousse en plus vers le haut. Le plancher est toujours atteint : le moteur
+achète l'homogénéité avec la moyenne, surtout par le zoom (les rangs du fond
+s'ouvrent vers 80°) et presque pas par le niveau (niveau moyen 0,99 à 1,00).
+Un plancher plus haut rend moins : à 0,95, `U` somme ≈ 0,5 ; à 0,80, ≈ 0,65 (à
+± 0,05, la recherche étant locale).
+
+**Algorithme.** Recherche par motifs, une coordonnée à la fois, dans l'ordre
+décalage X, Y, zoom, niveau, pas divisé par deux quand un tour n'améliore rien
+(quatre divisions au plus). Déterministe, sans tirage. Borne : `max_evaluations`
+(3 000) recalculs de l'éclairement d'un appareil ; un recalcul de niveau seul
+ne coûte rien. Contrôle : 12 départs tirés au hasard (visée et zoom) ne gagnent
+pas plus de 1 % de perte sur le départ nominal.
+
+**Résultats**, `U` puis `CV`, avant → après (`front_pc` : défauts ; IES de la
+bibliothèque ; niveau moyen 1,00 ; 0,6 s, 2 100 évaluations, Python 3.12) :
+
+| Rig | Jardin seul | Cour seule | Somme | Moyenne (somme) |
+|---|---|---|---|---|
+| défauts | 0,063 → 0,375 / 0,329 → 0,231 | 0,063 → 0,392 / 0,329 → 0,245 | 0,290 → 0,600 / 0,310 → 0,176 | 883 → 751 lx |
+| préréglage `user_open_angled`, `zone_width` 3,0 | 0,066 → 0,375 / 0,367 → 0,239 | 0,066 → 0,376 / 0,367 → 0,240 | 0,307 → 0,558 / 0,350 → 0,192 | 834 → 713 lx |
+
+Les sondes les plus sombres avant sont les coins du nez (`X = ±5,55 ; Y = 0,25`),
+à 256 lx contre 883 en moyenne ; après, les plus sombres valent 450 lx.
+
+- Limites : les niveaux sont par appareil, alors que le plan de feux (13.7)
+  groupe les PC en 4 circuits (rang, direction) ; les écrire demande un
+  réglage de niveau par appareil dans le patch (15.1). Le sens de `φ` des IES
+  asymétriques (Fresnel : 9 plans, quasi symétriques) reste à vérifier dans
+  Cycles ; les profils du T15 sont de révolution.
+
 ## 14. Appareils dans Blender
 
 `rigbuild.py` traduit le plan de la section 13 en objets. Il ne calcule
