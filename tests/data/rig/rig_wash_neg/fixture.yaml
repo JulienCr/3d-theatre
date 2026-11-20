@@ -1,0 +1,41 @@
+version: 1
+id: rig_wash_neg
+manufacturer: Test
+model: Synthetic wash
+family: moving_wash
+sources:
+  - {kind: datasheet, url: "https://example.org/wash.pdf", note: synthetic}
+physical:
+  weight: 12.0
+  dimensions: {width: 0.40, depth: 0.30, height: 0.50}
+  mount: {hook_height: 0.10, tilt_axis_height: 0.25}
+optics:
+  beam_type: wash
+  lens_diameter: 0.15
+  lens_offset: 0.10
+  flux: 6000
+  field_angle: {min: 12, max: 50}
+  beam_angle: {min: 8, max: 30}
+colour: {systems: [rgbw]}
+motion:
+  type: moving
+  pan: {min: -270, max: 270}
+  tilt: {min: -130, max: -5}
+modes:
+  - name: Full
+    footprint: 9
+    channels:
+      - {offset: 1, attribute: pan, bits: 16, default: 32768, fine: 2}
+      - {offset: 3, attribute: tilt, bits: 16, default: 32768, fine: 4}
+      - {offset: 5, attribute: dimmer, bits: 8, default: 0}
+      - {offset: 6, attribute: color_r, bits: 8, default: 255}
+      - {offset: 7, attribute: color_g, bits: 8, default: 255}
+      - {offset: 8, attribute: color_b, bits: 8, default: 255}
+  - name: Coarse
+    footprint: 4
+    channels:
+      - {offset: 1, attribute: pan, bits: 8, default: 128}
+      - {offset: 2, attribute: tilt, bits: 8, default: 128}
+      - {offset: 4, attribute: dimmer, bits: 8, default: 0}
+default_mode: Full
+model3d: {kind: procedural, shape: box, body: {width: 0.4, depth: 0.3, height: 0.5}}

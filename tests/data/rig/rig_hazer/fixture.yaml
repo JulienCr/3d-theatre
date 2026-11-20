@@ -1,0 +1,15 @@
+version: 1
+id: rig_hazer
+manufacturer: Test
+model: Synthetic hazer
+family: hazer
+sources:
+  - {kind: datasheet, url: "https://example.org/hazer.pdf", note: synthetic}
+physical: {weight: 30.0}
+modes:
+  - name: 1 Ch
+    footprint: 1
+    channels:
+      - {offset: 1, attribute: haze_density, bits: 8, default: 0}
+default_mode: 1 Ch
+model3d: {kind: none}

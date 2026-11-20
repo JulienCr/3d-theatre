@@ -77,6 +77,23 @@ class Tube:
 
 
 @dataclass(frozen=True)
+class Truss:
+    """Square truss tower on a square base plate, as one mesh.
+
+    `center` is the plan position of the axis, `base` the plate side, `size` the
+    side of the truss section, `height` the top of the posts above Z = 0.
+    """
+
+    name: str
+    material: str
+    collection: str
+    center: Vec2
+    base: float
+    size: float
+    height: float
+
+
+@dataclass(frozen=True)
 class SlatGrid:
     """Square slats parallel to Y, one box per entry of `x_centers`."""
 
@@ -175,4 +192,4 @@ class Camera:
     lens: float
 
 
-Primitive = Box | Prism | Panel | Tube | SlatGrid | PleatedSurface | FlatSurface | HorizontalFace
+Primitive = Box | Prism | Panel | Tube | Truss | SlatGrid | PleatedSurface | FlatSurface | HorizontalFace

@@ -48,7 +48,8 @@ def test_side_zone_widens_with_a_warning_only_when_stairs_need_it():
                for w in lay.warnings)
     quiet = layout(stairs={"side_angle": 0.0})
     assert not any("Zone latérale" in w for w in quiet.warnings)
-    wide = layout(stairs={"side_angle": 0.0}, advanced={"side_zone_width": 3.0})
+    wide = layout(stairs={"side_angle": 0.0}, advanced={"side_zone_width": 3.0},
+                  rig={"enabled": False})
     assert wide.derived.side_zone == pytest.approx(3.0) and not wide.warnings
 
 

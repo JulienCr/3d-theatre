@@ -1051,7 +1051,7 @@ obligatoire à `null` (laissée ainsi par l'outil GDTF) rend la fiche invalide.
 | `colour.cto_kelvin` | K | si `cto` | température de couleur du filtre CTO plein |
 | `colour.emitters` | liste de `{attribute, rgb}` | si `emitters` | une émission par attribut `emitter_N`, `rgb` linéaire 0–1 de l'émetteur à pleine intensité |
 | `motion.type` | `moving` / `static` | si pas `hazer` | `static` : visée fixée à la construction |
-| `motion.pan`, `motion.tilt` | `{min, max}` | si `moving` | course physique, en degrés, zéro compris (convention 13.9) |
+| `motion.pan`, `motion.tilt` | `{min, max, invert}` | si `moving` | course physique, en degrés, zéro compris (convention 13.9). `invert` (booléen, `false` par défaut) : l'octet DMX 0 vaut `max` (GDTF `PhysicalFrom` > `PhysicalTo`) ; `min` < `max` reste vrai |
 | `blades.count` | entier (4) | non | la section `blades` absente = pas de lames ; `count` vaut 4 par défaut |
 | `blades.mode` | `motorised` / `manual` | si lames | `manual` : réglées à la construction |
 | `blades.gate_from_lens` | m | si lames | du plan des lames à la face avant de la lentille, vers l'arrière |
@@ -1059,7 +1059,7 @@ obligatoire à `null` (laissée ainsi par l'outil GDTF) rend la fiche invalide.
 | `blades.travel` | `{open, closed}` | si lames | distance du bord à l'axe, positive du côté de la lame, négative au-delà de l'axe : lame dégagée / course complète |
 | `blades.sides` | 4 angles | si lames | direction « côté lame » de chaque lame, rotation du cadrage nulle, de +X vers +Y de la tête (13.8) |
 | `blades.angle_limit` | angle | si lames | inclinaison maximale du bord, ± |
-| `blades.rotation` | `{min, max}` | si `motorised` | course de `blade_rot` |
+| `blades.rotation` | `{min, max, invert}` | si `motorised` | course de `blade_rot` ; `invert` comme pour `motion.pan` |
 | `gobos.wheels` | liste de `{name, rotation_range, slots}` | non | `name` : `gobo1` ou `gobo2` ; `rotation_range` : degrés pour `gobo1_rot` (360 par défaut) ; `slots` : liste de `{name, image, dmx}`, `image` facultatif (absent ou `null` : fente ouverte), `dmx` : `[octet_min, octet_max]` |
 | `iris.min_ratio` | 0–1 | non | rapport du diamètre d'iris fermé au diamètre ouvert |
 | `strobe` | `{open, closed, strobe}` | non | `open`, `closed` : `[octet_min, octet_max]` ; `strobe` : `{from, to, hz_min, hz_max}` |
@@ -1114,7 +1114,7 @@ dernier, la valeur de l'extrémité est tenue.
 | Attribut | Sens de `v` |
 |---|---|
 | `dimmer` | intensité, linéaire |
-| `pan`, `tilt` | `angle = min + v·(max − min)` de `motion.pan` / `motion.tilt` |
+| `pan`, `tilt` | `angle = min + v·(max − min)` de `motion.pan` / `motion.tilt` ; `v` devient `1 − v` si `invert` |
 | `zoom` | champ `= min + v·(max − min)` de `optics.field_angle` (inversé si `zoom_invert`) ; le faisceau suit par la même interpolation sur `beam_angle` |
 | `color_r`, `color_g`, `color_b`, `color_w` | niveau de l'émetteur ou du canal additif |
 | `cyan`, `magenta`, `yellow` | 0 = filtre dégagé, 1 = filtre plein |
@@ -1127,7 +1127,7 @@ dernier, la valeur de l'extrémité est tenue.
 | `iris` | 0 = ouvert, 1 = fermé à `iris.min_ratio` |
 | `blade_1a`, `blade_1b` … `blade_4a`, `blade_4b` | insertion aux deux extrémités A et B de la lame ; 0 = dégagée, 1 = course complète |
 | `blade_1_rot` … `blade_4_rot` | pivotement de la lame K autour de son axe : angle = `angle_limit·(1 − 2v)`, 0 au milieu *(choix : sens du GDTF Robe, +30° à `v` = 0, à confirmer contre 13.8)* |
-| `blade_rot` | rotation du cadrage, `min + v·(max − min)` de `blades.rotation` |
+| `blade_rot` | rotation du cadrage, `min + v·(max − min)` de `blades.rotation` (`1 − v` si `invert`) |
 | `haze_density` | densité du hazer, 0 – 1 |
 
 **Attribut inconnu.** L'outil GDTF (12.6) et la fiche acceptent tout autre
@@ -1257,7 +1257,10 @@ données par un chemin relatif).
 ## 13. Implantation lumière
 
 Tout est calculé dans `core/rig.py` (positions, visées, champs, lames,
-pan/tilt). `rigbuild.py` ne fait que traduire. Méthode : fiche ADEC 6-3
+pan/tilt, patch, valeurs de repos). `compute_layout(params, library)` l'appelle
+et rend le résultat dans `Layout.rig` ; sans `library`, c'est la bibliothèque
+livrée. Une fiche absente ou inadaptée écarte la famille avec une alerte,
+jamais d'erreur. `rigbuild.py` ne fait que traduire. Méthode : fiche ADEC 6-3
 (McCandless) : site 45° et azimut 45°, deux appareils de directions opposées
 par zone, faisceaux parallèles en plan pour une même direction, chaud d'un
 côté et froid de l'autre, recouvrement des zones voisines.
@@ -1378,8 +1381,9 @@ Deux appareils par zone, un par direction `d` : `L` (accroché côté jardin,
   `C_k`. Champ requis `F_req = 2·max_k angle(a, (C_k − P)/|C_k − P|)`.
   `F = clamp(F_req, field_angle.min, field_angle.max)`, puis le faisceau suit
   (12.3). `F_req > max` : alerte « Zone non couverte » ; `F_req < min` :
-  alerte « Champ trop large ». Le champ est une valeur de construction, pas
-  un canal DMX, sauf si le mode a `zoom`.
+  alerte « Champ trop large » (une alerte par nature, qui liste les appareils).
+  Le champ est une valeur de construction, pas un canal DMX, sauf si le mode
+  a `zoom` : la valeur de repos du canal reproduit alors `F` (15.2).
 - **Circuits** : un par (rang, direction) : `FrontPC_Row1_L`, `FrontPC_Row1_R`,
   `FrontPC_Row2_L`, `FrontPC_Row2_R` (4 circuits pour 12 PC). Propriété
   `theatre_circuit` de la racine.
@@ -1415,7 +1419,8 @@ Normale du plan : `n = (Q − S) × u / |(Q − S) × u|`, orientée vers le cô
 2. Tube = le plus petit de `lens_tubes` dont le `field_angle` vérifie
    `field_angle ≥ 1,05·F_req` *(choix : marge de 5 %)*. `tube_angle ≠ 0` :
    le tube dont le `field_angle` est le plus proche de cette valeur. Aucun tube assez large : le plus large, alerte
-   « Découpe … : aucun tube ne couvre le cadrage ».
+   « Découpe … : aucun tube ne couvre le cadrage ». Une fiche de découpe à zoom
+   (sans `lens_tubes`) prend `F = clamp(1,05·F_req, min, max)`.
 3. `F` = `field_angle` du tube ; `lens_diameter` = celui du tube (à défaut
    `optics.lens_diameter`). Source `S = P + a·(lens_offset − d)` avec
    `d = r / tan(F/2)`, `r = lens_diameter/2` (14.3). Les plans et les `n` sont recalculés
@@ -1435,16 +1440,17 @@ lames. Chaque coupe de normale `n` est confiée à la lame `k` qui maximise
   `q_k` ;
 - extrémités A (`y = −e`) et B (`y = +e`), `e = span/2` :
   `h_A = h_c + e·tan α`, `h_B = h_c − e·tan α` ;
-- insertion normalisée `v = (open − h) / (open − closed)`, avec
-  `open`, `closed` de `blades.travel` ; valeur hors de [0, 1] ou
+- insertion normalisée `v = (open_eff − h) / (open_eff − closed)`, avec
+  `closed` de `blades.travel` et `open_eff` ci-dessous (14.7 lit la même
+  référence) ; valeur hors de [0, 1] ou
   `|α| > angle_limit` : ramenée et signalée « Découpe … : lame hors course » ;
 - la lame dégagée ne mord jamais sur le faisceau :
   `open_eff = max(open, g·tan(F/2))`.
 
 **Mode manuel** (`blades_mode = manual`) : pas de calcul de coupe ; pour la
 lame `b` de la découpe `p` : `v = <p>_blade_<b>_insertion`, `α =
-<p>_blade_<b>_angle`, `ρ = <p>_rotation`, converties en `h_c = open + v·(closed
-− open)`. Le tube reste automatique sauf `tube_angle`. Les lames manuelles
+<p>_blade_<b>_angle`, `ρ = <p>_rotation`, converties en `h_c = open_eff + v·(closed
+− open_eff)`. Le tube reste automatique sauf `tube_angle`. Les lames manuelles
 d'un appareil `manual` ne sont pas des canaux : elles sont fixées à la
 construction.
 
@@ -1469,8 +1475,8 @@ dirigé de l'embase vers la tête (vers le bas dans le monde). Face du corps :
   `τ` hors de `[tilt.min, tilt.max]` : seconde solution `(φ + 180°, −τ)`.
   Aucune des deux : angles ramenés dans la plage, alerte « Pan/tilt hors
   course : … ». Un appareil `static` n'a pas de plage : `τ` ∈ [0°, 180°].
-- Valeur DMX normalisée : `v = (angle − min) / (max − min)`, puis arrondi
-  16 bits (12.4) : `core` rend les deux octets de chaque canal et les valeurs
+- Valeur DMX normalisée : `v = (angle − min) / (max − min)`, puis `v = 1 − v` si
+  l'axe est `invert` (12.2), puis arrondi 16 bits (12.4) : `core` rend les deux octets de chaque canal et les valeurs
   d'angle effectivement atteintes après arrondi.
 - Dans Blender : la pièce `_Pan` tourne de `φ` autour de son Z, la pièce
   `_Tilt` de `−τ` autour de son X (une rotation positive de Blender autour de X
@@ -1494,10 +1500,19 @@ Récapitulatif des visées de repos :
 - **Charge** cumulée par support (perche de face, chaque porteuse lumière,
   chaque pylône) : somme des `physical.weight`. Affichée, **sans alerte de
   dépassement** (`BACKLOG.md`).
-- **Encombrement** : sur un même tube, deux appareils dont les axes sont à
-  moins de `(width_a + width_b)/2` en X (`dimensions.width`) → alerte
-  « Appareils qui se touchent sur la perche : … ». Aucun décalage
-  automatique.
+- **Encombrement et rangement** : sur un même tube (la perche de face ou une
+  porteuse lumière), deux appareils dont les axes sont à moins de
+  `(width_a + width_b)/2` en X (`dimensions.width`) se touchent. Les PC de
+  face gardent **leur X exact** (faisceaux parallèles, 13.7). Tout autre
+  appareil du tube (contre, mobiles de face, découpes), dans l'ordre contre,
+  mobiles de face, découpes puis numéro, est placé au X libre **le plus
+  proche** de son X voulu, cherché par pas de 0,05 m en alternant les côtés
+  (le côté du centre du tube d'abord), sans sortir du tube. Sa visée reste le
+  point cible de sa famille (13.4, 13.5, 13.8) ; pan, tilt, tube et lames se
+  calculent depuis le point d'accroche déplacé. Alerte « Appareils qui se
+  touchent sur la perche : … » seulement si aucune position libre n'existe, ou
+  entre deux PC dont le X est imposé. Les mobiles des pylônes ont chacun leur
+  bras et ne sont pas rangés.
 - Ajouts à l'encadré « Cotes calculées » : `Yp` et `Zp`, `Ya`, `nx × nr` et
   `zw × zd`, tube et champ de chaque découpe, charges, plages de patch par
   famille (15.1), pan et tilt (angles et valeurs DMX) de chaque mobile.
@@ -1556,7 +1571,8 @@ matériaux cherchés par nom.
   `field_min`, `field_max`, `beam_min`, `beam_max`, `field_angle` (champ
   retenu), `pan_min`, `pan_max`, `tilt_min`, `tilt_max`, `cct_min`, `cct_max`,
   `cto_r`, `cto_g`, `cto_b`, `blade_open`, `blade_closed`, `blade_half_span`,
-  `blade_rot_min`, `blade_rot_max`, `iris_min_ratio`.
+  `blade_rot_min`, `blade_rot_max`, `pan_invert`, `tilt_invert`, `blade_rot_invert`
+  (0 ou 1), `iris_min_ratio`.
 - Les drivers lisent la **scène** (`dmx_<u>_<c>`) et la **racine** (réglages
   ci-dessus) ; les objets ne se lisent jamais eux-mêmes.
 
@@ -1643,6 +1659,8 @@ colonne « Sans canal ».
 | arbre de nœuds de la lumière | `Blackbody`, `GoboIndex`, `gobo1_rot`, `IrisRadius`, `FieldTan` | formules de 14.5 | constantes |
 | `Haze_Volume` (matériau) | densité | section 15.4 | |
 
+- Pour `pan`, `tilt` et `blade_rot`, `v` est remplacé par `1 − v` quand l'axe est
+  `invert` (`pan_invert`, `tilt_invert`, `blade_rot_invert` de la racine).
 - `z = v_zoom` (ou `1 − v_zoom` si `zoom_invert`), `F(z) = field_min +
   z·(field_max − field_min)`, `B(z)` pareil sur `beam_min` / `beam_max`.
 - `h_A = open_eff + v_ka·(closed − open_eff)`, `h_B` pareil avec `v_kb`.
@@ -1718,7 +1736,8 @@ reconstruction recrée les objets, un patch saisi ailleurs serait perdu.
 - **Alertes** : recouvrement (« Patch : X et Y se recouvrent, univers u,
   canaux a à b ») entre deux appareils de n'importe quelles familles ;
   dépassement (« Patch : l'univers u dépasse 512 canaux ») quand
-  `adresse + empreinte − 1 > 512`.
+  `adresse + empreinte − 1 > 512`. Au-delà de huit recouvrements, une dernière
+  alerte donne le nombre des autres.
 - « Cotes calculées » : plage `univers : première – dernière adresse` par
   famille, et la liste des appareils avec leur adresse.
 
@@ -1733,7 +1752,9 @@ par appareil patché et par canal, en valeur normalisée puis écrite selon
 | `dimmer` | `pc_level` (PC de face), `profile_level` (découpes), `mover_level` (mobiles et contre), `haze_level` pour `haze_density` |
 | `pan`, `tilt` | angles de 13.9 pour la visée de repos, convertis en valeur normalisée |
 | `cct` | `K` de `rest.cct_left` / `cct_right` (PC par direction) ou `cct_profile` (découpes), converti sur `colour.cct_range` ; hors plage : ramené et signalé |
-| `color_r/g/b/w`, `cyan/magenta/yellow` | couleur de `cct_to_rgb(K)` pour les PC et les découpes : `rgbw` → `(r, g, b)`, `w = 0` ; `cmy` → `(1 − r, 1 − g, 1 − b)` ; mobiles : valeur par défaut de la fiche |
+| `color_r/g/b/w`, `cyan/magenta/yellow`, `emitter_N` | couleur de `cct_to_rgb(K)` pour les PC et les découpes, **seulement si le mode n'a pas de canal `cct`** : `rgbw` → `(r, g, b)`, `w = 0` ; `cmy` → `(1 − r, 1 − g, 1 − b)` ; `emitters` → poids dans [0, 1] des émetteurs dont le mélange approche `(r, g, b)` (moindres carrés non négatifs) ; mobiles : valeur par défaut de la fiche |
+| `zoom` | PC de face dont le mode a `zoom` : la valeur qui donne le champ `F` de 13.7 ; sinon défaut |
+| `blade_Ka/Kb`, `blade_rot` | découpe à lames motorisées : insertions et rotation calculées en 13.8 ; sinon défaut |
 | tous les autres | valeur par défaut du canal dans la fiche |
 
 `cct_to_rgb(K)` (dans `core/fixtures.py`) : couleur d'un corps noir,
@@ -1749,8 +1770,8 @@ Planck, valable de 1667 à 25000 K, `K` ramené dans cette plage).
   les propriétés des canaux patchés à leur valeur de repos, avec le même
   marquage de la scène. Tant que le pont tourne et reçoit l'univers, il réécrit
   les propriétés à chaque tick : **la console l'emporte**.
-- Les autres attributs d'un mode (gobo, iris, lames…) restent à leur valeur par
-  défaut de la fiche : lames dégagées, iris ouvert.
+- Les autres attributs d'un mode (gobo, iris, lames des mobiles…) restent à leur
+  valeur par défaut de la fiche : lames dégagées, iris ouvert.
 
 ### 15.3 Pont DMX Visualizer
 

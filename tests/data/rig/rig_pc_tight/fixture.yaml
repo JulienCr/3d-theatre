@@ -1,0 +1,36 @@
+version: 1
+id: rig_pc_tight
+manufacturer: Test
+model: Synthetic PC
+family: pc
+sources:
+  - {kind: datasheet, url: "https://example.org/pc.pdf", note: synthetic}
+physical:
+  weight: 10.0
+  dimensions: {width: 0.30, depth: 0.40, height: 0.40}
+  mount: {hook_height: 0.05, tilt_axis_height: 0.30}
+optics:
+  beam_type: wash
+  lens_diameter: 0.20
+  lens_offset: 0.30
+  flux: 8000
+  field_angle: {min: 66, max: 70}
+  beam_angle: {min: 6, max: 40}
+colour:
+  systems: [cct]
+  cct_range: {min: 2700, max: 6500}
+motion: {type: static}
+modes:
+  - name: Basic
+    footprint: 3
+    channels:
+      - {offset: 1, attribute: dimmer, bits: 16, default: 0, fine: 2}
+      - {offset: 3, attribute: cct, bits: 8, default: 0}
+  - name: Zoom
+    footprint: 4
+    channels:
+      - {offset: 1, attribute: dimmer, bits: 8, default: 0}
+      - {offset: 2, attribute: cct, bits: 8, default: 0}
+      - {offset: 3, attribute: zoom, bits: 8, default: 0}
+default_mode: Basic
+model3d: {kind: procedural, shape: box, body: {width: 0.3, depth: 0.4, height: 0.4}}
