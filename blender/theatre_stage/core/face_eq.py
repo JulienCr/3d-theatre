@@ -53,12 +53,11 @@ class Emitter:
 
     `axis`: unit beam axis. `up`: unit vector perpendicular to it, the head's reference for the IES
     phi (phi grows by the right-hand rule about `axis`). `zoom_field`/`zoom_range`: 10 % full angle.
-    `beam_of_field`: 50 % angle at a field, a callable or `((field, beam), ...)` ascending; read by the
-    fallback profile only. `cut_planes`: `(point, normal)` through the lens centre, normal toward the
-    lit side; a probe behind any plane gets 0. `aim_z`: height of the plane where aim offsets apply
-    (None: the plane of the probes). `cut_edges`: leaf edges; a probe sees the part of the lens disc of
-    `lens_radius` they leave open (penumbra; radius 0 gives a sharp plane). `spill`: False when walls hide
-    the emitter from the spill probes.
+    `beam_of_field`: 50 % angle at a field, a callable or `((field, beam), ...)`, fallback profile only.
+    `cut_planes`: `(point, normal)` through the lens centre, normal toward the lit side; a probe behind
+    any plane gets 0. `aim_z`: height of the plane where aim offsets apply (None: the probes').
+    `cut_edges`: leaf edges; a probe sees the part of the lens disc of `lens_radius` they leave open
+    (radius 0: a sharp plane). `spill`: False when walls hide the emitter from the spill probes.
     """
 
     name: str

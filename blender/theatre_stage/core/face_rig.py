@@ -318,26 +318,26 @@ def equalise_rig(rig: Rig, library: Library, min_mean_ratio: float, now: datetim
                   _spill_alerts(rig, tuned, means, bounds.spill_limit))
 
 
-def equalise_params(params: Mapping, library: Library, passes: int = 1, now: datetime | None = None) -> FaceEq:
+def _built(params: Mapping, library: Library, eq: FaceEq | None = None) -> Rig:
+    from .layout import compute_layout  # layout imports this module lazily
+
+    rig = compute_layout(params, library, eq).rig
+    if rig is None:
+        raise ValueError("Égalisation impossible : implantation lumière désactivée.")
+    return rig
+
+
+def equalise_params(params: Mapping, library: Library, now: datetime | None = None) -> FaceEq:
     """Equalise the face of the rig of `params` and describe the result on the rig as built.
 
     The barn doors are recomputed for each new aim, so the built rig lights a little differently from what
-    the engine solved; the stored `after`, spill and alerts are measured on it, `before` is the plain rig.
-    Extra `passes` re-solve from the built rig (they did not converge on the default rig: off by default).
+    the engine solved: the stored `after`, spill and alerts are measured on it, `before` is the plain rig.
     """
-    from .layout import compute_layout  # layout imports this module lazily
-
-    ratio = params["front_pc"]["min_mean_ratio"]
-    first = equalise_rig(compute_layout(params, library).rig, library, ratio, now)
-    eq = first
-    for _ in range(passes - 1):
-        again = equalise_rig(compute_layout(params, library, eq).rig, library, ratio, now)
-        eq = dataclasses.replace(again, signature=first.signature, before=first.before,
-                                 spill_before=first.spill_before, evaluations=first.evaluations + again.evaluations)
-    final = compute_layout(params, library, eq).rig
+    first = equalise_rig(_built(params, library), library, params["front_pc"]["min_mean_ratio"], now)
+    final = _built(params, library, first)
     limit = Bounds().spill_limit
-    tuned = _tuned(final, library, eq.by_name())
+    tuned = _tuned(final, library, first.by_name())
     stats, spill = measure(final, tuned, limit)
     return dataclasses.replace(
-        eq, after=stats, spill_after=spill, mean_ratio={g: s.mean / first.before[g].mean for g, s in stats.items()},
+        first, after=stats, spill_after=spill, mean_ratio={g: s.mean / first.before[g].mean for g, s in stats.items()},
         alerts=_spill_alerts(final, tuned, {g: s.mean for g, s in stats.items()}, limit))
