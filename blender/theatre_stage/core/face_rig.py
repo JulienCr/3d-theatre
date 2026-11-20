@@ -78,10 +78,10 @@ def _beam_table(optics: Optics, f: RigFixture) -> tuple[tuple[float, float], ...
     return ((field, field if f.beam_angle is None else f.beam_angle),)
 
 
-def _zoom_range(fx: Fixture, f: RigFixture) -> tuple[float, float]:
-    """The zoom of the fiche, held at the current field when the mode has no `zoom` channel."""
+def _zoom_range(fx: Fixture, f: RigFixture, hold_zoom: bool = False) -> tuple[float, float]:
+    """The zoom of the fiche, held at the current field when the mode has no `zoom` channel or `hold_zoom`."""
     zoom, field = _optics(fx).field_angle, _field(f)
-    if zoom is None or fx.mode(f.mode).channel("zoom") is None:
+    if hold_zoom or zoom is None or fx.mode(f.mode).channel("zoom") is None:
         return (field, field)
     return (zoom.min, zoom.max)
 
@@ -112,7 +112,7 @@ def _cut_edges(f: RigFixture, lens: Vec3) -> tuple[CutEdge, ...]:
     return tuple(out)
 
 
-def emitter_of(f: RigFixture, fx: Fixture, spill: bool = True) -> Emitter:
+def emitter_of(f: RigFixture, fx: Fixture, spill: bool = True, hold_zoom: bool = False) -> Emitter:
     """The face PC `f` as the equaliser sees it; barn door leaves become cut edges."""
     optics = _optics(fx)
     tube = next((t for t in optics.lens_tubes if t.name == f.tube), None)
@@ -121,18 +121,18 @@ def emitter_of(f: RigFixture, fx: Fixture, spill: bool = True) -> Emitter:
     return Emitter(
         name=f.name, direction=f.name.split("_")[1], row=int(row.group(1)) - 1 if row else 0,
         source=f.source, axis=f.axis, up=head_frame(*aim_angles(f.axis))[0],
-        zoom_field=_field(f), zoom_range=_zoom_range(fx, f), beam_of_field=_beam_table(optics, f),
+        zoom_field=_field(f), zoom_range=_zoom_range(fx, f, hold_zoom), beam_of_field=_beam_table(optics, f),
         photometry=photometry_of(fx, f), aim_z=f.aim[2], cut_edges=_cut_edges(f, lens),
         lens_radius=optics.aperture(tube) / 2, spill=spill)
 
 
-def emitters_of(rig: Rig, library: Library) -> tuple[Emitter, ...]:
+def emitters_of(rig: Rig, library: Library, hold_zoom: bool = False) -> tuple[Emitter, ...]:
     out = []
     for f in rig.by_family(FAMILY):
         fx = library.get(f.fixture_id)
         if fx is not None and fx.optics is not None and f.field_angle is not None:
             behind = rig.face is not None and f.source[1] > rig.face.forestage_depth
-            out.append(emitter_of(f, fx, not behind))
+            out.append(emitter_of(f, fx, not behind, hold_zoom))
     return tuple(out)
 
 
@@ -154,9 +154,9 @@ def _doors(f: RigFixture) -> list | None:
                                  for leaf in doors.leaves]]
 
 
-def signature(rig: Rig, min_mean_ratio: float) -> str:
+def signature(rig: Rig, min_mean_ratio: float, hold_zoom: bool = False) -> str:
     """Digest of everything the equalisation reads: face PC hang points, fiches, modes, aims, fields,
-    barn doors, zones, the measuring plane and the mean floor. Levels and colours are not in it."""
+    barn doors, zones, the measuring plane, the mean floor and a held zoom. Levels and colours are not in it."""
     pcs = [[f.name, f.fixture_id, f.mode, f.support, _vec(f.hang), _vec(f.axis), f.field_angle and _r(f.field_angle),
             f.tube, _doors(f)] for f in rig.by_family(FAMILY)]
     zones, face = rig.zones, rig.face
@@ -165,6 +165,8 @@ def signature(rig: Rig, min_mean_ratio: float) -> str:
              None if face is None else [_r(face.nose_width), _r(face.frame_width), _r(face.forestage_depth),
                                         _r(face.area_depth), _r(face.z), _r(face.z_torso), _r(face.nose_depth),
                                         len(face.spill), _r(sum(sum(p.position) for _, p in face.spill))]]
+    if hold_zoom:
+        parts.append("hold_zoom")
     return hashlib.sha1(json.dumps(parts, separators=(",", ":")).encode()).hexdigest()[:16]
 
 
@@ -230,9 +232,9 @@ class FaceEq:
         except (ValueError, KeyError, TypeError):
             return None
 
-    def matches(self, rig: Rig, min_mean_ratio: float) -> bool:
+    def matches(self, rig: Rig, min_mean_ratio: float, hold_zoom: bool = False) -> bool:
         """True while the rig is the one this result was computed for."""
-        return self.signature == signature(rig, min_mean_ratio)
+        return self.signature == signature(rig, min_mean_ratio, hold_zoom)
 
 
 def probes_of(rig: Rig) -> tuple[Probe, ...]:
@@ -301,9 +303,11 @@ def _spill_alerts(rig: Rig, tuned: tuple[Emitter, ...], means: Mapping[str, floa
     return tuple(alerts)
 
 
-def equalise_rig(rig: Rig, library: Library, min_mean_ratio: float, now: datetime | None = None) -> FaceEq:
-    """Run the engine on the face PCs of a plain (unadjusted) rig and package the result for storage."""
-    emitters = emitters_of(rig, library)
+def equalise_rig(rig: Rig, library: Library, min_mean_ratio: float, now: datetime | None = None,
+                 hold_zoom: bool = False) -> FaceEq:
+    """Run the engine on the face PCs of a plain (unadjusted) rig and package the result for storage.
+    `hold_zoom` keeps every zoom at its plain-focus field."""
+    emitters = emitters_of(rig, library, hold_zoom)
     if not emitters or rig.face is None or rig.zones is None:
         raise ValueError("Égalisation impossible : aucun PC de face dans l'implantation.")
     bounds = Bounds.for_zone(rig.zones.width, rig.zones.depth, min_mean_ratio=min_mean_ratio)
@@ -312,7 +316,7 @@ def equalise_rig(rig: Rig, library: Library, min_mean_ratio: float, now: datetim
                   for e, a in zip(emitters, result.adjustments))
     stamp = (now or datetime.now()).isoformat(timespec="seconds")
     means = {g: s.mean for g, s in result.after.items()}
-    return FaceEq(signature(rig, min_mean_ratio), stamp, min_mean_ratio, result.adjustments, dict(result.before),
+    return FaceEq(signature(rig, min_mean_ratio, hold_zoom), stamp, min_mean_ratio, result.adjustments, dict(result.before),
                   dict(result.after), dict(result.mean_ratio), result.mean_level, result.evaluations, result.seconds,
                   dict(result.spill_before), dict(result.spill_after),
                   _spill_alerts(rig, tuned, means, bounds.spill_limit))
@@ -333,7 +337,8 @@ def equalise_params(params: Mapping, library: Library, now: datetime | None = No
     The barn doors are recomputed for each new aim, so the built rig lights a little differently from what
     the engine solved: the stored `after`, spill and alerts are measured on it, `before` is the plain rig.
     """
-    first = equalise_rig(_built(params, library), library, params["front_pc"]["min_mean_ratio"], now)
+    pc = params["front_pc"]
+    first = equalise_rig(_built(params, library), library, pc["min_mean_ratio"], now, not pc["eq_zoom"])
     final = _built(params, library, first)
     limit = Bounds().spill_limit
     tuned = _tuned(final, library, first.by_name())

@@ -1011,7 +1011,8 @@ def compute_layout(params: Mapping | None = None, library: Library | None = None
     rig, rig_part = compute_rig(ctx, library)
     face_state = ""
     if face_eq is not None and rig.enabled:
-        if face_eq.matches(rig, ctx.p["front_pc"]["min_mean_ratio"]):
+        pc = ctx.p["front_pc"]
+        if face_eq.matches(rig, pc["min_mean_ratio"], not pc["eq_zoom"]):
             rig, rig_part = compute_rig(ctx, library, face_eq.by_name())
             warnings.extend(face_eq.alerts)
             face_state = "applied"

@@ -212,6 +212,19 @@ def test_equalise_params_reports_the_rig_as_built():
     assert result.before["sum"].cv > result.after["sum"].cv and set(result.alerts) <= set(layout.warnings)
 
 
+def test_holding_the_zoom_keeps_each_face_pc_at_its_plain_field_and_marks_the_result():
+    zoom = {"mode": "Dimmer 16 bit + CCT + Zoom"}
+    params = make(front_pc={**zoom, "eq_zoom": False})
+    plain = compute_layout(params, LIB).rig
+    result = equalise_params(params, LIB)
+    assert [a.zoom_field for a in result.adjustments] == [f.field_angle for f in faces(plain)]
+    assert result.signature == signature(plain, RATIO, hold_zoom=True) != signature(plain, RATIO)
+    assert compute_layout(params, LIB, result).face_eq_state == "applied"
+    assert compute_layout(make(front_pc=zoom), LIB, result).face_eq_state == "stale"
+    free = equalise_params(make(front_pc=zoom), LIB)
+    assert any(a.zoom_field != f.field_angle for a, f in zip(free.adjustments, faces(plain)))
+
+
 def test_default_layout_hangs_the_face_pcs_inside_the_facade_opening():
     """Pipe 2.6 m in front of the facade, 16 degrees, three columns (spec 13.7): beams enter the opening frontally."""
     from core.params import default_params

@@ -2074,6 +2074,10 @@ autant que la somme. Perte minimisée :
 | Zoom (champ) | plage de la fiche (`optics.field_angle`) |
 | Niveau | `[0, 1]` ; part du niveau donné, jamais au-dessus de 1 |
 
+`front_pc.eq_zoom` (« L'égalisation peut ouvrir les zooms », vrai par défaut) : décoché, le zoom
+de chaque PC reste à son champ de mise au point (13.7) et seuls la visée et le niveau bougent ;
+le réglage entre dans la signature (13.14) quand il est décoché.
+
 **Compromis sur la moyenne.** Égaliser en dimmant ou en ouvrant le zoom coûte de
 la lumière sur le plateau. L'éclairement moyen de chaque direction et de la
 somme reste au moins à `min_mean_ratio` (0,85 par défaut *(choix)*) de celui

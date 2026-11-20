@@ -159,6 +159,7 @@ front_pc:
   inset_side: 0.8
   inset_nez: 0.4
   min_mean_ratio: 0.85
+  eq_zoom: true
   barn_doors: auto
   row1_l_leaf_1: 0.0
   row1_l_leaf_2: 0.0

@@ -419,6 +419,9 @@ SCHEMA: tuple[Group, ...] = (
                 "de salle ne sont plus éclairés."),
         _float("min_mean_ratio", 0.85, 0.5, 1.0, "Moyenne minimale de l'égalisation",
                "Part de l'éclairement moyen du rig plein que l'égalisation de la face doit conserver."),
+        _flag("eq_zoom", True, "L'égalisation peut ouvrir les zooms",
+              "Décoché, « Égaliser la face » garde le zoom de chaque PC de face à son champ de mise au point "
+              "et ne règle que la visée et le niveau."),
         _enum("barn_doors", "auto", "Volets", "Volets (coupe-flux) des PC dont la fiche en porte.", (
             ("none", "Aucun", "Pas de volets."),
             ("auto", "Automatique", "Volets fermés sur la limite à ne pas éclairer."),
