@@ -6,9 +6,11 @@ from pathlib import Path
 
 import pytest
 
+from core.fixture_models import fixture_model
 from core.fixtures import EMPTY_LIBRARY, Range, cct_to_rgb, discover
 from core.layout import _make_context, compute_layout
-from core.rig import aim_angles, compute_rig, default_library, head_frame, spread
+from core.presets import read_preset, shipped_presets
+from core.rig import FOOTPRINT_MARGIN, _Boxes, aim_angles, compute_rig, default_library, head_frame, posed_points, spread
 from helpers import bounds, make
 
 DATA = Path(__file__).parent / "data" / "rig"
@@ -178,10 +180,44 @@ def test_pc_cross_at_azimuth_with_parallel_beams():
     assert first.hang[0] == pytest.approx(-3.75 - 2.90, abs=0.01)
 
 
-def touching(rig, support):
-    on = [f for f in rig.fixtures if f.support == support and f.family == "front_pc"]
-    return [(a.name, b.name) for i, a in enumerate(on) for b in on[i + 1:]
-            if abs(a.hang[0] - b.hang[0]) < (a.width + b.width) / 2 - 1e-9]
+def posed_interval(library, f, axis=0):
+    """Extent of every vertex of the posed model of `f` on a world axis (independent of core's boxes)."""
+    fx = library.get(f.fixture_id)
+    tube = next((t for t in fx.optics.lens_tubes if t.name == f.tube), None) if f.tube else None
+    model = fixture_model(fx, tube)
+    rz, rx = rot_z(f.pan), rot_x(-f.tilt)
+    pivot = model.tilt_pivot
+    values = []
+    for part, mesh in (("base", model.base), ("pan", model.pan), ("tilt", model.tilt)):
+        for v in mesh.vertices:
+            if part == "tilt":
+                v = add(matvec(rx, v), pivot)
+            if part != "base":
+                v = matvec(rz, v)
+            values.append((f.root[0] + v[0], f.root[1] - v[1], f.root[2] - v[2])[axis])
+    return min(values), max(values)
+
+
+def matvec(m, v):
+    return tuple(sum(m[i][k] * v[k] for k in range(3)) for i in range(3))
+
+
+def overlapping(rig, library):
+    """Pairs of fixtures on one support whose posed intervals overlap (X on a tube, Z on a tower),
+    and the smallest gap per support."""
+    by_support, pairs, gaps = {}, [], {}
+    for f in rig.fixtures:
+        if f.support:
+            axis = 2 if f.support.startswith("Tower_") else 0
+            by_support.setdefault(f.support, []).append((f, posed_interval(library, f, axis)))
+    for support, items in by_support.items():
+        for i, (a, ia) in enumerate(items):
+            for b, ib in items[i + 1:]:
+                gap = max(ia[0] - ib[1], ib[0] - ia[1])
+                gaps[support] = min(gaps.get(support, gap), gap)
+                if gap < 0:
+                    pairs.append((a.name, b.name))
+    return pairs, gaps
 
 
 def test_row_azimuth_moves_off_the_nominal_to_free_the_shared_tube():
@@ -190,7 +226,7 @@ def test_row_azimuth_moves_off_the_nominal_to_free_the_shared_tube():
     rig = rig_of(front_pc={"azimuth": nominal})
     assert rig.dims.pc_azimuths[0] == nominal
     assert rig.dims.pc_azimuths[1] != nominal and abs(rig.dims.pc_azimuths[1] - nominal) <= 10.0
-    assert not touching(rig, "Batten_01") and not has(rig.warnings, "se touchent")
+    assert not overlapping(rig, LIB)[0] and not has(rig.warnings, "se touchent")
     row = [f for f in pcs(rig) if f.support == "Batten_01"]
     for side in "LR":
         headings = {round(math.degrees(math.atan2(f.aim[0] - f.pivot[0], f.aim[1] - f.pivot[1])), 6)
@@ -200,7 +236,9 @@ def test_row_azimuth_moves_off_the_nominal_to_free_the_shared_tube():
 
 def test_row_azimuth_alerts_and_keeps_the_nominal_when_nothing_fits():
     pc = LIB.get("rig_pc")
-    wide = replace(pc, physical=replace(pc.physical, dimensions=replace(pc.physical.dimensions, width=2.4)))
+    body = replace(pc.model3d.body, width=2.4)
+    wide = replace(pc, model3d=replace(pc.model3d, body=body),
+                   physical=replace(pc.physical, dimensions=replace(pc.physical.dimensions, width=2.4)))
     lib = replace(LIB, fixtures={**LIB.fixtures, "rig_pc": wide})
     rig = rig_layout(library=lib, front_pc={"azimuth": 45.0}).rig
     assert has(rig.warnings, "Rang", "aucun azimut")
@@ -314,6 +352,14 @@ def test_tower_position_mesh_arms_and_aims():
     assert first.aim == pytest.approx((10 / 4, 6.0 * 0.5 / 2, 2.9))
     assert second.aim == pytest.approx((10 / 4, 6.0 * 1.5 / 2, 2.9))
     assert lay.rig.find("TowerMover_R_01").aim[0] == pytest.approx(-10 / 4)
+
+
+def test_stacked_tower_movers_whose_posed_height_exceeds_the_pitch_raise_an_alert():
+    wash = LIB.get("rig_wash")
+    tall = replace(wash, model3d=replace(wash.model3d, body=replace(wash.model3d.body, height=1.5)))
+    lib = replace(LIB, fixtures={**LIB.fixtures, "rig_wash": tall})
+    assert has(rig_layout(library=lib).warnings, "Appareils qui se touchent sur le pylône Tower_L_01")
+    assert not has(rig_layout().warnings, "se touchent")
 
 
 def test_asymmetric_towers_and_names_are_continuous_per_side():
@@ -545,7 +591,7 @@ def test_crowded_fixtures_move_to_the_nearest_free_x():
     assert moved
 
     def clear(x, me):
-        return all(abs(x - o.hang[0]) >= (me.width + o.width) / 2 - 1e-9
+        return all(abs(x - o.hang[0]) >= (me.width + o.width) / 2 + 2 * FOOTPRINT_MARGIN - 1e-9
                    for o in on_pipe if o is not me)
 
     limit = lay.find("FrontPipe").end[0]
@@ -752,6 +798,40 @@ def test_shipped_presets_raise_no_rig_alert():
         params, messages = read_preset(path)
         assert not messages, name
         assert compute_layout(params).rig.warnings == (), name
+
+
+def shipped_rigs():
+    out = {"default": compute_layout(make())}
+    for name, path in shipped_presets().items():
+        out[name] = compute_layout(read_preset(path)[0])
+    return out
+
+
+@pytest.mark.parametrize("name", ["default", "reference_with_modules", "open_space"])
+def test_no_two_fixtures_overlap_on_a_support_once_posed(name):
+    lay = shipped_rigs()[name]
+    pairs, gaps = overlapping(lay.rig, default_library())
+    assert pairs == [] and gaps
+    assert min(gaps.values()) >= 0.0 and lay.rig.warnings == ()
+
+
+def test_pc_footprint_includes_the_swing_of_the_heads():
+    # FrontPC_L_07 and R_05 used to hang 0.34 m apart while panned +-132 degrees: heads intersected.
+    rig = compute_layout(make()).rig
+    library = default_library()
+    pc = rig.find("FrontPC_L_07")
+    low, high = posed_interval(library, pc)
+    assert high - low > 1.5 * pc.width
+    assert abs(rig.find("FrontPC_R_05").hang[0] - pc.hang[0]) > 0.5
+    assert rig.dims.pc_azimuths[1] != 45.0
+
+
+def test_posed_points_follow_the_head_frame_of_the_spec():
+    boxes = _Boxes((), (), ((0.0, 0.0, 0.5),), (0.0, 0.0, 0.2))
+    for pan, tilt in ((0.0, 0.0), (30.0, 40.0), (-132.0, 45.0), (170.0, 100.0)):
+        (point,) = posed_points(boxes, (1.0, 2.0, 3.0), pan, tilt)
+        axis = head_frame(pan, tilt)[2]
+        assert point == pytest.approx(add((1.0, 2.0, 3.0 - 0.2), mul(axis, 0.5)))
 
 
 def test_default_profiles_all_find_a_tube_within_travel():

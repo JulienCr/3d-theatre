@@ -38,4 +38,4 @@ modes:
       - {offset: 2, attribute: tilt, bits: 8, default: 128}
       - {offset: 4, attribute: dimmer, bits: 8, default: 0}
 default_mode: Full
-model3d: {kind: procedural, shape: box, body: {width: 0.4, depth: 0.3, height: 0.5}}
+model3d: {kind: procedural, shape: box, body: {width: 6.0, depth: 0.3, height: 0.5}}

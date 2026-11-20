@@ -8,6 +8,7 @@ degrees in the records, lengths in metres, 3-vectors are `(x, y, z)` tuples.
 from __future__ import annotations
 
 import math
+import struct
 from dataclasses import dataclass, field
 from functools import lru_cache
 from collections.abc import Mapping
@@ -16,6 +17,7 @@ from .fixtures import (
     SHIPPED_DIR, Blades, Channel, Dimensions, Fixture, Library, Mode, Mount, Optics, Range,
     cct_to_rgb, discover, encode,
 )
+from .fixture_models import fixture_model
 from .layout import (
     BATTEN_RADIUS, EPS, PROSCENIUM_RECESS, Ctx, Part, _metres, _nn, _polys_overlap,
     _side_stair,
@@ -47,6 +49,8 @@ MAX_PATCH_ALERTS = 8
 MAX_CHANNEL = 512
 AZIMUTH_STEP = 0.5
 AZIMUTH_SEARCH = 10.0
+FOOTPRINT_MARGIN = 0.02
+_MODEL_ERRORS = (OSError, ValueError, KeyError, IndexError, struct.error)
 
 FAMILY_LABELS = {
     "backlight": "contre", "front_movers": "mobiles de face", "tower_movers": "mobiles de pylône",
@@ -57,7 +61,7 @@ FAMILY_GROUPS = {
     "front_pc": "front_pc", "profiles": "profiles", "hazer": "haze",
 }
 MOVER_GROUPS = {"backlight": "Backlight", "front_movers": "FrontMovers"}
-PACK_ORDER = {"backlight": 0, "front_movers": 1, "profiles": 2}
+PACK_ORDER = {"backlight": 0, "profiles": 1, "front_movers": 2}
 CUT_NAMES = ("bottom", "top", "left", "right")
 
 
@@ -340,6 +344,8 @@ class _Work:
         self.objects: list = []
         self.zones, self.za, self.ya = zones, za, ya
         self.azimuths: list[float] = []
+        self.models: dict = {}
+        self.boxes: dict = {}
         self.uncovered: list[tuple[str, float, float]] = []
         self.too_wide: list[tuple[str, float, float]] = []
 
@@ -405,16 +411,16 @@ def _nearest_batten(c: Ctx, y: float) -> int | None:
     return min(range(len(c.light_batten_ys)), key=lambda i: abs(c.light_batten_ys[i] - y))
 
 
-def _batten(c: Ctx, index: int) -> _Support:
-    name = f"Batten_{_nn(index + 1)}"
-    return _Support(name, c.light_batten_ys[index], c.plan.zb, c.Wk / 2 - PIPE_END_MARGIN,
-                 f"la porteuse {name}")
-
-
 def _upstage_batten(c: Ctx) -> int | None:
     """Most upstage light batten still in front of the back line, else the most upstage one."""
     front = [i for i, y in enumerate(c.light_batten_ys) if y < c.plan.yb]
     return front[-1] if front else len(c.light_batten_ys) - 1 if c.light_batten_ys else None
+
+
+def _batten(c: Ctx, index: int) -> _Support:
+    name = f"Batten_{_nn(index + 1)}"
+    return _Support(name, c.light_batten_ys[index], c.plan.zb, c.Wk / 2 - PIPE_END_MARGIN,
+                 f"la porteuse {name}")
 
 
 def _zones(c: Ctx, ya: float) -> Zones:
@@ -444,6 +450,80 @@ def _front_pipe(w: _Work, zones: Zones, za: float) -> tuple[_Support, float]:
     if not -c.Yh + FRAME_OFFSET <= yp <= c.Ys - FRAME_OFFSET:
         w.warn(f"Perche de face hors de la salle : Y = {_metres(yp)}.")
     return _Support("FrontPipe", yp, zp, c.Wt / 2 - PIPE_END_MARGIN, "la perche"), drop
+
+
+# ---------------------------------------------------------------- footprints
+
+@dataclass(frozen=True)
+class _Boxes:
+    """Bounding-box corners of the base, pan and tilt parts of a model, each in its own frame (14.2)."""
+
+    base: tuple[Vec3, ...]
+    pan: tuple[Vec3, ...]
+    tilt: tuple[Vec3, ...]
+    pivot: Vec3
+
+
+def _corners(mesh) -> tuple[Vec3, ...]:
+    if not mesh.vertices:
+        return ()
+    lo = [min(v[i] for v in mesh.vertices) for i in range(3)]
+    hi = [max(v[i] for v in mesh.vertices) for i in range(3)]
+    return tuple((x, y, z) for x in (lo[0], hi[0]) for y in (lo[1], hi[1]) for z in (lo[2], hi[2]))
+
+
+def _boxes(w: _Work, sheet: _Sheet) -> _Boxes | None:
+    """Corner boxes of the sheet's default model, or None when its model cannot be built."""
+    key = sheet.fixture.id
+    if key not in w.boxes:
+        try:
+            model = fixture_model(sheet.fixture, None, w.models)
+            w.boxes[key] = _Boxes(_corners(model.base), _corners(model.pan), _corners(model.tilt),
+                                  model.tilt_pivot)
+        except _MODEL_ERRORS:
+            w.boxes[key] = None
+    return w.boxes[key]
+
+
+def posed_points(boxes: _Boxes, root: Vec3, pan: float, tilt: float) -> list[Vec3]:
+    """World corners of the posed parts: the tilt part by `Rz(pan)(pivot + Rx(-tilt) v)`, then the
+    root's 180 degree turn about X (spec 13.9)."""
+    cp, sp = math.cos(math.radians(pan)), math.sin(math.radians(pan))
+    ct, st = math.cos(math.radians(tilt)), math.sin(math.radians(tilt))
+    px, py, pz = boxes.pivot
+    out: list[Vec3] = []
+    for part, corners in (("base", boxes.base), ("pan", boxes.pan), ("tilt", boxes.tilt)):
+        for x, y, z in corners:
+            if part == "tilt":
+                x, y, z = x + px, y * ct + z * st + py, -y * st + z * ct + pz
+            if part != "base":
+                x, y = cp * x - sp * y, sp * x + cp * y
+            out.append((root[0] + x, root[1] - y, root[2] - z))
+    return out
+
+
+def _span_at(w: _Work, sheet: _Sheet, hang: Vec3, target: Vec3, axis: int = 0) -> tuple[float, float]:
+    """Interval of the posed model on a world axis (0 = X along a pipe, 2 = Z on a tower arm),
+    margin included (spec 13.10)."""
+    mount = sheet.mount
+    root = (hang[0], hang[1], hang[2] - mount.hook_height)
+    pivot = (root[0], root[1], root[2] - mount.tilt_axis_height)
+    pan, tilt, _ = _pan_tilt(sheet.fixture, _unit(_sub(target, pivot)))
+    boxes = _boxes(w, sheet)
+    if boxes is None:
+        half = sheet.dimensions.width / 2
+        values = [root[0] - half, root[0] + half] if axis == 0 else [root[2] - sheet.dimensions.height, root[2]]
+    else:
+        values = [p[axis] for p in posed_points(boxes, root, pan, tilt)]
+    return min(values) - FOOTPRINT_MARGIN, max(values) + FOOTPRINT_MARGIN
+
+
+def _overlaps(a: tuple[float, float], b: tuple[float, float]) -> bool:
+    return a[0] < b[1] - EPS and b[0] < a[1] - EPS
+
+
+def _slot_span(w: _Work, s: _Slot, x: float, axis: int = 0) -> tuple[float, float]:
+    return _span_at(w, s.sheet, (x, s.y, s.z), s.target, axis)
 
 
 # ------------------------------------------------------------------ families
@@ -491,19 +571,22 @@ def _row_x(zones: Zones, drop: float, azimuth: float) -> list[tuple[str, int, fl
 
 
 def _row_azimuth(w: _Work, tube: _Support, yr: float, nominal: float, sheet: _Sheet,
-                 taken: list[float]) -> float | None:
-    """Azimuth nearest to `nominal` (+-0.5 deg steps, +-10 deg) where no PC of the row touches
-    another on the tube and every zone stays within the widest field of the sheet."""
+                 taken: list[tuple[float, float]]) -> float | None:
+    """Azimuth nearest to `nominal` (+-0.5 deg steps, +-10 deg) where no posed PC of the row
+    overlaps another on the tube (`taken`: intervals of earlier rows) and every zone stays
+    within the widest field of the sheet."""
     zones = w.zones
-    width, drop, za = sheet.dimensions.width, yr - tube.y, w.za
+    drop, za = yr - tube.y, w.za
     mount, widest = sheet.mount, sheet.optics.widest_field
     z = tube.z - mount.hook_height - mount.tilt_axis_height
     for k in range(int(AZIMUTH_SEARCH / AZIMUTH_STEP) + 1):
         for delta in ((0.0,) if k == 0 else (k * AZIMUTH_STEP, -k * AZIMUTH_STEP)):
             row = _row_x(zones, drop, nominal + delta)
-            xs = [x for _, _, x in row] + taken
-            clear = all(abs(x) <= tube.limit + EPS for x in xs) and all(
-                abs(a - b) >= width - EPS for n, a in enumerate(xs) for b in xs[n + 1:])
+            clear = all(abs(x) <= tube.limit + EPS for _, _, x in row)
+            if clear:
+                spans = [_span_at(w, sheet, (x, tube.y, tube.z), (zones.xs[i], yr, za))
+                         for _, i, x in row] + taken
+                clear = not any(_overlaps(a, b) for n, a in enumerate(spans) for b in spans[n + 1:])
             if clear and all(
                     _wash_required(w, (zones.xs[i], yr), za, (x, tube.y, z),
                                    _unit(_sub((zones.xs[i], yr, za), (x, tube.y, z)))) <= widest + EPS
@@ -516,7 +599,7 @@ def _plan_front_pc(w: _Work, zones: Zones, za: float, pipe: _Support, drop_auto:
     c, node = w.c, w.c.p["front_pc"]
     if not node["enabled"] or (sheet := w.sheet("front_pc", node)) is None:
         return
-    on_tube: dict[str, list[float]] = {}
+    on_tube: dict[str, list[tuple[float, float]]] = {}
     for j, yr in enumerate(zones.ys):
         if j == 0:
             tube = pipe
@@ -540,7 +623,7 @@ def _plan_front_pc(w: _Work, zones: Zones, za: float, pipe: _Support, drop_auto:
         for tag, i, x in _row_x(zones, drop, azimuth):
             name = f"FrontPC_{tag}_{_nn(j * zones.nx + i + 1)}"
             x = _clamp_x(w, name, x, tube)
-            taken.append(x)
+            taken.append(_span_at(w, sheet, (x, tube.y, tube.z), (zones.xs[i], yr, za)))
             w.add(_Slot(name, "front_pc", sheet, x, tube.y, tube.z, (zones.xs[i], yr, za),
                         tube.name, tube.name, tube.limit, movable=False,
                         circuit=f"FrontPC_Row{j + 1}_{tag}",
@@ -639,18 +722,16 @@ def _plan_hazer(w: _Work) -> None:
 
 # ------------------------------------------------------------------- packing
 
-def _gap(a: _Slot, b: _Slot) -> float:
-    return (a.width + b.width) / 2
-
-
-def _free_x(slot: _Slot, placed: list[_Slot]) -> float | None:
-    """Nearest X to the wanted one where `slot` touches nothing; None when the tube is full."""
+def _free_x(w: _Work, slot: _Slot, placed: list[tuple[_Slot, tuple[float, float]]]) -> float | None:
+    """Nearest X to the wanted one where the posed `slot` overlaps nothing; None when the tube is full."""
     sign = -1.0 if slot.x > 0 else 1.0
     for k in range(int(2 * slot.limit / PACK_STEP) + 2):
         for delta in ((0.0,) if k == 0 else (sign * k * PACK_STEP, -sign * k * PACK_STEP)):
             x = slot.x + delta
-            if abs(x) <= slot.limit + EPS and all(abs(x - t.x) >= _gap(slot, t) - EPS for t in placed):
-                return x
+            if abs(x) <= slot.limit + EPS:
+                span = _slot_span(w, slot, x)
+                if not any(_overlaps(span, other) for _, other in placed):
+                    return x
     return None
 
 
@@ -658,17 +739,31 @@ def _pack(w: _Work, tubes: Mapping[str, _Support]) -> None:
     """Per tube: PCs keep their X, every other fixture moves to the nearest free X (spec 13.10)."""
     for name, tube in tubes.items():
         group = [s for s in w.slots if s.group == name]
-        placed: list[_Slot] = []
+        placed: list[tuple[_Slot, tuple[float, float]]] = []
         movable = sorted((s for s in group if s.movable), key=lambda s: PACK_ORDER[s.family])
         for slot in [s for s in group if not s.movable] + movable:
             if slot.movable:
-                x = _free_x(slot, placed)
+                x = _free_x(w, slot, placed)
                 if x is not None:
                     slot.x = x
-            for other in placed:
-                if abs(slot.x - other.x) < _gap(slot, other) - EPS:
+            span = _slot_span(w, slot, slot.x)
+            for other, other_span in placed:
+                if _overlaps(span, other_span):
                     w.warn(f"Appareils qui se touchent sur {tube.label} : {other.name} et {slot.name}.")
-            placed.append(slot)
+            placed.append((slot, span))
+
+
+def _check_stacks(w: _Work) -> None:
+    """Alert when posed movers of one tower overlap along Z (spec 13.10)."""
+    stacks: dict[str, list[tuple[_Slot, tuple[float, float]]]] = {}
+    for s in w.slots:
+        if s.family == "tower_movers":
+            stacks.setdefault(s.load, []).append((s, _slot_span(w, s, s.x, axis=2)))
+    for name, stack in stacks.items():
+        for n, (a, span_a) in enumerate(stack):
+            for b, span_b in stack[n + 1:]:
+                if _overlaps(span_a, span_b):
+                    w.warn(f"Appareils qui se touchent sur le pylône {name} : {a.name} et {b.name}.")
 
 
 # ------------------------------------------------------------ pan/tilt, field
@@ -681,21 +776,27 @@ def _fit(phi: float, tau: float, pan: Range, tilt: Range) -> tuple[float, float]
     return min(reps, key=lambda r: abs(r - mid)), tau
 
 
-def _solve_pan_tilt(w: _Work, name: str, fx: Fixture, axis: Vec3) -> tuple[float, float]:
+def _pan_tilt(fx: Fixture, axis: Vec3) -> tuple[float, float, tuple[float, float] | None]:
+    """Physical `(pan, tilt)` for a world direction and the `(pan, tilt)` asked when out of travel."""
     phi, tau = aim_angles(axis)
     ranges = fx.pan_tilt
     if ranges is None:
-        return phi, tau
+        return phi, tau, None
     pan_range, tilt_range = ranges
     solution = _fit(phi, tau, pan_range, tilt_range) or _fit(phi + 180, -tau, pan_range, tilt_range)
     if solution is not None:
-        return solution
+        return solution[0], solution[1], None
     mid = (pan_range.min + pan_range.max) / 2
     near = min((phi + 360 * k for k in range(-3, 4)), key=lambda r: abs(r - mid))
-    pan = min(max(near, pan_range.min), pan_range.max)
-    tilt = min(max(tau, tilt_range.min), tilt_range.max)
-    w.warn(f"Pan/tilt hors course : {name} demande pan {phi:.1f}°, tilt {tau:.1f}°, "
-           f"ramenés à {pan:.1f}° et {tilt:.1f}°.")
+    return (min(max(near, pan_range.min), pan_range.max),
+            min(max(tau, tilt_range.min), tilt_range.max), (phi, tau))
+
+
+def _solve_pan_tilt(w: _Work, name: str, fx: Fixture, axis: Vec3) -> tuple[float, float]:
+    pan, tilt, asked = _pan_tilt(fx, axis)
+    if asked is not None:
+        w.warn(f"Pan/tilt hors course : {name} demande pan {asked[0]:.1f}°, tilt {asked[1]:.1f}°, "
+               f"ramenés à {pan:.1f}° et {tilt:.1f}°.")
     return pan, tilt
 
 
@@ -1182,6 +1283,7 @@ def compute_rig(c: Ctx, library: Library) -> tuple[Rig, Part]:
     _plan_profiles(w, zones, za, pipe, ya)
     _plan_towers(w, za, ya)
     _plan_hazer(w)
+    _check_stacks(w)
     tubes = {pipe.name: pipe}
     tubes.update({f"Batten_{_nn(i + 1)}": _batten(c, i) for i in range(len(c.light_batten_ys))})
     _pack(w, tubes)

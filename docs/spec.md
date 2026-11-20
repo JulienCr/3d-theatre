@@ -1412,12 +1412,14 @@ Deux appareils par zone, un par direction `d` : `L` (accroché côté jardin,
   azimut `az_j` pour tous les appareils d'une direction d'un rang : faisceaux
   parallèles en plan ; le site varie avec le rang.
 - **Azimut par rang** *(choix)* : avec 4 colonnes, le croisement place sur un même
-  tube des PC de directions opposées à quelques centimètres l'un de l'autre
-  (`FrontPC_L_07` et `FrontPC_R_05` sur `Batten_01`, 0,2 m). Pour chaque rang,
+  tube des PC de directions opposées proches l'un de l'autre
+  (`FrontPC_L_07` et `FrontPC_R_05` sur `Batten_01`, 0,34 m) et, panotés de
+  ±132°, leurs têtes s'entrecoupent. Pour chaque rang,
   `az_j` est l'azimut le plus proche de `azimuth` (pas de 0,5°, en alternant
-  + et −, jusqu'à ±10°) tel que deux PC du tube ne soient jamais à moins de
-  `(width_a + width_b)/2` en X, que les points d'accroche restent sur le tube et
-  que chaque zone tienne dans le champ le plus large de la fiche. Les deux
+  + et −, jusqu'à ±10°) tel que les **empreintes posées** (13.10) de deux PC du
+  tube ne se recouvrent jamais, que les points d'accroche restent sur le tube et
+  que chaque zone tienne dans le champ le plus large de la fiche. Par défaut :
+  45° au rang 1, 50° au rang 2. Les deux
   directions du rang utilisent ce même `az_j`. Aucun azimut ne convient :
   alerte « Rang j : aucun azimut … » et azimut nominal conservé. L'azimut de
   chaque rang est affiché dans « Cotes calculées ». Le rangement des autres
@@ -1557,20 +1559,35 @@ Récapitulatif des visées de repos :
 - **Charge** cumulée par support (perche de face, chaque porteuse lumière,
   chaque pylône) : somme des `physical.weight`. Affichée, **sans alerte de
   dépassement** (`BACKLOG.md`).
+- **Empreinte posée** : la largeur de la fiche ne suffit pas, une tête panotée
+  et inclinée déborde de son corps. L'empreinte d'un appareil sur son support
+  est l'intervalle des sommets de son modèle (14.2 : embase, étrier, tête)
+  projetés sur l'axe du support, une fois le modèle placé : racine, rotation
+  de 180° autour de X, pan puis tilt (13.9), agrandi de 0,02 m de chaque
+  côté *(choix)*. Par simplification, on projette les huit coins de la boîte
+  englobante de chaque pièce, ce qui majore l'intervalle ; le modèle pris est
+  celui du tube de lentille par défaut de la fiche. L'axe est X pour une
+  perche ou une porteuse, Z pour les mobiles empilés d'un pylône. Deux
+  appareils d'un même support **se touchent** quand leurs intervalles se
+  recouvrent. Pan et tilt sont ceux de la visée de repos, à la position
+  d'accroche essayée.
 - **Encombrement et rangement** : sur un même tube (la perche de face ou une
-  porteuse lumière), deux appareils dont les axes sont à moins de
-  `(width_a + width_b)/2` en X (`dimensions.width`) se touchent. Les PC de
-  face gardent **leur X exact** (faisceaux parallèles, 13.7). Tout autre
-  appareil du tube (contre, mobiles de face, découpes), dans l'ordre contre,
-  mobiles de face, découpes puis numéro, est placé au X libre **le plus
-  proche** de son X voulu, cherché par pas de 0,05 m en alternant les côtés
-  (le côté du centre du tube d'abord), sans sortir du tube. Sa visée reste le
+  porteuse lumière), deux appareils dont les empreintes posées se recouvrent
+  se touchent. Les PC de face gardent **leur X exact** (faisceaux parallèles,
+  13.7). Tout autre appareil du tube (contre, découpes, mobiles de face),
+  dans cet ordre puis par numéro, est placé au X libre **le plus proche** de
+  son X voulu, cherché par pas de 0,05 m en alternant les côtés (le côté du
+  centre du tube d'abord), sans sortir du tube ; l'empreinte se recalcule à
+  chaque X essayé. *(choix)* Les découpes passent avant les mobiles : leurs
+  lames ne tolèrent qu'un petit écart en X (inclinaison limitée à 20°), alors
+  qu'un mobile reprend sa visée par son pan et son tilt. Sa visée reste le
   point cible de sa famille (13.4, 13.5, 13.8) ; pan, tilt, tube et lames se
   calculent depuis le point d'accroche déplacé. Alerte « Appareils qui se
   touchent sur la perche : … » seulement si aucune position libre n'existe, ou
   entre deux PC dont le X est imposé. L'azimut par rang (13.7) a déjà écarté
-  les PC entre eux quand une solution existe. Les mobiles des pylônes ont chacun leur
-  bras et ne sont pas rangés.
+  les PC entre eux quand une solution existe. Les mobiles d'un pylône ont
+  chacun leur bras et ne sont pas rangés : alerte « Appareils qui se touchent
+  sur le pylône … » si leurs empreintes en Z se recouvrent.
 - Ajouts à l'encadré « Cotes calculées » : `Yp` et `Zp`, `Ya`, `nx × nr` et
   `zw × zd`, azimut `az_j` de chaque rang de PC, tube et champ de chaque découpe, charges, plages de patch par
   famille (15.1), pan et tilt (angles et valeurs DMX) de chaque mobile.
