@@ -68,8 +68,9 @@ def ensure_collections(scene, layout: Layout) -> dict[str, bpy.types.Collection]
     return out
 
 
-def _delete_generated(root) -> None:
-    doomed = [o for o in materials.walk_objects(root) if is_generated(o)]
+def _delete_generated(root, keep_cameras: frozenset[str] | set[str] = frozenset()) -> None:
+    doomed = [o for o in materials.walk_objects(root)
+              if is_generated(o) and not (o.type == "CAMERA" and o.name in keep_cameras)]
     datablocks = [(o.data, o.type) for o in doomed if o.data is not None]
     for obj in doomed:
         bpy.data.objects.remove(obj, do_unlink=True)
@@ -314,13 +315,21 @@ def _make_light(spec: Light, collections) -> bpy.types.Object:
 
 
 def _make_camera(spec, collections) -> bpy.types.Object:
-    data = bpy.data.cameras.new(spec.name)
-    data.lens = spec.lens
-    data.clip_end = 500.0
-    obj = bpy.data.objects.new(spec.name, data)
-    obj[TAG] = True
+    """Create the camera, or update the generated one in place: deleting the active camera
+    throws a 3D view out of camera view."""
+    obj = bpy.data.objects.get(spec.name)
+    if obj is None or obj.type != "CAMERA" or not is_generated(obj):
+        obj = bpy.data.objects.new(spec.name, bpy.data.cameras.new(spec.name))
+        obj[TAG] = True
+    obj.data.lens = spec.lens
+    obj.data.clip_end = 500.0
     _aim(obj, spec.location, spec.target)
-    collections[spec.collection].objects.link(obj)
+    target = collections[spec.collection]
+    for coll in collections.values():
+        if coll is not target and obj.name in coll.objects:
+            coll.objects.unlink(obj)
+    if obj.name not in target.objects:
+        target.objects.link(obj)
     return obj
 
 
@@ -344,7 +353,7 @@ def _rebuild(scene: bpy.types.Scene, params: dict, library) -> Layout:
 
     active = scene.camera
     wanted_camera = active.name if active is not None and is_generated(active) else "Cam_Face"
-    _delete_generated(collections[layout.root_collection])
+    _delete_generated(collections[layout.root_collection], {spec.name for spec in layout.cameras})
 
     chosen = materials.overrides(scene)
     slot_materials = {}
@@ -364,7 +373,9 @@ def _rebuild(scene: bpy.types.Scene, params: dict, library) -> Layout:
     atmosphere.apply(scene, params, layout)
 
     if scene.camera is None or is_generated(scene.camera):
-        scene.camera = cameras.get(wanted_camera) or cameras.get("Cam_Face")
+        chosen_camera = cameras.get(wanted_camera) or cameras.get("Cam_Face")
+        if scene.camera != chosen_camera:
+            scene.camera = chosen_camera
     foreign_names[:] = sorted(o.name for o in materials.walk_objects(collections[layout.root_collection])
                               if not is_generated(o))
     scene.update_tag()
