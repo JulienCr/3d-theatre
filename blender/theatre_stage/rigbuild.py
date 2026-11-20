@@ -20,6 +20,7 @@ from .core.fixtures import (
     IES_FAC_PER_CD, Blades, Fixture, LensTube, Library, Optics, Strobe, cct_to_rgb, ies_axis_candela, max_energy,
 )
 from .core.meshes import Mesh
+from .core import rigpanel
 from .core.rig import FIXTURES_COLLECTION, BladeSet, ChannelValue, Rig, RigFixture, default_library
 
 TAG = materials.TAG
@@ -651,6 +652,16 @@ def rest_full(scene, rig: Rig) -> int:
     scene.update_tag()
     bpy.context.view_layer.update()
     return len(rig.rest)
+
+
+def blackout(scene) -> int:
+    """Set every raw DMX channel property of the scene to 0 (spec 15.2); returns the channel count."""
+    keys = rigpanel.dmx_channel_keys(scene.keys())
+    for key in keys:
+        scene[key] = 0.0
+    scene.update_tag()
+    bpy.context.view_layer.update()
+    return len(keys)
 
 
 def _feeds_world_output(tree, name: str) -> bool:

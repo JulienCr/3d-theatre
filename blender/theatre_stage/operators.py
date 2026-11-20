@@ -154,6 +154,22 @@ class THEATRE_OT_rest_full(bpy.types.Operator):
         return {"FINISHED"}
 
 
+class THEATRE_OT_blackout(bpy.types.Operator):
+    bl_idname = "theatre.blackout"
+    bl_label = "Noir général"
+    bl_description = ("Met tous les canaux DMX de la scène à 0 pour que la console seule éclaire la scène ; "
+                      "un pont en marche réécrit les canaux qu'il reçoit")
+
+    def execute(self, context):
+        count = rigbuild.blackout(context.scene)
+        for window in context.window_manager.windows:
+            for area in window.screen.areas:
+                if area.type == "VIEW_3D":
+                    area.tag_redraw()
+        self.report({"INFO"}, f"Noir général : {count} canaux à 0")
+        return {"FINISHED"}
+
+
 class THEATRE_OT_reload_library(bpy.types.Operator):
     bl_idname = "theatre.reload_library"
     bl_label = "Recharger la bibliothèque"
@@ -198,7 +214,7 @@ class THEATRE_OT_export_qlc(bpy.types.Operator):
 
 
 CLASSES = (THEATRE_OT_rebuild, THEATRE_OT_load_preset, THEATRE_OT_save_preset,
-           THEATRE_OT_reset_material, THEATRE_OT_rest_full, THEATRE_OT_reload_library,
+           THEATRE_OT_reset_material, THEATRE_OT_rest_full, THEATRE_OT_blackout, THEATRE_OT_reload_library,
            THEATRE_OT_export_qlc)
 
 

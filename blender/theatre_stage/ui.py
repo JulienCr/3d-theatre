@@ -66,6 +66,7 @@ def _draw_set(layout, node, params, group: Group) -> None:
 def _draw_rig_buttons(layout) -> None:
     column = layout.column(align=True)
     column.operator("theatre.rest_full", icon="LIGHT_SUN")
+    column.operator("theatre.blackout", icon="LIGHT_SUN")
     column.operator("theatre.export_qlc", icon="EXPORT")
     column.operator("theatre.reload_library", icon="FILE_REFRESH")
     if operators.export_report:

@@ -2,10 +2,18 @@
 
 from __future__ import annotations
 
+import re
+
 from .layout import _metres
 from .rig import FAMILY_LABELS, Rig, RigFixture
 
 NO_CIRCUIT = "-"
+_DMX_KEY = re.compile(r"^dmx_\d+_\d+$")
+
+
+def dmx_channel_keys(names) -> list[str]:
+    """The scene property names that are raw DMX channels (`dmx_<universe>_<channel>`)."""
+    return [name for name in names if _DMX_KEY.match(name)]
 
 
 def _number(value: float, digits: int = 1) -> str:

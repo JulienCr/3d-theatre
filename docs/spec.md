@@ -1860,6 +1860,10 @@ Planck, valable de 1667 à 25000 K, `K` ramené dans cette plage).
   les propriétés des canaux patchés à leur valeur de repos, avec le même
   marquage de la scène. Tant que le pont tourne et reçoit l'univers, il réécrit
   les propriétés à chaque tick : **la console l'emporte**.
+- **Bouton « Noir général »** (`theatre.blackout`) : met à 0 **toutes** les
+  propriétés de scène `dmx_<u>_<c>` (patchées ou non), avec le même marquage de
+  la scène, pour que la console éclaire seule. Un pont en marche réécrit les
+  canaux qu'il reçoit : **la console l'emporte** aussi.
 - Les autres attributs d'un mode (gobo, iris, lames des mobiles…) restent à leur
   valeur par défaut de la fiche : lames dégagées, iris ouvert.
 

@@ -5,7 +5,7 @@ from dataclasses import replace
 import pytest
 
 from core.layout import compute_layout
-from core.rigpanel import dimension_lines, mover_lines, patch_rows
+from core.rigpanel import dimension_lines, dmx_channel_keys, mover_lines, patch_rows
 from helpers import make
 
 
@@ -61,3 +61,8 @@ def test_disabled_rig_has_no_lines():
     off = compute_layout(make(rig={"enabled": False})).rig
     assert dimension_lines(off) == [] and mover_lines(off) == [] and patch_rows(off) == []
 
+
+
+def test_dmx_channel_keys_selects_only_raw_channels():
+    names = ["dmx_1_1", "dmx_12_512", "dmx_viz", "dmx_1_1_x", "haze_density"]
+    assert dmx_channel_keys(names) == ["dmx_1_1", "dmx_12_512"]
