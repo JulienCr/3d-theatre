@@ -254,6 +254,20 @@ def test_invert_is_set_only_when_the_function_runs_downwards(low, high, expected
     assert tool._span([tool._read_channel(element)], "Tilt", True) == expected
 
 
+@pytest.mark.parametrize("evil", ["../../escaped", r"..\..\escaped", ".."])
+def test_a_model_file_name_cannot_leave_the_output_folder(tmp_path, evil):
+    work = tmp_path / "work"
+    work.mkdir()
+    path = work / "evil.gdtf"
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("description.xml", description().replace('File="base"', f'File="{evil}"'))
+        z.writestr(f"models/3ds/{evil}.3ds", box_3ds(200, 100, 50))
+        z.writestr("models/3ds/head.3ds", box_3ds(150, 150, 300))
+    report = tool.convert(path, work / "out" / "x", "x")
+    assert not (work / "escaped.obj").exists() and not (tmp_path / "escaped.obj").exists()
+    assert any("sans chemin" in w for w in report.warnings)
+
+
 def test_discrete_channel_sets_with_physical_values_become_a_step_curve():
     sets = "".join(f'<ChannelSet DMXFrom="{start}/1" Name="S{start}" PhysicalFrom="{kelvin}"/>'
                    for start, kelvin in ((0, 3200), (100, 5600), (200, 8000)))

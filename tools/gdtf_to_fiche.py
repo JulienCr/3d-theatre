@@ -382,6 +382,9 @@ def _convert_models(gdtf: _Gdtf, out: Path, report: Report):
             continue
         model = models[info[0]]
         file = model.get("File") or ""
+        if re.search(r"[\\/]|^\.+$", file):
+            report.warnings.append(f"Maillage « {file} » ignoré : un nom de fichier sans chemin est attendu.")
+            continue
         dims = [_float(model.get(k), 0.0) for k in ("Length", "Width", "Height")]
         glb = gdtf.member(f"models/gltf/{file}.glb", f"models/glb/{file}.glb")
         tds = gdtf.member(f"models/3ds/{file}.3ds")
