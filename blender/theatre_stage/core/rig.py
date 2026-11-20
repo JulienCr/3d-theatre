@@ -17,7 +17,7 @@ from .fixtures import (
 )
 from .layout import (
     BATTEN_RADIUS, EPS, PROSCENIUM_RECESS, Ctx, Part, _metres, _nn, _polys_overlap,
-    _round_half_up, _side_stair,
+    _side_stair,
 )
 from .params import FIXTURE, GROUPS, PATCH_FAMILIES, side_sets
 from .primitives import Truss, Tube
@@ -44,6 +44,8 @@ HAZER_INSET = 0.50
 LISTED_NAMES = 4
 MAX_PATCH_ALERTS = 8
 MAX_CHANNEL = 512
+AZIMUTH_STEP = 0.5
+AZIMUTH_SEARCH = 10.0
 
 FAMILY_LABELS = {
     "backlight": "contre", "front_movers": "mobiles de face", "tower_movers": "mobiles de pylône",
@@ -185,7 +187,10 @@ class HazeLink:
 
 @dataclass(frozen=True)
 class RigDims:
-    """Panel values of spec 13.10; `profiles` is (name, tube, field), `patch_ranges` (family, u, first, last)."""
+    """Panel values of spec 13.10; `profiles` is (name, tube, field), `patch_ranges` (family, u, first, last).
+
+    `pc_azimuths` is the crossing azimuth used by each hung PC row.
+    """
 
     pipe_y: float
     pipe_z: float
@@ -193,6 +198,7 @@ class RigDims:
     pipe_drop: float
     profiles: tuple[tuple[str, str | None, float], ...]
     patch_ranges: tuple[tuple[str, int, int, int], ...]
+    pc_azimuths: tuple[float, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -316,7 +322,9 @@ class _Work:
         self.slots: list[_Slot] = []
         self.objects: list = []
         self.zones: Zones | None = None
+        self.azimuths: list[float] = []
         self.za = 0.0
+        self.ya = 0.0
         self.uncovered: list[tuple[str, float, float]] = []
         self.too_wide: list[tuple[str, float, float]] = []
 
@@ -392,8 +400,8 @@ def _zones(w: _Work, ya: float) -> Zones:
     if pc["zone_mode"] == "manual":
         nx, nr = pc["columns"], pc["rows"]
     else:
-        nx = max(1, _round_half_up(c.Wc / pc["zone_width"]))
-        nr = min(4, max(1, _round_half_up(ya / pc["zone_width"])))
+        nx = max(1, math.ceil(c.Wc / pc["zone_width"] - 1e-9))
+        nr = min(4, max(1, math.ceil(ya / pc["zone_width"] - 1e-9)))
     zw, zd = c.Wc / nx, ya / nr
     return Zones(nx, nr, zw, zd, tuple(spread(i, nx, c.Wc) for i in range(nx)),
                  tuple((j + 0.5) * zd for j in range(nr)))
@@ -452,11 +460,41 @@ def _plan_front_movers(w: _Work, zones: Zones, za: float, pipe: _Support) -> Non
                     circuit=MOVER_GROUPS["front_movers"]))
 
 
+def _row_x(zones: Zones, drop: float, azimuth: float) -> list[tuple[str, int, float]]:
+    """(side, column, X) of every PC of a row for one crossing azimuth."""
+    t = drop * math.tan(math.radians(azimuth))
+    return [(tag, i, xc + sign * t) for tag, sign in (("L", -1), ("R", 1))
+            for i, xc in enumerate(zones.xs)]
+
+
+def _row_azimuth(w: _Work, tube: _Support, yr: float, nominal: float, sheet: _Sheet,
+                 taken: list[float]) -> float | None:
+    """Azimuth nearest to `nominal` (+-0.5 deg steps, +-10 deg) where no PC of the row touches
+    another on the tube and every zone stays within the widest field of the sheet."""
+    zones, fx = w.zones, sheet.fixture
+    width, drop, za = fx.physical.dimensions.width, yr - tube.y, w.za
+    mount, optics = fx.physical.mount, fx.optics
+    widest = optics.lens_tubes[-1].field_angle if optics.lens_tubes else optics.field_angle.max
+    z = tube.z - mount.hook_height - mount.tilt_axis_height
+    for k in range(int(AZIMUTH_SEARCH / AZIMUTH_STEP) + 1):
+        for delta in ((0.0,) if k == 0 else (k * AZIMUTH_STEP, -k * AZIMUTH_STEP)):
+            row = _row_x(zones, drop, nominal + delta)
+            xs = [x for _, _, x in row] + taken
+            clear = all(abs(x) <= tube.limit + EPS for x in xs) and all(
+                abs(a - b) >= width - EPS for n, a in enumerate(xs) for b in xs[n + 1:])
+            if clear and all(
+                    _wash_required(w, (zones.xs[i], yr), za, (x, tube.y, z),
+                                   _unit(_sub((zones.xs[i], yr, za), (x, tube.y, z)))) <= widest + EPS
+                    for _, i, x in row):
+                return nominal + delta
+    return None
+
+
 def _plan_front_pc(w: _Work, zones: Zones, za: float, pipe: _Support, drop_auto: float) -> None:
     c, node = w.c, w.c.p["front_pc"]
     if not node["enabled"] or (sheet := w.sheet("front_pc", node)) is None:
         return
-    tan_az = math.tan(math.radians(node["azimuth"]))
+    on_tube: dict[str, list[float]] = {}
     for j, yr in enumerate(zones.ys):
         if j == 0:
             tube = pipe
@@ -470,24 +508,40 @@ def _plan_front_pc(w: _Work, zones: Zones, za: float, pipe: _Support, drop_auto:
         if drop < MIN_ROW_DROP - EPS:
             w.warn(f"Rang {j + 1} : porteuse trop en arrière de la zone.")
             continue
-        for tag, sign in (("L", -1), ("R", 1)):
-            for i, xc in enumerate(zones.xs):
-                name = f"FrontPC_{tag}_{_nn(j * zones.nx + i + 1)}"
-                x = _clamp_x(w, name, xc + sign * drop * tan_az, tube)
-                w.add(_Slot(name, "front_pc", sheet, x, tube.y, tube.z, (xc, yr, za), tube.name,
-                            tube.name, tube.limit, movable=False,
-                            circuit=f"FrontPC_Row{j + 1}_{tag}",
-                            meta={"zone": (xc, yr), "side": tag}))
+        taken = on_tube.setdefault(tube.name, [])
+        azimuth = _row_azimuth(w, tube, yr, node["azimuth"], sheet, taken)
+        if azimuth is None:
+            azimuth = node["azimuth"]
+            w.warn(f"Rang {j + 1} : aucun azimut à ±{AZIMUTH_SEARCH:g}° de {azimuth:g}° n'évite "
+                   f"que des PC se touchent sur {tube.label} ou sortent de leur champ.")
+        w.azimuths.append(azimuth)
+        for tag, i, x in _row_x(zones, drop, azimuth):
+            name = f"FrontPC_{tag}_{_nn(j * zones.nx + i + 1)}"
+            x = _clamp_x(w, name, x, tube)
+            taken.append(x)
+            w.add(_Slot(name, "front_pc", sheet, x, tube.y, tube.z, (zones.xs[i], yr, za),
+                        tube.name, tube.name, tube.limit, movable=False,
+                        circuit=f"FrontPC_Row{j + 1}_{tag}",
+                        meta={"zone": (zones.xs[i], yr), "side": tag}))
+
+
+def _bisector_y(head: Vec3, low: Vec3, high: Vec3, za: float) -> float:
+    """Y where the ray bisecting the bottom and top cut directions (side view) crosses the plane `za`."""
+    elev = [math.atan2(head[2] - q[2], q[1] - head[1]) for q in (low, high)]
+    return head[1] + (head[2] - za) / math.tan(sum(elev) / 2)
 
 
 def _plan_profiles(w: _Work, zones: Zones, za: float, pipe: _Support, ya: float) -> None:
     c, node = w.c, w.c.p["profiles"]
     if not node["enabled"] or (sheet := w.sheet("profiles", node)) is None:
         return
+    mount = sheet.fixture.physical.mount
+    head = (0.0, pipe.y, pipe.z - mount.hook_height - mount.tilt_axis_height)
+    yt = _bisector_y(head, (0.0, 0.0, c.Hp), _top_target(w, head), za)
     for p, tag in enumerate("LCR"):
         name, xs = f"Profile_{tag}", spread(p, 3, c.Wc)
         w.add(_Slot(name, "profiles", sheet, _clamp_x(w, name, xs, pipe), pipe.y, pipe.z,
-                    (xs, ya / 2, za), pipe.name, pipe.name, pipe.limit, circuit=name,
+                    (xs, yt, za), pipe.name, pipe.name, pipe.limit, circuit=name,
                     meta={"third": p}))
 
 
@@ -678,15 +732,19 @@ def _source(optics, tube, f_ref: float) -> tuple[str, float, float]:
     return "AREA", optics.lens_offset, 0.0
 
 
+def _wash_required(w: _Work, zone: tuple[float, float], za: float, pivot: Vec3, axis: Vec3) -> float:
+    """Field needed to cover `zone` plus the overlap from `pivot` along `axis`."""
+    zones, overlap = w.zones, w.c.p["front_pc"]["overlap"]
+    xc, yr = zone
+    hx, hy = zones.width / 2 * (1 + overlap), zones.depth / 2 * (1 + overlap)
+    return 2 * max(_angle_between(axis, _sub((xc + sx * hx, yr + sy * hy, za), pivot))
+                   for sx in (-1, 1) for sy in (-1, 1))
+
+
 def _wash_field(w: _Work, s: _Slot, pivot: Vec3, axis: Vec3):
     """Field of a face PC covering its zone plus overlap (spec 13.7)."""
-    optics, node = s.sheet.fixture.optics, w.c.p["front_pc"]
-    zones = w.zones
-    xc, yr = s.meta["zone"]
-    hx, hy = zones.width / 2 * (1 + node["overlap"]), zones.depth / 2 * (1 + node["overlap"])
-    za = s.target[2]
-    f_req = 2 * max(_angle_between(axis, _sub((xc + sx * hx, yr + sy * hy, za), pivot))
-                    for sx in (-1, 1) for sy in (-1, 1))
+    optics = s.sheet.fixture.optics
+    f_req = _wash_required(w, s.meta["zone"], s.target[2], pivot, axis)
     tube, value, status = _fit_field(optics, f_req, 1.0)
     if status == "uncovered":
         w.uncovered.append((s.name, f_req, value))
@@ -697,6 +755,17 @@ def _wash_field(w: _Work, s: _Slot, pivot: Vec3, axis: Vec3):
 
 # ---------------------------------------------------------------- profiles
 
+def _top_target(w: _Work, source: Vec3) -> Vec3:
+    """Point of the top cut line: head of a standing actor at the back, or the lintel when lower."""
+    c, ya = w.c, w.ya
+    lintel = (0.0, c.Ys + PROSCENIUM_RECESS, c.Hp + c.Hc - c.p["profiles"]["lintel_margin"])
+    actor = (0.0, ya, c.Hp + c.p["profiles"]["top_height"])
+    if abs(actor[1] - source[1]) < EPS:
+        return actor
+    t = (lintel[1] - source[1]) / (actor[1] - source[1])
+    return lintel if source[2] + t * (actor[2] - source[2]) > lintel[2] + EPS else actor
+
+
 def _cut_planes(w: _Work, third: int, source: Vec3, axis: Vec3) -> dict[str, Vec3]:
     """Unit normals of the four cut planes through `source`, pointing to the dark side."""
     c = w.c
@@ -704,8 +773,7 @@ def _cut_planes(w: _Work, third: int, source: Vec3, axis: Vec3) -> dict[str, Vec
     b0 = -c.Wc / 2 + third * c.Wc / 3
     lines = {
         "bottom": ((0.0, 0.0, c.Hp), (1.0, 0.0, 0.0)),
-        "top": ((0.0, c.Ys + PROSCENIUM_RECESS, c.Hp + c.Hc - c.p["profiles"]["lintel_margin"]),
-                (1.0, 0.0, 0.0)),
+        "top": (_top_target(w, source), (1.0, 0.0, 0.0)),
         "left": ((b0, 0.0, za), (0.0, 1.0, 0.0)),
         "right": ((b0 + c.Wc / 3, 0.0, za), (0.0, 1.0, 0.0)),
     }
@@ -1085,7 +1153,7 @@ def compute_rig(c: Ctx, library: Library) -> tuple[Rig, Part]:
         w.warn(f"Zone de jeu raccourcie : {_metres(rg['area_depth'])} demandés, le fond est à "
                f"{_metres(c.plan.yb)}.")
     zones = _zones(w, ya)
-    w.zones, w.za = zones, za
+    w.zones, w.za, w.ya = zones, za, ya
     pipe, drop = _front_pipe(w, zones, za)
     _plan_backlight(w, zones, za)
     _plan_front_movers(w, zones, za, pipe)
@@ -1112,7 +1180,7 @@ def compute_rig(c: Ctx, library: Library) -> tuple[Rig, Part]:
     ranges = tuple((k, min(e.universe for e in grp), min(e.address for e in grp), max(e.last for e in grp))
                    for k, _, _ in PATCH_FAMILIES if (grp := [e for e in entries if e.family == k]))
     profiles = tuple((f.name, f.tube, f.field_angle) for f in fixtures if f.family == "profiles")
-    dims = RigDims(pipe.y, pipe.z, ya, drop, profiles, ranges)
+    dims = RigDims(pipe.y, pipe.z, ya, drop, profiles, ranges, tuple(w.azimuths))
     rig = Rig(True, zones, tuple(fixtures), tuple(entries), _rest_map(fixtures), _loads(fixtures),
               tuple((k, tuple(v)) for k, v in circuits.items()), _haze_link(w, fixtures), dims,
               tuple(w.warnings))

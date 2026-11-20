@@ -114,7 +114,7 @@ backlight:
   fixture: martin_mac_aura
   mode: default
   count: 6
-  distance: 4.0
+  distance: 3.1
 front_movers:
   enabled: true
   fixture: robe_robin_esprite
@@ -153,6 +153,7 @@ profiles:
   fixture: etc_s4led_s3_lustr_x8
   mode: default
   lintel_margin: 0.1
+  top_height: 2.2
   tube_angle: 0.0
   blades_mode: auto
   l_blade_1_insertion: 0.0

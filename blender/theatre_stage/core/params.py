@@ -330,7 +330,7 @@ SCHEMA: tuple[Group, ...] = (
         _flag("enabled", True, "Contre", "Appareils de contre, accrochés à une porteuse."),
         *_fixture_pair("martin_mac_aura", ("moving_wash",), "le contre"),
         _int("count", 6, 1, 24, "Nombre d'appareils", "Nombre d'appareils de contre."),
-        _length("distance", 4.00, 0.50, 30.0, "Distance au nez",
+        _length("distance", 3.10, 0.50, 30.0, "Distance au nez",
                 "Distance au nez de scène de la porteuse visée."),
     )),
     Group("front_movers", "Mobiles de face", (
@@ -371,6 +371,8 @@ SCHEMA: tuple[Group, ...] = (
         *_fixture_pair("etc_s4led_s3_lustr_x8", ("profile",), "les découpes"),
         _length("lintel_margin", 0.10, 0.0, 1.0, "Marge sous le linteau",
                 "Marge sous le linteau pour la coupe haute."),
+        _length("top_height", 2.20, 1.0, 6.0, "Hauteur de coupe haute",
+                "Hauteur au-dessus du plateau du haut d'un comédien debout, au fond de la zone de jeu."),
         _angle("tube_angle", 0.0, 0.0, 90.0, "Tube de lentille",
                "Angle de champ du tube de lentille. 0 : choisi automatiquement."),
         _enum("blades_mode", "auto", "Lames", "Réglage des lames des découpes.", (

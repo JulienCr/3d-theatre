@@ -100,8 +100,8 @@ def test_default_front_pipe_and_zone_grid():
     assert rig.dims.pipe_y == pytest.approx(-1.40, abs=0.01)
     assert rig.dims.area_depth == pytest.approx(6.0)
     z = rig.zones
-    assert (z.nx, z.nr) == (3, 2)
-    assert z.width == pytest.approx(10.0 / 3) and z.depth == pytest.approx(3.0)
+    assert (z.nx, z.nr) == (4, 2)
+    assert z.width == pytest.approx(2.5) and z.depth == pytest.approx(3.0)
     pipe = lay.find("FrontPipe")
     assert pipe.collection == "Theatre_Rig" and pipe.material == "TS_Batten"
     assert pipe.start[1] == pytest.approx(rig.dims.pipe_y) and pipe.start[2] == pytest.approx(7.0)
@@ -139,15 +139,25 @@ def pcs(rig):
     return rig.by_family("front_pc")
 
 
-def test_twelve_face_pc_on_four_circuits():
+def test_sixteen_face_pc_on_four_circuits():
     rig = rig_of()
-    assert len(pcs(rig)) == 12
+    assert len(pcs(rig)) == 16
     circuits = dict(rig.circuits)
     for row in (1, 2):
         for tag in "LR":
-            assert len(circuits[f"FrontPC_Row{row}_{tag}"]) == 3
+            assert len(circuits[f"FrontPC_Row{row}_{tag}"]) == 4
     assert sum(1 for name in circuits if name.startswith("FrontPC_")) == 4
-    assert rig.find("FrontPC_L_04").circuit == "FrontPC_Row2_L"
+    assert rig.find("FrontPC_L_05").circuit == "FrontPC_Row2_L"
+
+
+@pytest.mark.parametrize("width, wanted", [(3.0, 4), (2.5, 4), (5.0, 2), (4.99, 3), (10.0, 1), (1.0, 10)])
+def test_zone_width_is_a_maximum_so_columns_round_up(width, wanted):
+    assert rig_of(front_pc={"zone_width": width}).zones.nx == wanted
+
+
+def test_zone_rows_round_up_and_stay_within_four():
+    assert rig_of(front_pc={"zone_width": 2.0}).zones.nr == 3
+    assert rig_of(front_pc={"zone_width": 1.0}).zones.nr == 4
 
 
 def test_pc_cross_at_azimuth_with_parallel_beams():
@@ -157,14 +167,50 @@ def test_pc_cross_at_azimuth_with_parallel_beams():
         side = -1 if "_L_" in f.name else 1
         index = int(f.name[-2:]) - 1
         row, col = divmod(index, z.nx)
+        azimuth = rig.dims.pc_azimuths[row]
         drop = z.ys[row] - f.hang[1]
-        assert f.hang[0] == pytest.approx(z.xs[col] + side * drop * math.tan(math.radians(45)))
+        assert f.hang[0] == pytest.approx(z.xs[col] + side * drop * math.tan(math.radians(azimuth)))
         heading = math.degrees(math.atan2(f.aim[0] - f.pivot[0], f.aim[1] - f.pivot[1]))
-        assert heading == pytest.approx(-side * 45.0)
+        assert heading == pytest.approx(-side * azimuth)
         assert f.aim == pytest.approx((z.xs[col], z.ys[row], 2.9))
     assert {f.support for f in pcs(rig)} == {"FrontPipe", "Batten_01"}
     first = rig.find("FrontPC_L_01")
-    assert first.hang[0] == pytest.approx(-10 / 3 - 2.90, abs=0.01)
+    assert first.hang[0] == pytest.approx(-3.75 - 2.90, abs=0.01)
+
+
+def touching(rig, support):
+    on = [f for f in rig.fixtures if f.support == support and f.family == "front_pc"]
+    return [(a.name, b.name) for i, a in enumerate(on) for b in on[i + 1:]
+            if abs(a.hang[0] - b.hang[0]) < (a.width + b.width) / 2 - 1e-9]
+
+
+def test_row_azimuth_moves_off_the_nominal_to_free_the_shared_tube():
+    # At the nominal 45 degrees, FrontPC_L_07 and FrontPC_R_05 hang 0.2 m apart on Batten_01.
+    nominal = 45.0
+    rig = rig_of(front_pc={"azimuth": nominal})
+    assert rig.dims.pc_azimuths[0] == nominal
+    assert rig.dims.pc_azimuths[1] != nominal and abs(rig.dims.pc_azimuths[1] - nominal) <= 10.0
+    assert not touching(rig, "Batten_01") and not has(rig.warnings, "se touchent")
+    row = [f for f in pcs(rig) if f.support == "Batten_01"]
+    for side in "LR":
+        headings = {round(math.degrees(math.atan2(f.aim[0] - f.pivot[0], f.aim[1] - f.pivot[1])), 6)
+                    for f in row if f"_{side}_" in f.name}
+        assert len(headings) == 1
+
+
+def test_row_azimuth_alerts_and_keeps_the_nominal_when_nothing_fits():
+    pc = LIB.get("rig_pc")
+    wide = replace(pc, physical=replace(pc.physical, dimensions=replace(pc.physical.dimensions, width=2.4)))
+    lib = replace(LIB, fixtures={**LIB.fixtures, "rig_pc": wide})
+    rig = rig_layout(library=lib, front_pc={"azimuth": 45.0}).rig
+    assert has(rig.warnings, "Rang", "aucun azimut")
+    assert rig.dims.pc_azimuths == (45.0, 45.0)
+
+
+def test_pc_row_azimuth_keeps_coverage_of_the_widest_field():
+    rig = compute_layout(make()).rig
+    assert not has(rig.warnings, "Zone non couverte")
+    assert max(f.field_angle for f in rig.by_family("front_pc")) <= 54.4 + 1e-9
 
 
 def test_pc_field_covers_the_zone_with_overlap():
@@ -276,12 +322,20 @@ def third_bounds(p, wc=10.0):
     return -wc / 2 + p * wc / 3, -wc / 2 + (p + 1) * wc / 3
 
 
-def cut_lines(lay, third):
+def top_line(ctx, source, top_height=2.20, margin=0.10):
+    """Spec 13.8: head of a standing actor at the back, or the lintel when that cut passes above it."""
+    actor = (0.0, 6.0, ctx.Hp + top_height)
+    lintel = (0.0, ctx.Ys + 0.05, ctx.Hp + ctx.Hc - margin)
+    t = (lintel[1] - source[1]) / (actor[1] - source[1])
+    return lintel if source[2] + t * (actor[2] - source[2]) > lintel[2] else actor
+
+
+def cut_lines(lay, third, source, **profiles):
     ctx, _ = _make_context(make(**SYNTH))
     b0, b1 = third_bounds(third)
     return {
         "bottom": ((0.0, 0.0, ctx.Hp), (1.0, 0.0, 0.0)),
-        "top": ((0.0, ctx.Ys + 0.05, ctx.Hp + ctx.Hc - 0.10), (1.0, 0.0, 0.0)),
+        "top": (top_line(ctx, source, **profiles), (1.0, 0.0, 0.0)),
         "left": ((b0, 0.0, 2.9), (0.0, 1.0, 0.0)),
         "right": ((b1, 0.0, 2.9), (0.0, 1.0, 0.0)),
     }
@@ -302,14 +356,16 @@ def required_field(lines, source, axis):
 
 @pytest.mark.parametrize("groups", [
     {}, {"rig_front": {"ceiling_gap": 1.5}}, {"profiles": {"lintel_margin": 0.60}},
-    {"rig": {"aim_height": 2.4}},
+    {"rig": {"aim_height": 2.4}}, {"profiles": {"top_height": 1.2}},
 ])
 def test_profile_tube_is_the_smallest_with_a_five_percent_margin(groups):
     lay = rig_layout(**groups)
     tubes = {t.name: t for t in LIB.get("rig_profile").optics.lens_tubes}
     for p, tag in enumerate("LCR"):
         f = lay.rig.find(f"Profile_{tag}")
-        need = required_field(cut_lines(lay, p), f.pivot, f.axis)
+        prof = {k: v for k, v in groups.get("profiles", {}).items() if k != "lintel_margin"}
+        margin = groups.get("profiles", {}).get("lintel_margin", 0.10)
+        need = required_field(cut_lines(lay, p, f.pivot, margin=margin, **prof), f.pivot, f.axis)
         covering = [t for t in tubes.values() if t.field_angle >= 1.05 * need]
         expected = covering[0] if covering else list(tubes.values())[-1]
         assert f.tube == expected.name and f.field_angle == expected.field_angle
@@ -333,11 +389,12 @@ def test_profile_source_is_recessed_behind_the_lens():
     assert pcs(rig_of())[0].source_z == pytest.approx(0.30)
 
 
+@pytest.mark.parametrize("top_height", [2.20, 6.0])
 @pytest.mark.parametrize("tag, third", [("L", 0), ("C", 1), ("R", 2)])
-def test_each_blade_edge_lies_on_its_cut_plane(tag, third):
-    lay = rig_layout()
+def test_each_blade_edge_lies_on_its_cut_plane(tag, third, top_height):
+    lay = rig_layout(profiles={"top_height": top_height})
     f = lay.rig.find(f"Profile_{tag}")
-    lines = cut_lines(lay, third)
+    lines = cut_lines(lay, third, f.source, top_height=top_height)
     xh, yh, axis = head_frame(f.pan, f.tilt)
     assert axis == pytest.approx(f.axis, abs=1e-9)
     blades = f.blades
@@ -457,7 +514,8 @@ def test_default_preset_has_no_crowding_alert_and_pcs_keep_their_x():
     for f in pcs(lay.rig):
         side = -1 if "_L_" in f.name else 1
         row, col = divmod(int(f.name[-2:]) - 1, z.nx)
-        assert f.hang[0] == pytest.approx(z.xs[col] + side * (z.ys[row] - f.hang[1]))
+        t = math.tan(math.radians(lay.rig.dims.pc_azimuths[row]))
+        assert f.hang[0] == pytest.approx(z.xs[col] + side * (z.ys[row] - f.hang[1]) * t)
 
 
 def test_crowded_fixtures_move_to_the_nearest_free_x():
@@ -497,7 +555,7 @@ def test_patch_addresses_are_consecutive_by_footprint_in_a_stable_order():
     rig = rig_of(patch={"front_pc_address": 10})
     entries = [e for e in rig.patch if e.family == "front_pc"]
     names = [e.name for e in entries]
-    assert names == [f"FrontPC_{t}_{n:02d}" for r in (0, 1) for t in "LR" for n in range(r * 3 + 1, r * 3 + 4)]
+    assert names == [f"FrontPC_{t}_{n:02d}" for r in (0, 1) for t in "LR" for n in range(r * 4 + 1, r * 4 + 5)]
     assert entries[0].universe == 4 and entries[0].address == 10
     for a, b in zip(entries, entries[1:]):
         assert b.address == a.address + a.footprint == a.address + 3
@@ -525,7 +583,7 @@ def test_patch_overlap_and_overflow_alerts():
 
 def test_patch_ranges_per_family():
     ranges = {r[0]: r[1:] for r in rig_of().dims.patch_ranges}
-    assert ranges["front_pc"] == (4, 1, 36)
+    assert ranges["front_pc"] == (4, 1, 48)
     assert ranges["profiles"] == (5, 1, 6)
     assert "hazer" not in ranges
 
@@ -593,7 +651,7 @@ def test_loads_sum_the_weights_per_support():
     loads = {l.name: l for l in rig.loads}
     on_pipe = [f for f in rig.fixtures if f.support == "FrontPipe"]
     assert loads["FrontPipe"].weight == pytest.approx(sum(f.weight for f in on_pipe))
-    assert loads["FrontPipe"].weight == pytest.approx(6 * 10 + 4 * 12 + 3 * 8)
+    assert loads["FrontPipe"].weight == pytest.approx(8 * 10 + 4 * 12 + 3 * 8)
     assert loads["Tower_L_01"].weight == pytest.approx(24.0) and loads["Tower_L_01"].count == 2
     assert [l.name for l in rig.loads][0] == "FrontPipe"
 
@@ -629,7 +687,7 @@ def test_empty_library_never_crashes():
 def test_default_library_is_the_shipped_one():
     lay = compute_layout(make())
     assert default_fiche("generic_pc_led") is not None
-    assert len(lay.rig.by_family("front_pc")) == 12
+    assert len(lay.rig.by_family("front_pc")) == 16
 
 
 # ------------------------------------------------------- shipped integration
@@ -641,7 +699,7 @@ def test_shipped_library_default_rig():
     assert not missing
     counts = {k: len(rig.by_family(k)) for k in ("backlight", "front_movers", "tower_movers",
                                                   "front_pc", "profiles")}
-    assert counts == {"backlight": 6, "front_movers": 4, "tower_movers": 4, "front_pc": 12,
+    assert counts == {"backlight": 6, "front_movers": 4, "tower_movers": 4, "front_pc": 16,
                       "profiles": 3}
     assert rig.dims.pipe_z == pytest.approx(7.0) and rig.dims.pipe_y == pytest.approx(-1.40, abs=0.01)
     for word in ("se touchent", "Patch", "Pan/tilt hors course", "Pylône"):
@@ -663,3 +721,32 @@ def test_shipped_movers_round_trip_with_their_inverted_axes():
     assert aura.pan.invert and aura.tilt.invert
     esprite = default_fiche("robe_robin_esprite")
     assert esprite.motion.tilt.invert and esprite.blades.rotation.invert and not esprite.motion.pan.invert
+
+
+# ------------------------------------------------------- alert-free defaults
+
+def test_shipped_presets_raise_no_rig_alert():
+    from core.presets import read_preset, shipped_presets
+    presets = shipped_presets()
+    assert {"reference_with_modules", "open_space"} <= set(presets)
+    for name, path in presets.items():
+        params, messages = read_preset(path)
+        assert not messages, name
+        assert compute_layout(params).rig.warnings == (), name
+
+
+def test_default_profiles_all_find_a_tube_within_travel():
+    lay = compute_layout(make())
+    assert [t for _, t, _ in lay.rig.dims.profiles] == ["70", "70", "70"]
+    assert not has(lay.warnings, "Découpe")
+
+
+def test_top_cut_is_the_actor_head_unless_the_lintel_is_lower():
+    ctx, _ = _make_context(make(**SYNTH))
+    source = (0.0, -1.4, 6.65)
+    assert top_line(ctx, source)[2] == pytest.approx(ctx.Hp + 2.20)
+    assert top_line(ctx, source, top_height=6.0)[2] == pytest.approx(ctx.Hp + ctx.Hc - 0.10)
+    tall = rig_layout(profiles={"top_height": 6.0})
+    low = rig_layout(profiles={"top_height": 2.20})
+    top = lambda lay: next(b for b in lay.rig.find("Profile_C").blades.blades if b.cut == "top")
+    assert top(tall).edge != pytest.approx(top(low).edge)

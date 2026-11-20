@@ -243,7 +243,7 @@ Le défaut manuel est la valeur que donne le calcul avec les défauts
 | `fixture` | Appareil | `martin_mac_aura` | énumération (1) |
 | `mode` | Mode DMX | mode par défaut de la fiche | énumération (2) |
 | `count` | Nombre d'appareils | 6 | 1 – 24 |
-| `distance` | Distance au nez de la porteuse visée *(choix)* | 4,00 | 0,50 – 30 |
+| `distance` | Distance au nez de la porteuse visée *(choix)* | 3,10 | 0,50 – 30 |
 
 (1) Énumération **dynamique** : les `id` des fiches de la bibliothèque dont la
 famille convient (section 12.2), relue au chargement de l'extension et par le
@@ -251,6 +251,10 @@ bouton « Recharger la bibliothèque ». Un `id` inconnu dans un préréglage do
 le défaut du paramètre et un avertissement.
 (2) Énumération dynamique : `default` (mode par défaut de la fiche) et les noms
 des modes de l'appareil choisi.
+
+Défaut 3,10 *(choix)* : avec le pendrillonnage par défaut, seules les
+porteuses lumière à Y = 2,10 et 3,10 subsistent ; 4,00 se ramenait à 3,10 avec
+une alerte.
 
 ### 3.13 Mobiles de face — `front_movers`
 
@@ -292,14 +296,16 @@ Chaque jeu :
 | `fixture` | Appareil | `generic_pc_led` | énumération |
 | `mode` | Mode DMX | mode par défaut de la fiche | énumération |
 | `zone_mode` | Découpage en zones | automatique | automatique / manuel |
-| `zone_width` | Largeur de zone visée *(choix)* | 3,00 | 1 – 10 |
+| `zone_width` | Largeur de zone **maximale** *(choix)* | 3,00 | 1 – 10 |
 | `columns` | Zones en largeur (mode manuel) | 3 | 1 – 8 |
 | `rows` | Rangs en profondeur (mode manuel) | 2 | 1 – 4 |
 | `azimuth` | Azimut de croisement | 45° | 10 – 80 |
 | `overlap` | Recouvrement des zones voisines *(choix)* | 0,20 | 0 – 1 |
 
 `overlap` : fraction de la taille d'une zone ajoutée au champ couvert (section
-13.7). Azimut 45° : fiche ADEC 6-3.
+13.7). Azimut 45° : fiche ADEC 6-3, nominal : 13.7 le règle rang par rang
+dans ±10°. `zone_width` est un plafond : le nombre de zones est arrondi au
+supérieur (13.1).
 
 ### 3.16 Découpes — `profiles`
 
@@ -309,6 +315,7 @@ Chaque jeu :
 | `fixture` | Appareil | `etc_s4led_s3_lustr_x8` | énumération |
 | `mode` | Mode DMX | mode par défaut de la fiche | énumération |
 | `lintel_margin` | Marge sous le linteau pour la coupe haute *(choix)* | 0,10 | 0 – 1 |
+| `top_height` | Hauteur de la coupe haute au-dessus du plateau *(choix)* | 2,20 | 1 – 6 |
 | `tube_angle` | Tube de lentille (0 = choisi automatiquement) | 0 | 0 – 90 |
 | `blades_mode` | Lames | automatique | automatique / manuel |
 
@@ -966,7 +973,8 @@ Calculées dans `core`, rédigées en français, affichées dans le panneau :
     `v = 1` donne `255, 255`), empreinte et offsets, les six fiches livrées
     valides, outil GDTF sur un petit GDTF construit dans le test (offsets
     multiples → 16 bits, attributs inconnus gardés) ;
-  - implantation : `Yp = −1,40` avec les défauts ; 12 PC et 4 circuits ;
+  - implantation : `Yp = −1,40` avec les défauts ; 16 PC et 4 circuits, aucune alerte avec
+    les trois préréglages livrés ; azimut par rang ; coupe haute (comédien ou linteau) ;
     décalage en X `ΔY·tan(azimut)` et faisceaux parallèles en plan par
     direction ; champ requis, bornage au zoom et alerte ; accroche par Y
     (première porteuse, retrait d'une porteuse qui renumérote, contre à plus de
@@ -1276,9 +1284,13 @@ Nouvelles :
   `Ya = min(area_depth, Yb)`. Alerte « Zone de jeu raccourcie » si
   `area_depth > Yb`.
 - **Grille de zones** : `nx = columns` et `nr = rows` en mode manuel ;
-  automatique : `nx = max(1, round(Wc / zone_width))` et
-  `nr = min(4, max(1, round(Ya / zone_width)))`. `zw = Wc/nx`, `zd = Ya/nr`
-  (3,33 × 3,00 par défaut). Zone `(i, j)`, `i` de 0 (jardin) à `nx − 1`, `j`
+  automatique : `zone_width` est un **maximum** visé :
+  `nx = max(1, ceil(Wc / zone_width − 1e-9))` et
+  `nr = min(4, max(1, ceil(Ya / zone_width − 1e-9)))`. `zw = Wc/nx`,
+  `zd = Ya/nr` (4 × 2 zones de 2,50 × 3,00 par défaut). Raison *(choix)* : le PC
+  générique est calibré sur un Robe T15 PC dont le champ le plus large est
+  54,4° ; des zones de 3,33 m vues depuis la première porteuse lumière
+  demandent 64,9°. Zone `(i, j)`, `i` de 0 (jardin) à `nx − 1`, `j`
   de 0 (face) à `nr − 1` : centre `(xc_i, yr_j)` avec
   `xc_i = −Wc/2 + (i + ½)·zw`, `yr_j = (j + ½)·zd`. La grille est calculée
   même si `front_pc.enabled` est décoché.
@@ -1365,16 +1377,27 @@ Pour chaque côté `s` (−1 jardin, +1 cour) et chaque pylône `k` de 1 à `cou
 
 Deux appareils par zone, un par direction `d` : `L` (accroché côté jardin,
 `s_d = −1`) et `R` (côté cour, `s_d = +1`). `NN = j·nx + i + 1`. Total
-`2·nx·nr` (12 par défaut).
+`2·nx·nr` (16 par défaut).
 
 - **Accroche en Y** : rang 0 sur la perche de face `(Yp, Zp)` ; rang 1 sur la
   **première porteuse lumière** `(Y, Zb)` (méthode ADEC) ; rang `j ≥ 2` sur
   `nearest_batten(yr_j − ΔYp)` *(choix)*. `ΔY = yr_j − Y_accroche`. Si
   `ΔY < 0,10` : rang non posé, alerte « Rang j : porteuse trop en arrière de
   la zone ».
-- **Accroche en X** (croisement) : `X = xc_i + s_d·ΔY·tan(azimuth)`. Même
-  azimut pour tous les appareils d'une direction : faisceaux parallèles en
-  plan ; le site varie avec le rang.
+- **Accroche en X** (croisement) : `X = xc_i + s_d·ΔY·tan(az_j)`. Même
+  azimut `az_j` pour tous les appareils d'une direction d'un rang : faisceaux
+  parallèles en plan ; le site varie avec le rang.
+- **Azimut par rang** *(choix)* : avec 4 colonnes, le croisement place sur un même
+  tube des PC de directions opposées à quelques centimètres l'un de l'autre
+  (`FrontPC_L_07` et `FrontPC_R_05` sur `Batten_01`, 0,2 m). Pour chaque rang,
+  `az_j` est l'azimut le plus proche de `azimuth` (pas de 0,5°, en alternant
+  + et −, jusqu'à ±10°) tel que deux PC du tube ne soient jamais à moins de
+  `(width_a + width_b)/2` en X, que les points d'accroche restent sur le tube et
+  que chaque zone tienne dans le champ le plus large de la fiche. Les deux
+  directions du rang utilisent ce même `az_j`. Aucun azimut ne convient :
+  alerte « Rang j : aucun azimut … » et azimut nominal conservé. L'azimut de
+  chaque rang est affiché dans « Cotes calculées ». Le rangement des autres
+  appareils (13.10) vient ensuite.
 - **Visée** : `T_ij`. Axe `a = (T_ij − P)/|T_ij − P|`.
 - **Champ couvert** : rectangle centré sur `T_ij` au plan `Za`, de demi-côtés
   `(zw/2)·(1 + overlap)` en X et `(zd/2)·(1 + overlap)` en Y ; quatre coins
@@ -1385,7 +1408,7 @@ Deux appareils par zone, un par direction `d` : `L` (accroché côté jardin,
   Le champ est une valeur de construction, pas un canal DMX, sauf si le mode
   a `zoom` : la valeur de repos du canal reproduit alors `F` (15.2).
 - **Circuits** : un par (rang, direction) : `FrontPC_Row1_L`, `FrontPC_Row1_R`,
-  `FrontPC_Row2_L`, `FrontPC_Row2_R` (4 circuits pour 12 PC). Propriété
+  `FrontPC_Row2_L`, `FrontPC_Row2_R` (4 circuits pour 16 PC). Propriété
   `theatre_circuit` de la racine.
 - **Couleur de repos** : `rest.cct_left` pour `L`, `rest.cct_right` pour `R`
   (chaud côté jardin, froid côté cour *(choix)*).
@@ -1394,8 +1417,11 @@ Deux appareils par zone, un par direction `d` : `L` (accroché côté jardin,
 
 Trois sur la perche de face, une par tiers de l'ouverture. Tiers `p` = 0, 1,
 2 : bornes `B_p = −Wc/2 + p·Wc/3` et `B_(p+1)`, accroche
-`(spread(p, 3), Yp, Zp)`, visée `T_p = (spread(p, 3), Ya/2, Za)`, axe `a`
-depuis `P`. Appareils statiques, un circuit chacun (`Profile_L` …).
+`(spread(p, 3), Yp, Zp)`, visée `T_p = (spread(p, 3), Y_v, Za)`, axe `a`
+depuis `P`. `Y_v` *(choix)* est le point où la bissectrice des directions
+bas et haut (vue de côté, depuis `P`) coupe le plan `Za` : l'axe centre la
+fenêtre éclairée et le champ requis reste minimal (avec `Ya/2`, la coupe basse
+au nez demandait 82,6°, au-delà du tube le plus large, 72,5°). Appareils statiques, un circuit chacun (`Profile_L` …).
 
 **Quatre plans de coupe** passant par la source `S` ; chacun contient une
 droite cible `(Q, u)` (point, direction unitaire) :
@@ -1403,9 +1429,16 @@ droite cible `(Q, u)` (point, direction unitaire) :
 | Coupe | Droite cible | Effet |
 |---|---|---|
 | bas | `Q = (0, 0, Hp)`, `u = (1, 0, 0)` | le faisceau finit sur le nez, rien sur l'avant-scène |
-| haut | `Q = (0, Ys + 0,05, Hp + Hc − lintel_margin)`, `u = (1, 0, 0)` | le faisceau passe sous le linteau, face avant du cadre |
+| haut | `Q = (0, Ya, Hp + top_height)`, `u = (1, 0, 0)` ; limite du linteau, voir ci-dessous | le faisceau passe au-dessus de la tête d'un comédien debout au fond de la zone de jeu *(choix : `top_height` = 2,20, comédien debout et marge)* |
 | gauche | `Q = (B_p, 0, Za)`, `u = (0, 1, 0)` | limite du tiers (cadre pour le tiers jardin) |
 | droite | `Q = (B_(p+1), 0, Za)`, `u = (0, 1, 0)` | limite du tiers (cadre pour le tiers cour) |
+
+**Limite du linteau.** Si le plan de coupe haute passe, au plan
+`Y = Ys + 0,05` (face avant du cadre), au-dessus du bas du linteau
+`Z = Hp + Hc − lintel_margin`, la droite cible devient
+`Q = (0, Ys + 0,05, Hp + Hc − lintel_margin)` : la coupe la plus restrictive
+l'emporte. Avec les défauts, les trois découpes trouvent un tube (le « 70 »,
+champ 72,5°) sans « lame hors course ».
 
 Normale du plan : `n = (Q − S) × u / |(Q − S) × u|`, orientée vers le côté
 **sombre** : `n·a < 0` (l'axe est dans la zone éclairée).
@@ -1493,7 +1526,7 @@ Récapitulatif des visées de repos :
 | mobiles de face | `(X_i, yr_0, Za)` |
 | mobiles des pylônes | `(−s·Wc/4, Ya·(m − ½)/movers, Za)` |
 | PC de face | `T_ij` |
-| découpes | `(spread(p, 3), Ya/2, Za)` |
+| découpes | `(spread(p, 3), Y_v, Za)`, `Y_v` : bissectrice des coupes bas et haut (13.8) |
 
 ### 13.10 Charges, encombrement et « Cotes calculées »
 
@@ -1511,10 +1544,11 @@ Récapitulatif des visées de repos :
   point cible de sa famille (13.4, 13.5, 13.8) ; pan, tilt, tube et lames se
   calculent depuis le point d'accroche déplacé. Alerte « Appareils qui se
   touchent sur la perche : … » seulement si aucune position libre n'existe, ou
-  entre deux PC dont le X est imposé. Les mobiles des pylônes ont chacun leur
+  entre deux PC dont le X est imposé. L'azimut par rang (13.7) a déjà écarté
+  les PC entre eux quand une solution existe. Les mobiles des pylônes ont chacun leur
   bras et ne sont pas rangés.
 - Ajouts à l'encadré « Cotes calculées » : `Yp` et `Zp`, `Ya`, `nx × nr` et
-  `zw × zd`, tube et champ de chaque découpe, charges, plages de patch par
+  `zw × zd`, azimut `az_j` de chaque rang de PC, tube et champ de chaque découpe, charges, plages de patch par
   famille (15.1), pan et tilt (angles et valeurs DMX) de chaque mobile.
 
 ## 14. Appareils dans Blender
