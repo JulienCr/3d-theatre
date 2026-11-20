@@ -13,7 +13,8 @@ from functools import lru_cache
 from collections.abc import Mapping
 
 from .fixtures import (
-    SHIPPED_DIR, Channel, Fixture, Library, Mode, Range, cct_to_rgb, discover, encode,
+    SHIPPED_DIR, Blades, Channel, Dimensions, Fixture, Library, Mode, Mount, Optics, Range,
+    cct_to_rgb, discover, encode,
 )
 from .layout import (
     BATTEN_RADIUS, EPS, PROSCENIUM_RECESS, Ctx, Part, _metres, _nn, _polys_overlap,
@@ -292,10 +293,20 @@ def default_library() -> Library:
 
 # ------------------------------------------------------------------ planning
 
+NO_DIMENSIONS = Dimensions(0.0, 0.0, 0.0)
+NO_MOUNT = Mount(0.0, 0.0)
+NO_OPTICS = Optics("none", 0.0, 0.0, 0.0, None, None, (), False, ())
+
+
 @dataclass
 class _Sheet:
+    """A fiche with its mode; the hazer, which has no body or lens, gets zero-sized stand-ins."""
+
     fixture: Fixture
     mode: Mode
+    dimensions: Dimensions = NO_DIMENSIONS
+    mount: Mount = NO_MOUNT
+    optics: Optics = NO_OPTICS
 
 
 @dataclass
@@ -318,20 +329,17 @@ class _Slot:
 
     @property
     def width(self) -> float:
-        dims = self.sheet.fixture.physical.dimensions
-        return dims.width if dims else 0.0
+        return self.sheet.dimensions.width
 
 
 class _Work:
-    def __init__(self, c: Ctx, library: Library):
+    def __init__(self, c: Ctx, library: Library, zones: Zones, za: float, ya: float):
         self.c, self.lib = c, library
         self.warnings: list[str] = []
         self.slots: list[_Slot] = []
         self.objects: list = []
-        self.zones: Zones | None = None
+        self.zones, self.za, self.ya = zones, za, ya
         self.azimuths: list[float] = []
-        self.za = 0.0
-        self.ya = 0.0
         self.uncovered: list[tuple[str, float, float]] = []
         self.too_wide: list[tuple[str, float, float]] = []
 
@@ -350,7 +358,8 @@ class _Work:
         if fx.family not in allowed:
             self.warn(f"Fiche « {fid} » : famille « {fx.family} » inadaptée aux {label}, ignorés.")
             return None
-        if fx.family != "hazer" and None in (fx.physical.dimensions, fx.physical.mount, fx.optics):
+        dimensions, mount, optics = fx.physical.dimensions, fx.physical.mount, fx.optics
+        if fx.family != "hazer" and None in (dimensions, mount, optics):
             self.warn(f"Fiche « {fid} » incomplète (dimensions, accroche ou optique) : {label} ignoré.")
             return None
         try:
@@ -358,7 +367,7 @@ class _Work:
         except KeyError:
             self.warn(f"Mode « {node['mode']} » inconnu de la fiche « {fid} » : mode par défaut utilisé.")
             mode = fx.mode()
-        return _Sheet(fx, mode)
+        return _Sheet(fx, mode, dimensions or NO_DIMENSIONS, mount or NO_MOUNT, optics or NO_OPTICS)
 
     def add(self, slot: _Slot) -> _Slot:
         self.slots.append(slot)
@@ -402,8 +411,8 @@ def _batten(c: Ctx, index: int) -> _Support:
                  f"la porteuse {name}")
 
 
-def _zones(w: _Work, ya: float) -> Zones:
-    c, pc = w.c, w.c.p["front_pc"]
+def _zones(c: Ctx, ya: float) -> Zones:
+    pc = c.p["front_pc"]
     if pc["zone_mode"] == "manual":
         nx, nr = pc["columns"], pc["rows"]
     else:
@@ -478,10 +487,9 @@ def _row_azimuth(w: _Work, tube: _Support, yr: float, nominal: float, sheet: _Sh
                  taken: list[float]) -> float | None:
     """Azimuth nearest to `nominal` (+-0.5 deg steps, +-10 deg) where no PC of the row touches
     another on the tube and every zone stays within the widest field of the sheet."""
-    zones, fx = w.zones, sheet.fixture
-    width, drop, za = fx.physical.dimensions.width, yr - tube.y, w.za
-    mount, optics = fx.physical.mount, fx.optics
-    widest = optics.lens_tubes[-1].field_angle if optics.lens_tubes else optics.field_angle.max
+    zones = w.zones
+    width, drop, za = sheet.dimensions.width, yr - tube.y, w.za
+    mount, widest = sheet.mount, sheet.optics.widest_field
     z = tube.z - mount.hook_height - mount.tilt_axis_height
     for k in range(int(AZIMUTH_SEARCH / AZIMUTH_STEP) + 1):
         for delta in ((0.0,) if k == 0 else (k * AZIMUTH_STEP, -k * AZIMUTH_STEP)):
@@ -542,7 +550,7 @@ def _plan_profiles(w: _Work, zones: Zones, za: float, pipe: _Support, ya: float)
     c, node = w.c, w.c.p["profiles"]
     if not node["enabled"] or (sheet := w.sheet("profiles", node)) is None:
         return
-    mount = sheet.fixture.physical.mount
+    mount = sheet.mount
     head = (0.0, pipe.y, pipe.z - mount.hook_height - mount.tilt_axis_height)
     yt = _bisector_y(head, (0.0, 0.0, c.Hp), _top_target(w, head), za)
     for p, tag in enumerate("LCR"):
@@ -592,8 +600,7 @@ def _check_tower(w: _Work, name: str, xt: float, y: float, base: float, shapes) 
 
 def _plan_tower_movers(w, sheet, name, tag, s, xt, y, node, count, ya, za) -> int:
     c, tw = w.c, w.c.p["towers"]
-    fx = sheet.fixture
-    dims, mount = fx.physical.dimensions, fx.physical.mount
+    dims, mount = sheet.dimensions, sheet.mount
     pitch = mount.hook_height + dims.height + TOWER_CLEARANCE
     arm = max(TOWER_MIN_ARM, dims.width / 2 + TOWER_CLEARANCE)
     flank = abs(xt) - tw["truss_size"] / 2
@@ -669,16 +676,17 @@ def _fit(phi: float, tau: float, pan: Range, tilt: Range) -> tuple[float, float]
 
 def _solve_pan_tilt(w: _Work, name: str, fx: Fixture, axis: Vec3) -> tuple[float, float]:
     phi, tau = aim_angles(axis)
-    motion = fx.motion
-    if motion is None or motion.type != "moving":
+    ranges = fx.pan_tilt
+    if ranges is None:
         return phi, tau
-    solution = _fit(phi, tau, motion.pan, motion.tilt) or _fit(phi + 180, -tau, motion.pan, motion.tilt)
+    pan_range, tilt_range = ranges
+    solution = _fit(phi, tau, pan_range, tilt_range) or _fit(phi + 180, -tau, pan_range, tilt_range)
     if solution is not None:
         return solution
-    mid = (motion.pan.min + motion.pan.max) / 2
+    mid = (pan_range.min + pan_range.max) / 2
     near = min((phi + 360 * k for k in range(-3, 4)), key=lambda r: abs(r - mid))
-    pan = min(max(near, motion.pan.min), motion.pan.max)
-    tilt = min(max(tau, motion.tilt.min), motion.tilt.max)
+    pan = min(max(near, pan_range.min), pan_range.max)
+    tilt = min(max(tau, tilt_range.min), tilt_range.max)
     w.warn(f"Pan/tilt hors course : {name} demande pan {phi:.1f}°, tilt {tau:.1f}°, "
            f"ramenés à {pan:.1f}° et {tilt:.1f}°.")
     return pan, tilt
@@ -838,11 +846,10 @@ def _blade_record(w, name, bl, k, cut, h_c, tan_a, open_eff) -> Blade:
     return Blade(k + 1, cut, bl.sides[k], h_c, alpha, ha, hb, va, vb)
 
 
-def _blade_set(w: _Work, s: _Slot, source: Vec3, axis, frame, f_ref: float, d: float,
+def _blade_set(w: _Work, s: _Slot, bl: Blades, source: Vec3, axis, frame, f_ref: float, d: float,
                source_z: float) -> BladeSet:
-    """Blades of a profile: cut planes (auto) or manual setting (spec 13.8)."""
-    fx, p = s.sheet.fixture, w.c.p["profiles"]
-    bl = fx.blades
+    """Blades `bl` of a profile: cut planes (auto) or manual setting (spec 13.8)."""
+    p = w.c.p["profiles"]
     xh, yh, _ = frame
     g = max(d - bl.gate_from_lens, GATE_MIN_RATIO * d)
     open_eff = max(bl.travel.open, g * math.tan(math.radians(f_ref) / 2))
@@ -884,8 +891,7 @@ def _blade_set(w: _Work, s: _Slot, source: Vec3, axis, frame, f_ref: float, d: f
 
 def _profile_optics(w: _Work, s: _Slot, pivot: Vec3, axis: Vec3, frame):
     """Tube, field, source and blades of a découpe (spec 13.8)."""
-    fx = s.sheet.fixture
-    optics = fx.optics
+    fx, optics = s.sheet.fixture, s.sheet.optics
     planes = _cut_planes(w, s.meta["third"], pivot, axis)
     f_req = _required_field(planes, axis)
     forced = w.c.p["profiles"]["tube_angle"]
@@ -896,7 +902,7 @@ def _profile_optics(w: _Work, s: _Slot, pivot: Vec3, axis: Vec3, frame):
     source = _add(pivot, _mul(axis, source_z))
     blades = None
     if fx.blades is not None:
-        blades = _blade_set(w, s, source, axis, frame, value, d, source_z)
+        blades = _blade_set(w, s, fx.blades, source, axis, frame, value, d, source_z)
     return tube, value, kind, source_z, source, blades
 
 
@@ -993,16 +999,17 @@ def _build_fixture(w: _Work, s: _Slot, levels, done: set) -> RigFixture:
     if s.family == "hazer":
         return _build_hazer(w, s, levels)
     fx, mode, p = s.sheet.fixture, s.sheet.mode, w.c.p
-    optics, mount = fx.optics, fx.physical.mount
+    optics, mount = s.sheet.optics, s.sheet.mount
     root = (s.x, s.y, s.z - mount.hook_height)
     pivot = (s.x, s.y, root[2] - mount.tilt_axis_height)
     pan, tilt = _solve_pan_tilt(w, s.name, fx, _unit(_sub(s.target, pivot)))
-    moving = fx.motion is not None and fx.motion.type == "moving"
+    ranges = fx.pan_tilt
+    moving = ranges is not None
     over: dict[str, float] = {"dimmer": levels[s.family]}
     pan_data = tilt_data = None
-    if moving:
-        pan, pan_data, pv = _angle_dmx(mode, "pan", fx.motion.pan, pan)
-        tilt, tilt_data, tv = _angle_dmx(mode, "tilt", fx.motion.tilt, tilt)
+    if ranges is not None:
+        pan, pan_data, pv = _angle_dmx(mode, "pan", ranges[0], pan)
+        tilt, tilt_data, tv = _angle_dmx(mode, "tilt", ranges[1], tilt)
         over.update({k: v for k, v in (("pan", pv), ("tilt", tv)) if v is not None})
     frame = head_frame(pan, tilt)
     axis = frame[2]
@@ -1019,16 +1026,16 @@ def _build_fixture(w: _Work, s: _Slot, levels, done: set) -> RigFixture:
     elif s.family == "profiles":
         tube, field_angle, kind, source_z, source, blades = _profile_optics(w, s, pivot, axis, frame)
         kelvin = p["rest"]["cct_profile"]
-        if blades is not None and fx.blades.mode == "motorised":
-            over.update(_blade_rest(fx, blades))
+        if blades is not None and fx.blades is not None and fx.blades.mode == "motorised":
+            over.update(_blade_rest(fx.blades, blades))
     else:
         field_angle = _mover_field(mode, optics)
         tube = None
-        f_ref = optics.field_angle.max if optics.field_angle else optics.lens_tubes[-1].field_angle
+        f_ref = optics.widest_field
         kind, source_z, d = _source(optics, None if optics.field_angle else optics.lens_tubes[-1], f_ref)
         source = _add(pivot, _mul(axis, source_z))
         if fx.blades is not None:
-            blades = _blade_set(w, s, source, axis, frame, f_ref, d, source_z)
+            blades = _blade_set(w, s, fx.blades, source, axis, frame, f_ref, d, source_z)
     if kelvin is not None:
         over.update(_colour_overrides(w, s, kelvin, done))
     return RigFixture(
@@ -1039,22 +1046,23 @@ def _build_fixture(w: _Work, s: _Slot, levels, done: set) -> RigFixture:
         _channel_values(s, over), fx.physical.weight, s.width)
 
 
-def _mover_field(mode: Mode, optics) -> float:
-    if optics.field_angle is None:
+def _mover_field(mode: Mode, optics: Optics) -> float:
+    zoom_range = optics.field_angle
+    if zoom_range is None:
         return optics.lens_tubes[-1].field_angle
     zoom = mode.channel("zoom")
     if zoom is None:
-        return optics.field_angle.max
+        return zoom_range.max
     z = 1.0 - zoom.default_normalized if optics.zoom_invert else zoom.default_normalized
-    return optics.field_angle.min + z * (optics.field_angle.max - optics.field_angle.min)
+    return zoom_range.min + z * (zoom_range.max - zoom_range.min)
 
 
-def _blade_rest(fx: Fixture, blades: BladeSet) -> dict[str, float]:
+def _blade_rest(sheet: Blades, blades: BladeSet) -> dict[str, float]:
     out: dict[str, float] = {}
     for blade in blades.blades:
         out[f"blade_{blade.index}a"] = blade.insertion_a
         out[f"blade_{blade.index}b"] = blade.insertion_b
-    rot = fx.blades.rotation
+    rot = sheet.rotation
     if rot is not None:
         out["blade_rot"] = _clamp01(rot.fraction(blades.rotation))
     return out
@@ -1152,15 +1160,14 @@ def compute_rig(c: Ctx, library: Library) -> tuple[Rig, Part]:
     """The whole rig for the context `c` and the fiches of `library` (spec 13 and 15)."""
     if not c.p["rig"]["enabled"]:
         return Rig(), Part()
-    w = _Work(c, library)
     rg = c.p["rig"]
     za = c.Hp + rg["aim_height"]
     ya = min(rg["area_depth"], c.plan.yb)
+    zones = _zones(c, ya)
+    w = _Work(c, library, zones, za, ya)
     if rg["area_depth"] > c.plan.yb + EPS:
         w.warn(f"Zone de jeu raccourcie : {_metres(rg['area_depth'])} demandés, le fond est à "
                f"{_metres(c.plan.yb)}.")
-    zones = _zones(w, ya)
-    w.zones, w.za, w.ya = zones, za, ya
     pipe, drop = _front_pipe(w, zones, za)
     _plan_backlight(w, zones, za)
     _plan_front_movers(w, zones, za, pipe)
@@ -1186,7 +1193,8 @@ def compute_rig(c: Ctx, library: Library) -> tuple[Rig, Part]:
             circuits.setdefault(f.circuit, []).append(f.name)
     ranges = tuple((k, min(e.universe for e in grp), min(e.address for e in grp), max(e.last for e in grp))
                    for k, _, _ in PATCH_FAMILIES if (grp := [e for e in entries if e.family == k]))
-    profiles = tuple((f.name, f.tube, f.field_angle) for f in fixtures if f.family == "profiles")
+    profiles = tuple((f.name, f.tube, f.field_angle) for f in fixtures
+                     if f.family == "profiles" and f.field_angle is not None)
     dims = RigDims(pipe.y, pipe.z, ya, drop, profiles, ranges, tuple(w.azimuths))
     rig = Rig(True, zones, tuple(fixtures), tuple(entries), _rest_map(fixtures), _loads(fixtures),
               tuple((k, tuple(v)) for k, v in circuits.items()), _haze_link(w, fixtures), dims,

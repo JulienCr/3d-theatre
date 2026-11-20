@@ -9,16 +9,18 @@ from __future__ import annotations
 import math
 import traceback
 from collections.abc import Callable
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass
 from pathlib import Path
 
 import bpy
 
 from . import materials
 from .core.fixture_models import fixture_model
-from .core.fixtures import IES_FAC_PER_CD, Fixture, Strobe, cct_to_rgb, ies_axis_candela, max_energy
+from .core.fixtures import (
+    IES_FAC_PER_CD, Blades, Fixture, LensTube, Library, Optics, Strobe, cct_to_rgb, ies_axis_candela, max_energy,
+)
 from .core.meshes import Mesh
-from .core.rig import FIXTURES_COLLECTION, Rig, RigFixture, default_library
+from .core.rig import FIXTURES_COLLECTION, BladeSet, ChannelValue, Rig, RigFixture, default_library
 
 TAG = materials.TAG
 MAX_CHANNEL = 512
@@ -50,17 +52,30 @@ class _Build:
     collection: bpy.types.Collection
     new_mesh: Callable
     material: Callable
-    library: object
-    f: RigFixture | None = None
-    fx: Fixture | None = None
-    root: bpy.types.Object | None = None
-    tube: object = None
-    tail: str = ""
-    channels: dict = field(default_factory=dict)
+    library: Library
 
-    def for_fixture(self, f: RigFixture, fx: Fixture, root, tube) -> _Build:
-        return replace(self, f=f, fx=fx, root=root, tube=tube, tail=f"_{tube.name}" if tube else "",
-                       channels={cv.attribute: cv for cv in f.channels})
+    def for_fixture(self, f: RigFixture, fx: Fixture, root, tube: LensTube | None) -> _FixtureBuild:
+        optics = fx.optics
+        if optics is None or f.field_angle is None or f.aperture is None:
+            raise ValueError(f"{f.name} : appareil sans optique, pas de hiérarchie à construire.")
+        return _FixtureBuild(self.scene, self.collection, self.new_mesh, self.material, self.library,
+                             f, fx, root, tube, f"_{tube.name}" if tube else "",
+                             {cv.attribute: cv for cv in f.channels}, optics, f.field_angle, f.aperture)
+
+
+@dataclass
+class _FixtureBuild(_Build):
+    """The build context narrowed to one lit fixture: its fiche, root empty, lens tube and optics."""
+
+    f: RigFixture
+    fx: Fixture
+    root: bpy.types.Object
+    tube: LensTube | None
+    tail: str
+    channels: dict[str, ChannelValue]
+    optics: Optics
+    field_angle: float
+    aperture: float
 
     def expr(self) -> _Expr:
         return _Expr(self)
@@ -69,7 +84,7 @@ class _Build:
 class _Expr:
     """One driver expression with its variables: scene DMX bytes `d_*`, root settings `k_*`."""
 
-    def __init__(self, ctx: _Build):
+    def __init__(self, ctx: _FixtureBuild):
         self.ctx = ctx
         self.variables: dict[str, tuple] = {}
 
@@ -132,6 +147,11 @@ def _level(ex: _Expr) -> str | None:
     return "*".join(terms) or None
 
 
+def _channel_default(ex: _Expr, attribute: str) -> int:
+    channel = ex.ctx.fx.channel(attribute, ex.ctx.f.mode)
+    return channel.default if channel is not None else 0
+
+
 def _colour_expr(ex: _Expr, i: int) -> str | None:
     """Component `i` of the RGB colour of the mode (spec 14.7); None when it stays white."""
     colour, has = ex.ctx.fx.colour, ex.has
@@ -141,7 +161,7 @@ def _colour_expr(ex: _Expr, i: int) -> str | None:
         white = [ex.dmx("color_w")] if has("color_w") else []
         mix = ["+".join(([ex.dmx(a)] if has(a) else []) + white) or "0" for a in rgb]
         base = mix[i]
-        if has("cct") and not any(ex.ctx.fx.channel(a, ex.ctx.f.mode).default for a in rgb if has(a)):
+        if has("cct") and not any(_channel_default(ex, a) for a in rgb if has(a)):
             base = f"(1+{mix[i]})/(1+max({mix[0]},max({mix[1]},{mix[2]})))"
     elif any(has(a) for a in ("cyan", "magenta", "yellow")):
         attribute = ("cyan", "magenta", "yellow")[i]
@@ -166,17 +186,17 @@ def _zoom_fraction(ex: _Expr, inverted: bool) -> str:
     return f"(1-{zoom})" if inverted else zoom
 
 
-def _drive_root(ctx: _Build) -> None:
+def _drive_root(ctx: _FixtureBuild) -> None:
     """Values several drivers share, driven on the root from the scene alone: level, field, beam."""
     ex = ctx.expr()
     if (level := _level(ex)):
         ex.drive(ctx.root, '["level"]', level)
-    if not (ctx.expr().has("zoom") and ctx.fx.optics.field_angle is not None):
+    if not (ctx.expr().has("zoom") and ctx.optics.field_angle is not None):
         return
     for key in ("field", "beam"):
         ex = ctx.expr()
         low, high = ctx.root[f"{key}_min"], ctx.root[f"{key}_max"]
-        ex.drive(ctx.root, f'["{key}_now"]', f"{low}+{_zoom_fraction(ex, ctx.fx.optics.zoom_invert)}*{high - low}")
+        ex.drive(ctx.root, f'["{key}_now"]', f"{low}+{_zoom_fraction(ex, ctx.optics.zoom_invert)}*{high - low}")
 
 
 def _drive_kelvin(ex: _Expr, owner, path: str) -> None:
@@ -235,7 +255,7 @@ def _object(ctx: _Build, name: str, data=None, parent=None, location=(0.0, 0.0, 
     return obj
 
 
-def _body_part(ctx: _Build, suffix: str, part: Mesh, data_name: str, parent, location=(0.0, 0.0, 0.0)):
+def _body_part(ctx: _FixtureBuild, suffix: str, part: Mesh, data_name: str, parent, location=(0.0, 0.0, 0.0)):
     """A body part: a mesh object, or an empty when the fiche has no such mesh."""
     data = _mesh(ctx, data_name, part, "TS_Fixture") if part.vertices else None
     obj = _object(ctx, f"{ctx.f.name}_{suffix}", data, parent, location, category="TS_Fixture" if data else None)
@@ -293,24 +313,21 @@ def setup_lens_material(mat: bpy.types.Material, scene=None) -> None:
 
 # ------------------------------------------------------------------ settings
 
-def _settings(f: RigFixture, fx: Fixture, tube) -> dict:
+def _settings(ctx: _FixtureBuild) -> dict:
     """Configuration properties of the root (spec 14.2)."""
-    optics, colour, sheet = fx.optics, fx.colour, fx.blades
-    field_range = (tube.field_angle,) * 2 if tube else (optics.field_angle.min, optics.field_angle.max)
-    if tube:
-        beam_range = (tube.beam_angle,) * 2
-    else:
-        beam_range = (optics.beam_angle.min, optics.beam_angle.max) if optics.beam_angle else field_range
-    pan, tilt = (fx.motion.pan, fx.motion.tilt) if f.moving else (None, None)
+    f, fx, tube, optics = ctx.f, ctx.fx, ctx.tube, ctx.optics
+    colour, sheet = fx.colour, fx.blades
+    field_range, beam_range = optics.field_span(tube), optics.beam_span(tube)
+    pan, tilt = fx.pan_tilt if f.moving and fx.pan_tilt else (None, None)
     rot = sheet.rotation if sheet else None
     cct = colour.cct_range
     cto = cct_to_rgb(colour.cto_kelvin) if colour.cto_kelvin else (1.0, 1.0, 1.0)
     return {
         "theatre_fixture": f.fixture_id, "theatre_family": f.family, "theatre_circuit": f.circuit or "",
         "theatre_mode": f.mode, "theatre_universe": f.universe, "theatre_address": f.address,
-        "max_energy": max_energy(optics.beam_type, optics.flux, f.field_angle),
+        "max_energy": max_energy(optics.beam_type, optics.flux, ctx.field_angle),
         "field_min": field_range[0], "field_max": field_range[1], "beam_min": beam_range[0],
-        "beam_max": beam_range[1], "field_angle": f.field_angle, "zoom_invert": float(optics.zoom_invert),
+        "beam_max": beam_range[1], "field_angle": ctx.field_angle, "zoom_invert": float(optics.zoom_invert),
         "pan_min": pan.min if pan else 0.0, "pan_max": pan.max if pan else 0.0,
         "tilt_min": tilt.min if tilt else 0.0, "tilt_max": tilt.max if tilt else 0.0,
         "pan_invert": float(bool(pan and pan.invert)), "tilt_invert": float(bool(tilt and tilt.invert)),
@@ -323,14 +340,14 @@ def _settings(f: RigFixture, fx: Fixture, tube) -> dict:
         "blade_rot_min": rot.min if rot else 0.0, "blade_rot_max": rot.max if rot else 0.0,
         "blade_rot_invert": float(bool(rot and rot.invert)),
         "iris_min_ratio": fx.iris.min_ratio if fx.iris else 1.0,
-        "level": 1.0, "field_now": f.field_angle,
-        "beam_now": f.beam_angle if f.beam_angle is not None else f.field_angle,
+        "level": 1.0, "field_now": ctx.field_angle,
+        "beam_now": f.beam_angle if f.beam_angle is not None else ctx.field_angle,
     }
 
 
 # ------------------------------------------------------------------ lens, light, pose
 
-def _drive_pose(ctx: _Build, pan, tilt) -> None:
+def _drive_pose(ctx: _FixtureBuild, pan, tilt) -> None:
     ex = ctx.expr()
     if ex.has("pan"):
         ex.drive(pan, "rotation_euler", f"radians({_ranged(ex, 'pan', 'pan', 'pan_invert')})", 2)
@@ -339,7 +356,7 @@ def _drive_pose(ctx: _Build, pan, tilt) -> None:
         ex.drive(tilt, "rotation_euler", f"-radians({_ranged(ex, 'tilt', 'tilt', 'tilt_invert')})", 0)
 
 
-def _make_lens(ctx: _Build, tilt, radius: float, lens_offset: float):
+def _make_lens(ctx: _FixtureBuild, tilt, radius: float, lens_offset: float):
     fx, f = ctx.fx, ctx.f
     mesh = _mesh(ctx, f"TSF_{fx.id}_lens{ctx.tail}", _disc(radius, lens_offset + LENS_ADVANCE), "TS_Lens")
     lens = _object(ctx, f"{f.name}_Lens", mesh, tilt, category="TS_Lens")
@@ -348,7 +365,7 @@ def _make_lens(ctx: _Build, tilt, radius: float, lens_offset: float):
     return lens
 
 
-def _drive_lens(ctx: _Build, lens) -> None:
+def _drive_lens(ctx: _FixtureBuild, lens) -> None:
     ex = ctx.expr()
     if ex.has("dimmer") or ex.has("strobe"):
         ex.drive(lens, '["lens_level"]', ex.cfg("level"))
@@ -361,26 +378,26 @@ def _drive_lens(ctx: _Build, lens) -> None:
         _drive_kelvin(ex, lens, '["lens_kelvin"]')
 
 
-def _make_light(ctx: _Build, tilt):
-    f, optics = ctx.f, ctx.fx.optics
+def _make_light(ctx: _FixtureBuild, tilt):
+    f, optics = ctx.f, ctx.optics
     data = bpy.data.lights.new(f"{f.name}_Light", f.source_kind)
     data.use_shadow = True
-    data.energy = max_energy(optics.beam_type, optics.flux, f.field_angle)
+    data.energy = max_energy(optics.beam_type, optics.flux, ctx.field_angle)
     if f.source_kind == "SPOT":
         data.shadow_soft_size = 0.0
         data.spot_blend = SPOT_BLEND
-        data.spot_size = math.radians(f.field_angle)
+        data.spot_size = math.radians(ctx.field_angle)
     else:
         data.shape = "DISK"
-        data.size = f.aperture
-        data.spread = math.radians(f.beam_angle if f.beam_angle is not None else f.field_angle)
+        data.size = ctx.aperture
+        data.spread = math.radians(f.beam_angle if f.beam_angle is not None else ctx.field_angle)
     return _object(ctx, f"{f.name}_Light", data, tilt, (0.0, 0.0, f.source_z), (math.pi, 0.0, 0.0))
 
 
-def _drive_light(ctx: _Build, light) -> None:
+def _drive_light(ctx: _FixtureBuild, light) -> None:
     data, spot = light.data, ctx.f.source_kind == "SPOT"
     ex = ctx.expr()
-    zoomed = ex.has("zoom") and ctx.fx.optics.field_angle is not None
+    zoomed = ex.has("zoom") and ctx.optics.field_angle is not None
     leveled = ex.has("dimmer") or ex.has("strobe")
     if leveled or (zoomed and spot):
         parts = [ex.cfg("max_energy")] + ([ex.cfg("level")] if leveled else [])
@@ -398,11 +415,11 @@ def _drive_light(ctx: _Build, light) -> None:
 
 # ------------------------------------------------------------------ blades
 
-def _make_blades(ctx: _Build, tilt) -> None:
+def _make_blades(ctx: _FixtureBuild, tilt, sheet: Blades, blades: BladeSet) -> None:
     f, fx = ctx.f, ctx.fx
-    sheet, blades, radius = fx.blades, f.blades, f.aperture / 2
+    radius = ctx.aperture / 2
     mesh = _mesh(ctx, f"TSF_{fx.id}_blade{ctx.tail}",
-                 _blade_plane(f.aperture, max(sheet.span / 2, 1.5 * radius)), "TS_Blade")
+                 _blade_plane(ctx.aperture, max(sheet.span / 2, 1.5 * radius)), "TS_Blade")
     holder = _object(ctx, f"{f.name}_Blades", None, tilt, (0.0, 0.0, blades.plane_z),
                      (0.0, 0.0, math.radians(blades.rotation)))
     motorised = sheet.mode == "motorised"
@@ -420,7 +437,7 @@ def _make_blades(ctx: _Build, tilt) -> None:
             _drive_blade(ctx, plane, blade.index)
 
 
-def _drive_blade(ctx: _Build, plane, k: int) -> None:
+def _drive_blade(ctx: _FixtureBuild, plane, k: int) -> None:
     a, b, swivel = f"blade_{k}a", f"blade_{k}b", f"blade_{k}_rot"
 
     def edge(ex: _Expr, attribute: str) -> str:
@@ -500,7 +517,7 @@ def _wheel_group(fx: Fixture, wheel):
     group.links.new(inputs.outputs["Angle"], spin.inputs["Angle"])
     unit = _vector_math(group, "MULTIPLY_ADD", spin.outputs[0], (0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
     byte = _math(group, "MINIMUM", inputs.outputs["Byte"], float(wheel.slots[-1].dmx[1]))
-    total = None
+    terms = []
     for slot in wheel.slots:
         low, high = slot.dmx
         pick = _math(group, "COMPARE", byte.outputs[0], (low + high) / 2, (high - low) / 2 + 0.01)
@@ -511,16 +528,19 @@ def _wheel_group(fx: Fixture, wheel):
             term = _vector_math(group, "SCALE", texture.outputs["Color"], pick.outputs[0])
         else:
             term = _vector_math(group, "SCALE", (1.0, 1.0, 1.0), pick.outputs[0])
-        total = term if total is None else _vector_math(group, "ADD", total.outputs[0], term.outputs[0])
+        terms.append(term)
+    total = terms[0]
+    for term in terms[1:]:
+        total = _vector_math(group, "ADD", total.outputs[0], term.outputs[0])
     group.links.new(total.outputs[0], output.inputs["Color"])
     return group
 
 
-def _build_tree(ctx: _Build, light) -> None:
+def _build_tree(ctx: _FixtureBuild, light) -> None:
     """Cycles node tree of the light: IES, colour temperature, gobo wheels, iris (spec 14.5)."""
     f, fx = ctx.f, ctx.fx
     probe = ctx.expr()
-    ies = fx.ies_for(f.field_angle, ctx.tube)
+    ies = fx.ies_for(ctx.field_angle, ctx.tube)
     wheels = [w for w in fx.gobos if probe.has(w.name) and any(s.image for s in w.slots)]
     iris = fx.iris is not None and probe.has("iris")
     cct = probe.has("cct") and fx.colour.cct_range is not None
@@ -528,7 +548,7 @@ def _build_tree(ctx: _Build, light) -> None:
         return
     tree = light.data.node_tree
     emission = next(n for n in tree.nodes if n.bl_idname == "ShaderNodeEmission")
-    colour = None
+    colour = plane = None
     if ies:
         text = _ies_text(fx, ies)
         texture = _node(tree, "ShaderNodeTexIES", mode="INTERNAL", ies=text)
@@ -563,13 +583,13 @@ def _build_tree(ctx: _Build, light) -> None:
         tree.links.new(colour, emission.inputs["Color"])
 
 
-def _drive_field(ctx: _Build, tree) -> None:
+def _drive_field(ctx: _FixtureBuild, tree) -> None:
     ex = ctx.expr()
     path = 'nodes["FieldTan"].outputs[0].default_value'
     if ex.has("zoom") and ctx.f.source_kind == "SPOT":
         ex.drive(tree, path, f"tan(radians({ex.cfg('field_now')})/2)")
     else:
-        tree.nodes["FieldTan"].outputs[0].default_value = math.tan(math.radians(ctx.f.field_angle) / 2)
+        tree.nodes["FieldTan"].outputs[0].default_value = math.tan(math.radians(ctx.field_angle) / 2)
 
 
 # ------------------------------------------------------------------ fixture
@@ -592,18 +612,18 @@ def _build_fixture(base: _Build, f: RigFixture) -> bpy.types.Object:
     tube = next((t for t in fx.optics.lens_tubes if t.name == f.tube), None)
     ctx = base.for_fixture(f, fx, root, tube)
     model = fixture_model(fx, tube, _models)
-    for key, value in _settings(f, fx, tube).items():
+    for key, value in _settings(ctx).items():
         root[key] = value
     _label(root, f)
     _body_part(ctx, "Base", model.base, f"TSF_{fx.id}_base", root)
     pan = _body_part(ctx, "Pan", model.pan, f"TSF_{fx.id}_yoke", root)
-    pan.rotation_euler = (0.0, 0.0, math.radians(f.pan))
+    pan.rotation_euler = (0.0, 0.0, math.radians(f.pan or 0.0))
     tilt = _body_part(ctx, "Tilt", model.tilt, f"TSF_{fx.id}_head{ctx.tail}", pan, model.tilt_pivot)
-    tilt.rotation_euler = (-math.radians(f.tilt), 0.0, 0.0)
+    tilt.rotation_euler = (-math.radians(f.tilt or 0.0), 0.0, 0.0)
     light = _make_light(ctx, tilt)
     lens = _make_lens(ctx, tilt, model.lens_radius, model.lens_offset)
     if f.blades is not None and fx.blades is not None:
-        _make_blades(ctx, tilt)
+        _make_blades(ctx, tilt, fx.blades, f.blades)
     if f.moving:
         _drive_pose(ctx, pan, tilt)
     _drive_root(ctx)

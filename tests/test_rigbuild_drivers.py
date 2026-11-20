@@ -88,7 +88,7 @@ def test_driver_expressions_fit_blender_limit(rigbuild, fixture_id, family, mode
     tube = next((t for t in fx.optics.lens_tubes if t.name == f.tube), None)
     store: dict = {}
     ctx = rigbuild._Build(None, None, None, None, LIB).for_fixture(f, fx, None, tube)
-    ctx.root = _Root(rigbuild._settings(f, fx, tube), store)
+    ctx.root = _Root(rigbuild._settings(ctx), store)
     owner = _Recorder(store)
     light = SimpleNamespace(data=owner)
     if f.moving:

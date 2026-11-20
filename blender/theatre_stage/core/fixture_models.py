@@ -65,11 +65,11 @@ def fixture_model(fixture: Fixture, tube: LensTube | None = None, cache: dict | 
     key = (fixture.id, tube.name if tube else None)
     if cache is not None and key in cache:
         return cache[key]
-    meshes, pivot = _parts(fixture, fixture.model3d, tube)
+    (base, pan, tilt), pivot = _parts(fixture, fixture.model3d, tube)
     optics = fixture.optics
     blades = fixture.blades
     model = FixtureModel(
-        fixture.id, key[1], *meshes, pivot,
+        fixture.id, key[1], base, pan, tilt, pivot,
         optics.lens_offset if optics else 0.0,
         optics.aperture(tube) / 2 if optics else 0.0,
         optics.lens_offset - blades.gate_from_lens if optics and blades else None,
@@ -115,7 +115,7 @@ def _flip(v) -> Vec3:
 
 # ------------------------------------------------------------------ dispatch
 
-def _parts(fixture: Fixture, model: Model3D, tube: LensTube | None):
+def _parts(fixture: Fixture, model: Model3D, tube: LensTube | None) -> tuple[tuple[Mesh, Mesh, Mesh], Vec3]:
     """((base, pan, tilt), tilt_pivot) for a model."""
     if model.kind == "none":
         return (EMPTY, EMPTY, EMPTY), (0.0, 0.0, 0.0)
@@ -208,6 +208,8 @@ def _head(model: Model3D, body: Body, optics, gap: float, tube: LensTube | None)
         lens = _along_z(front - LENS_BULGE - 0.01, front, lens_r, lens_r)
         return _merge(shell, lens, axle)
     barrel = model.barrel
+    if barrel is None:
+        raise ValueError(f"Modèle procédural « {model.shape} » sans fût.")
     rear = front - body.depth - barrel.length
     split = rear + (1 - SHUTTER_SHARE) * body.depth
     tube_r = max(barrel.diameter, 2 * lens_r + TUBE_WALL) / 2

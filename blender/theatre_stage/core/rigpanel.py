@@ -43,14 +43,15 @@ def dimension_lines(rig: Rig) -> list[str]:
     return lines
 
 
-def _aim_line(f: RigFixture) -> str:
-    pan, tilt = _dmx_value(f.pan_dmx), _dmx_value(f.tilt_dmx)
-    return (f"{f.name} : pan {_number(f.pan)}° (DMX {pan}), tilt {_number(f.tilt)}° (DMX {tilt})")
+def _aim_line(f: RigFixture, pan: float, tilt: float) -> str:
+    return (f"{f.name} : pan {_number(pan)}° (DMX {_dmx_value(f.pan_dmx)}), "
+            f"tilt {_number(tilt)}° (DMX {_dmx_value(f.tilt_dmx)})")
 
 
 def mover_lines(rig: Rig) -> list[str]:
     """Rest pan and tilt of every moving fixture, angle then DMX value (13.9)."""
-    return [_aim_line(f) for f in rig.fixtures if f.moving and f.pan is not None and f.tilt is not None]
+    return [_aim_line(f, f.pan, f.tilt) for f in rig.fixtures
+            if f.moving and f.pan is not None and f.tilt is not None]
 
 
 def patch_rows(rig: Rig) -> list[tuple[str, str, str, str]]:

@@ -436,7 +436,7 @@ class _Planner:
             problem = f"absent de la définition QLC+ (« {qlc_mode} » attendu)"
         elif found.modes[qlc_mode][0] != mode.footprint:
             problem = f"de {mode.footprint} canaux, la définition QLC+ en a {found.modes[qlc_mode][0]}"
-        if problem:
+        if problem or qlc_mode is None:
             self.warnings.append(f"Fiche « {fixture.id} », mode « {mode.name} » {problem} : "
                                  f"définition générée.")
             return None
@@ -498,9 +498,9 @@ def _place(items: Sequence[PatchedFixture], planner: _Planner) -> list[_Placed]:
     placed: list[_Placed] = []
     for item in items:
         resolved = planner.resolve(item)
-        if resolved is None:
-            continue
         fixture = planner.library.get(item.fixture_id)
+        if resolved is None or fixture is None:
+            continue
         mode = fixture.mode(item.mode)
         last = item.address + mode.footprint - 1
         if item.universe < 1 or item.address < 1 or last > MAX_CHANNELS:
@@ -582,8 +582,8 @@ def _write_engine(x: _Xml, placed: list[_Placed]) -> None:
         for column, fixture_id in enumerate(members):
             x.leaf("Head", 0, X=column, Y=0, Fixture=fixture_id)
         x.close("FixtureGroup")
-    movers = [(p, _degrees(p)) for p in placed]
-    for palette_id, (p, degrees) in enumerate((m for m in movers if m[1] is not None)):
+    movers = [(p, degrees) for p in placed if (degrees := _degrees(p)) is not None]
+    for palette_id, (p, degrees) in enumerate(movers):
         x.leaf("Palette", ID=palette_id, Type="PanTilt", Name=f"Repos_{p.item.name}",
                Value=f"{degrees[0]},{degrees[1]}")
     positions = [(p.id, v) for p in placed if (v := _position_values(p))]

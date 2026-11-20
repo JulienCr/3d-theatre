@@ -8,10 +8,10 @@ from __future__ import annotations
 
 import math
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeGuard, TypeVar
 
 import yaml
 
@@ -34,6 +34,7 @@ ATTRIBUTES = (
     "cyan", "magenta", "yellow", "cto", "cct", *EMITTER_ATTRIBUTES, "strobe", "gobo1", "gobo2",
     "gobo1_rot", "gobo2_rot", "iris", *BLADE_ATTRIBUTES, *BLADE_SWIVEL_ATTRIBUTES, "blade_rot", "haze_density",
 )
+_T = TypeVar("_T")
 _ATTRIBUTE_NAME = re.compile(r"[a-z0-9_]+")
 _ID = re.compile(r"[a-z0-9_]+")
 
@@ -124,6 +125,27 @@ class Optics:
     def aperture(self, tube: LensTube | None = None) -> float:
         """Lens diameter of `tube`, falling back to `lens_diameter`."""
         return self.lens_diameter if tube is None or tube.lens_diameter is None else tube.lens_diameter
+
+    @property
+    def widest_field(self) -> float:
+        """Largest field angle: the zoom maximum, else the last (widest) lens tube."""
+        return self.field_angle.max if self.field_angle is not None else self.lens_tubes[-1].field_angle
+
+    def field_span(self, tube: LensTube | None = None) -> tuple[float, float]:
+        """`(min, max)` field angle: the fixed value of `tube`, else the zoom range."""
+        if tube is not None:
+            return (tube.field_angle, tube.field_angle)
+        if self.field_angle is None:
+            raise ValueError("Optique sans zoom ni tube de lentille choisi.")
+        return (self.field_angle.min, self.field_angle.max)
+
+    def beam_span(self, tube: LensTube | None = None) -> tuple[float, float]:
+        """`(min, max)` beam angle, the field span when the sheet gives no beam range."""
+        if tube is not None:
+            return (tube.beam_angle, tube.beam_angle)
+        if self.beam_angle is not None:
+            return (self.beam_angle.min, self.beam_angle.max)
+        return self.field_span()
 
 
 @dataclass(frozen=True)
@@ -333,6 +355,14 @@ class Fixture:
     def mode_names(self) -> tuple[str, ...]:
         return tuple(m.name for m in self.modes)
 
+    @property
+    def pan_tilt(self) -> tuple[Range, Range] | None:
+        """`(pan, tilt)` ranges of a moving fixture, None for a static one."""
+        motion = self.motion
+        if motion is None or motion.type != "moving" or motion.pan is None or motion.tilt is None:
+            return None
+        return (motion.pan, motion.tilt)
+
     def mode(self, name: str | None = None) -> Mode:
         """Mode by name; None, "" and "default" give `default_mode`. KeyError if unknown."""
         wanted = self.default_mode if name in (None, "", DEFAULT_MODE) else name
@@ -352,9 +382,9 @@ class Fixture:
         if tube is not None:
             return tube.ies
         profiles = self.optics.ies if self.optics else ()
-        known = [q for q in profiles if q.field_angle is not None]
+        known = [(q.field_angle, q.file) for q in profiles if q.field_angle is not None]
         if known:
-            return min(known, key=lambda q: abs(q.field_angle - field_angle)).file
+            return min(known, key=lambda q: abs(q[0] - field_angle))[1]
         return profiles[0].file if profiles else None
 
     def path(self, relative: str) -> Path:
@@ -370,6 +400,11 @@ def _is_number(value) -> bool:
 
 def _is_int(value) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _all_set(values: Sequence[_T | None]) -> TypeGuard[Sequence[_T]]:
+    """True when no parsed value is None (the parser records the error and returns None)."""
+    return None not in values
 
 
 class _Parser:
@@ -469,7 +504,7 @@ class _Parser:
         if len(values) != 3 or not all(_is_number(v) for v in values):
             self.fail(f"{prefix}{key}", "trois nombres sont attendus.")
             return None
-        return tuple(float(v) for v in values)
+        return (float(values[0]), float(values[1]), float(values[2]))
 
     def byte_range(self, data, key, prefix, required=True) -> tuple[int, int] | None:
         values = self.sequence(data, key, prefix, required)
@@ -539,12 +574,12 @@ def _parse_physical(p: _Parser, data, hazer: bool) -> Physical | None:
     if dim_node is not None:
         values = [p.number(dim_node, k, "physical.dimensions.", lo=0, strict_lo=True)
                   for k in ("width", "depth", "height")]
-        dims = Dimensions(*values) if None not in values else None
+        dims = Dimensions(*values) if _all_set(values) else None
     mount_node = p.mapping(node, "mount", "physical.", required=not hazer)
     if mount_node is not None:
         hook = p.number(mount_node, "hook_height", "physical.mount.", lo=0)
         tilt = p.number(mount_node, "tilt_axis_height", "physical.mount.")
-        mount = Mount(hook, tilt) if None not in (hook, tilt) else None
+        mount = Mount(hook, tilt) if hook is not None and tilt is not None else None
     return Physical(weight, dims, mount) if weight is not None else None
 
 
@@ -567,7 +602,7 @@ def _parse_optics(p: _Parser, data, hazer: bool) -> Optics | None:
     beam = p.range(node, "beam_angle", pre, required=beam_type == "wash", lo=0)
     ies = _parse_ies(p, node)
     invert = p.boolean(node, "zoom_invert", pre)
-    if None in (beam_type, diameter, offset, flux):
+    if beam_type is None or diameter is None or offset is None or flux is None:
         return None
     return Optics(beam_type, diameter, offset, flux, field, beam, tubes, invert, ies)
 
@@ -686,7 +721,7 @@ def _parse_blades(p: _Parser, data) -> Blades | None:
     travel = None
     if travel_node is not None:
         opened, closed = (p.number(travel_node, k, "blades.travel.") for k in ("open", "closed"))
-        travel = Travel(opened, closed) if None not in (opened, closed) else None
+        travel = Travel(opened, closed) if opened is not None and closed is not None else None
     sides = p.sequence(node, "sides", pre)
     clean_sides: tuple[float, ...] = ()
     if sides is not None:
@@ -697,7 +732,7 @@ def _parse_blades(p: _Parser, data) -> Blades | None:
         else:
             clean_sides = tuple(float(v) for v in sides)
     rotation = p.range(node, "rotation", pre, required=mode == "motorised", invertible=True)
-    if None in (count, mode, gate, span, limit, travel) or not clean_sides:
+    if mode is None or gate is None or span is None or limit is None or travel is None or not clean_sides:
         return None
     return Blades(count, mode, gate, span, travel, clean_sides, limit, rotation)
 
@@ -761,12 +796,12 @@ def _parse_strobe(p: _Parser, data) -> Strobe | None:
         stop = p.integer(ramp_node, "to", "strobe.strobe.", lo=0, hi=255)
         hz_min = p.number(ramp_node, "hz_min", "strobe.strobe.", lo=0)
         hz_max = p.number(ramp_node, "hz_max", "strobe.strobe.", lo=0)
-        if None not in (start, stop, hz_min, hz_max):
+        if start is not None and stop is not None and hz_min is not None and hz_max is not None:
             if start > stop or hz_min > hz_max:
                 p.fail("strobe.strobe", "from et hz_min doivent être inférieurs ou égaux à to et hz_max.")
             else:
                 ramp = StrobeRamp(start, stop, hz_min, hz_max)
-    if None in (opened, closed, ramp):
+    if opened is None or closed is None or ramp is None:
         return None
     return Strobe(opened, closed, ramp)
 
@@ -794,7 +829,7 @@ def _parse_channel(p: _Parser, item, path: str, footprint: int | None) -> Channe
     elif bits == 8 and item.get("fine") is not None:
         p.fail(f"{path}fine", "réservé aux canaux 16 bits.")
     curve, mode = _parse_curve(p, item, path)
-    if None in (offset, attribute, bits, default):
+    if offset is None or attribute is None or bits is None or default is None:
         return None
     return Channel(offset, attribute, bits, default, fine, curve, mode)
 
@@ -885,18 +920,18 @@ def _parse_model3d(p: _Parser, data, hazer: bool, nested: bool = False, key="mod
         if body_node is not None:
             values = [p.number(body_node, k, f"{path}body.", lo=0, strict_lo=True)
                       for k in ("width", "depth", "height")]
-            body = Body(*values) if None not in values else None
+            body = Body(*values) if _all_set(values) else None
         barrel_node = p.mapping(node, "barrel", path, required=shape == "profile")
         barrel = None
         if barrel_node is not None:
             values = [p.number(barrel_node, k, f"{path}barrel.", lo=0, strict_lo=True)
                       for k in ("diameter", "length")]
-            barrel = Barrel(*values) if None not in values else None
+            barrel = Barrel(*values) if _all_set(values) else None
         yoke_node = p.mapping(node, "yoke", path, required=False)
         yoke = None
         if yoke_node is not None:
             values = [p.number(yoke_node, k, f"{path}yoke.", lo=0) for k in ("gap", "height")]
-            yoke = Yoke(*values) if None not in values else None
+            yoke = Yoke(*values) if _all_set(values) else None
         return Model3D("procedural", shape=shape, body=body, barrel=barrel, yoke=yoke)
     if kind == "mesh":
         parts_node = p.mapping(node, "parts", path)
@@ -929,7 +964,7 @@ def _parse_qlc(p: _Parser, data) -> QlcLink | None:
     if modes is not None and not all(isinstance(k, str) and isinstance(v, str) for k, v in modes.items()):
         p.fail("qlc.modes", "correspondance {mode de la fiche: mode QLC+} de textes attendue.")
         modes = None
-    if None in (manufacturer, model, modes):
+    if manufacturer is None or model is None or modes is None:
         return None
     return QlcLink(manufacturer, model, tuple(modes.items()), None if verified is None else str(verified))
 
@@ -963,7 +998,7 @@ def validate_fixture(data: Any, folder: Path | None = None) -> Fixture | list[st
     modes, default_mode = _parse_modes(p, data)
     model3d = _parse_model3d(p, data, hazer)
     qlc = _parse_qlc(p, data)
-    if p.errors:
+    if p.errors or version is None or fid is None or manufacturer is None or model is None             or family is None or physical is None or default_mode is None or model3d is None:
         return p.errors
     return Fixture(version, fid, manufacturer, model, family, sources, physical, optics, colour,
                    motion, blades, gobos, iris, strobe, modes, default_mode, model3d, qlc, folder)
@@ -1078,9 +1113,9 @@ def cct_to_rgb(kelvin: float) -> tuple[float, float, float]:
     rgb = (3.2404542 * big_x - 1.5371385 - 0.4985314 * big_z,
            -0.9692660 * big_x + 1.8760108 + 0.0415560 * big_z,
            0.0556434 * big_x - 0.2040259 + 1.0572252 * big_z)
-    rgb = tuple(max(c, 0.0) for c in rgb)
-    top = max(rgb)
-    return tuple(c / top for c in rgb)
+    r, g, b = (max(c, 0.0) for c in rgb)
+    top = max(r, g, b)
+    return (r / top, g / top, b / top)
 
 
 # ------------------------------------------------------------- photometry

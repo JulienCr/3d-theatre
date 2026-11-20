@@ -157,7 +157,7 @@ def _dynamic_items(node, param: Param, group: Group) -> list[tuple[str, str, str
     current = getattr(node, param.key)
     if param.kind == schema.FIXTURE:
         lib = library()
-        items = [(i, lib.get(i).label, lib.get(i).family) for i in lib.ids_by_family(*param.families)]
+        items = [(i, f.label, f.family) for i, f in lib.fixtures.items() if f.family in param.families]
     else:
         sheet = library().get(getattr(node, param.depends_on))
         items = [(fixtures.DEFAULT_MODE,

@@ -12,6 +12,7 @@ Standard library only, apart from the repository's `core/meshio.py`.
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import math
 import re
@@ -84,7 +85,8 @@ def _translation(position: str | None) -> tuple[float, float, float]:
     """Translation of a GDTF `{r0}{r1}{r2}{r3}` row-major 4x4 matrix."""
     rows = re.findall(r"\{([^}]*)\}", position or "")
     try:
-        return tuple(float(rows[i].split(",")[3]) for i in range(3))
+        x, y, z = (float(rows[i].split(",")[3]) for i in range(3))
+        return (x, y, z)
     except (IndexError, ValueError):
         return (0.0, 0.0, 0.0)
 
@@ -328,7 +330,10 @@ class _Gdtf:
         self.path = path
         self.archive = zipfile.ZipFile(path)
         root = ElementTree.fromstring(self.archive.read("description.xml"))
-        self.type = root.find("FixtureType")
+        fixture_type = root.find("FixtureType")
+        if fixture_type is None:
+            raise SystemExit(f"{path.name} : pas de FixtureType dans description.xml.")
+        self.type = fixture_type
         self.names = {n.lower(): n for n in self.archive.namelist()}
 
     def member(self, *candidates: str) -> str | None:
@@ -347,17 +352,21 @@ def _geometry_parts(gdtf: _Gdtf) -> dict[str, tuple[str, tuple[float, float, flo
         for child in element:
             if child.get("Name") is None or child.tag in ("Beam", "WiringObject"):
                 continue
-            here = tuple(c + t for c, t in zip(carried, _translation(child.get("Position"))))
+            dx, dy, dz = _translation(child.get("Position"))
+            here = (carried[0] + dx, carried[1] + dy, carried[2] + dz)
             model = models.get(child.get("Model"))
-            role = None
+            role, model_name = None, ""
             if model is not None and model.get("File"):
-                role = next((r for r in PARTS if r in (model.get("Name", "").lower(), model.get("File", "").lower())), None)
+                model_name = model.get("Name", "")
+                role = next((r for r in PARTS if r in (model_name.lower(), model.get("File", "").lower())), None)
             if role and role not in parts:
-                parts[role] = (model.get("Name"), here)
+                parts[role] = (model_name, here)
                 here = (0.0, 0.0, 0.0)
             walk(child, here)
 
-    walk(gdtf.type.find("Geometries"), (0.0, 0.0, 0.0))
+    geometries = gdtf.type.find("Geometries")
+    if geometries is not None:
+        walk(geometries, (0.0, 0.0, 0.0))
     return parts
 
 
@@ -372,7 +381,7 @@ def _convert_models(gdtf: _Gdtf, out: Path, report: Report):
         if info is None:
             continue
         model = models[info[0]]
-        file = model.get("File")
+        file = model.get("File") or ""
         dims = [_float(model.get(k), 0.0) for k in ("Length", "Width", "Height")]
         glb = gdtf.member(f"models/gltf/{file}.glb", f"models/glb/{file}.glb")
         tds = gdtf.member(f"models/3ds/{file}.3ds")
@@ -495,7 +504,7 @@ def _optics(gdtf: _Gdtf, channels: list[_Channel]) -> dict:
         "flux": round(flux, 3) if flux else None,
         "field_angle": None,
         "beam_angle": zoom_span,
-        "zoom_invert": bool(zoom and None not in (zoom.phys_from, zoom.phys_to)
+        "zoom_invert": bool(zoom and zoom.phys_from is not None and zoom.phys_to is not None
                             and zoom.phys_from > zoom.phys_to),
     }
 
@@ -506,7 +515,7 @@ def _colour(channels) -> dict | None:
                                          ("cto", "CTO"), ("cct", "CTC")) if wanted in attributes]
     if not systems:
         return None
-    colour = {"systems": systems}
+    colour: dict = {"systems": systems}
     if "cct" in systems:
         colour["cct_range"] = _span(channels, "CTC")
     if "cto" in systems:
@@ -534,7 +543,7 @@ def convert(gdtf_path, out, fixture_id: str | None = None, modes: list[str] | No
         raise SystemExit(f"Identifiant invalide « {fixture_id} » : a-z, 0-9 et _ seulement.")
     report = Report(fixture_id)
 
-    mode_elements = ft.find("DMXModes").findall("DMXMode")
+    mode_elements = ft.findall("DMXModes/DMXMode")
     if modes:
         missing = [m for m in modes if m not in [e.get("Name") for e in mode_elements]]
         if missing:
@@ -546,7 +555,7 @@ def convert(gdtf_path, out, fixture_id: str | None = None, modes: list[str] | No
         footprint = max((o for c in channels for o in c.offsets), default=0)
         sheet_modes.append({"name": element.get("Name"), "footprint": footprint,
                             "channels": _name_channels(channels, report.warnings)})
-        report.modes.append((element.get("Name"), footprint))
+        report.modes.append((element.get("Name") or "", footprint))
         if analysed is None or len(channels) > len(analysed):
             analysed = channels
     channels = analysed or []
@@ -611,7 +620,8 @@ def main(argv=None) -> int:
     parser.add_argument("--mode", action="append", help="mode à garder (répétable, défaut : tous)")
     parser.add_argument("--out", type=Path, required=True, help="dossier de la fiche")
     args = parser.parse_args(argv)
-    sys.stdout.reconfigure(encoding="utf-8")
+    if isinstance(sys.stdout, io.TextIOWrapper):
+        sys.stdout.reconfigure(encoding="utf-8")
     print(summary(convert(args.gdtf, args.out, args.fixture_id, args.mode)))
     return 0
 
