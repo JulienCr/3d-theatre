@@ -1907,6 +1907,8 @@ sans fiche ou avec `front_pc.barn_doors = none`). Même idée que les lames
 - Valeurs sourcées : le catalogue Robe cite un « 4-leaf Barndoor module »
   (10981010) pour le T15 PC sans cotes ; Chauvet cite le « Ovation F 7.5" Barndoor
   V2 » (8 feuilles, 323 × 308 × 52 mm ouvert) pour l'Ovation F-915VW sans
+- **Dans Blender** (14.4 bis) : une boîte mince par feuille, fille de `_Tilt`, posée sur
+  `hinge` et tournée selon `axes`.
   longueur de feuille. Les longueurs et largeurs des deux fiches sont des
   estimations signalées dans les fiches ; elles respectent la règle des
   feuilles ouvertes de 12.7.
@@ -2109,6 +2111,7 @@ un gobo, un iris ou `cct`. EEVEE ne le lit pas.
   `p = (n_x, n_y) / (−n_z) / tan(F/2)` : le disque unité est le bord du champ.
   Nœud `Value` `FieldTan` piloté à `tan(F/2)`. *Le sens de `Normal` pour les
   lumières spot et surfaciques est à confirmer au premier rendu (11).*
+      <Racine>_Leaf_K       boîte mince (volet de PC, 14.4 bis), K = 1 à 4
 - Gobo : rotation de `p` par `β = gobo1_rot`, coordonnées image
   `0,5 + 0,5·p`, une `Image Texture` par fente (`CLIP`, linéaire, images de
   `gobos/`). Chaque roue (`gobo1`, `gobo2`) est un **groupe de nœuds**
@@ -2176,6 +2179,17 @@ colonne « Sans canal ».
 - Les drivers de nœuds sont portés par l'arbre de nœuds de la lumière : ce
   n'est pas l'objet, donc pas de cycle avec la racine.
 - `level = dimmer · shut` et, si le mode a `zoom`, `field_now = F(z)` et
+### 14.4 bis Volets des PC
+
+Pour chaque PC dont `RigFixture.barn_doors` existe (13.12), quatre boîtes
+`_Leaf_K` (`K` = `index`), enfants de `_Tilt`, matériau `TS_Fixture`, visibles de la
+caméra **et** projetant une ombre. Maillage `TSF_<id>_leaf` : `leaf_width` selon X,
+2 mm selon Y, `leaf_length` selon Z depuis l'origine, partagé par nom. Position
+`hinge`, rotation = la matrice dont les colonnes sont `axes` (repère de la tête = repère
+de `_Tilt`). Les feuilles ouvertes (`θ = 0`) sont construites aussi : elles existent
+physiquement et rognent déjà la lumière (13.13). Les volets sont fixes : pas de
+driver.
+
   `beam_now = B(z)` sont des propriétés de la racine pilotées par la scène (les
   constantes de la fiche y sont écrites en clair). `Light.energy` vaut
   `max_energy · level`, `spot_size` ou `spread` lit `field_now` ou `beam_now`.

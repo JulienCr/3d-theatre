@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import bpy
+from mathutils import Matrix
 
 from . import materials
 from .core.fixture_models import fixture_model
@@ -20,6 +21,7 @@ from .core.fixtures import (
     DEFAULT_EXPOSURE_EV, IES_FAC_PER_CD, Blades, Fixture, LensTube, Library, Optics, Strobe, cct_to_rgb,
     ies_axis_candela, max_energy,
 )
+from .core.barndoors import BarnDoorSet
 from .core.meshes import Mesh
 from .core import rigpanel
 from .core.rig import FIXTURES_COLLECTION, BladeSet, ChannelValue, Rig, RigFixture, default_library
@@ -36,6 +38,7 @@ SPOT_BLEND = 0.02
 EMPTY_SIZE = 0.03
 CTO_KEYS = ("cto_r", "cto_g", "cto_b")
 
+LEAF_THICKNESS = 0.002
 warnings: list[str] = []
 _models: dict = {}
 
@@ -244,6 +247,13 @@ def _blade_plane(diameter: float, half_width: float) -> Mesh:
 
 def _object(ctx: _Build, name: str, data=None, parent=None, location=(0.0, 0.0, 0.0),
             rotation=(0.0, 0.0, 0.0), category: str | None = None):
+def _leaf_box(length: float, width: float) -> Mesh:
+    """A barn door leaf: `width` along X, `LEAF_THICKNESS` along Y, `length` along Z from the hinge line."""
+    hx, hy = width / 2, LEAF_THICKNESS / 2
+    corners = tuple((x, y, z) for z in (0.0, length) for y in (-hy, hy) for x in (-hx, hx))
+    return Mesh(corners, ((0, 2, 3, 1), (4, 5, 7, 6), (0, 1, 5, 4), (2, 6, 7, 3), (0, 4, 6, 2), (1, 3, 7, 5)))
+
+
     obj = bpy.data.objects.new(name, data)
     obj[TAG] = True
     if category:
@@ -479,6 +489,17 @@ def _vector_math(tree, operation: str, *inputs):
     return node
 
 
+# ------------------------------------------------------------------ barn doors
+
+def _make_barn_doors(ctx: _FixtureBuild, tilt, doors: BarnDoorSet) -> None:
+    """One thin box per leaf, parented to `_Tilt` at its hinge, in the leaf frame of spec 13.12."""
+    mesh = _mesh(ctx, f"TSF_{ctx.fx.id}_leaf", _leaf_box(doors.length, doors.width), "TS_Fixture")
+    for leaf in doors.leaves:
+        rotation = Matrix(leaf.axes).transposed().to_euler()
+        _object(ctx, f"{ctx.f.name}_Leaf_{leaf.index}", mesh, tilt, leaf.hinge, tuple(rotation),
+                category="TS_Fixture")
+
+
 def _math(tree, operation: str, *inputs):
     node = _node(tree, "ShaderNodeMath", operation=operation)
     for slot, value in enumerate(inputs):
@@ -655,6 +676,8 @@ def ensure_default_exposure(scene) -> bool:
     if scene.view_settings.exposure != 0.0:
         return False
     scene.view_settings.exposure = DEFAULT_EXPOSURE_EV
+    if f.barn_doors is not None:
+        _make_barn_doors(ctx, tilt, f.barn_doors)
     return True
 
 

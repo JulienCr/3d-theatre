@@ -52,12 +52,13 @@ class _Root(dict, _Recorder):
 
 @pytest.fixture(scope="module")
 def rigbuild():
-    saved = {k: sys.modules.get(k) for k in ("bpy", "bpy.types", "bpy.props", "theatre_stage")}
+    saved = {k: sys.modules.get(k) for k in ("bpy", "bpy.types", "bpy.props", "mathutils", "theatre_stage")}
     bpy = _StubModule("bpy")
     bpy.types, bpy.props = _StubModule("bpy.types"), _StubModule("bpy.props")
     package = types.ModuleType("theatre_stage")
     package.__path__ = [str(PACKAGE)]
-    sys.modules.update({"bpy": bpy, "bpy.types": bpy.types, "bpy.props": bpy.props, "theatre_stage": package})
+    sys.modules.update({"bpy": bpy, "bpy.types": bpy.types, "bpy.props": bpy.props,
+                        "mathutils": _StubModule("mathutils"), "theatre_stage": package})
     from theatre_stage import rigbuild as module  # noqa: PLC0415
     yield module
     for key in [k for k in sys.modules if k.startswith("theatre_stage")]:
