@@ -10,6 +10,7 @@ import math
 import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 from typing import Any, TypeGuard, TypeVar
 
@@ -971,7 +972,10 @@ def _parse_qlc(p: _Parser, data) -> QlcLink | None:
         modes = None
     if manufacturer is None or model is None or modes is None:
         return None
-    return QlcLink(manufacturer, model, tuple(modes.items()), None if verified is None else str(verified))
+    if verified is not None and verified is not False and not isinstance(verified, (str, date)):
+        p.fail("qlc.verified", "une date ou un texte est attendu (absent ou false : non vérifié).")
+        return None
+    return QlcLink(manufacturer, model, tuple(modes.items()), str(verified) if verified else None)
 
 
 def validate_fixture(data: Any, folder: Path | None = None) -> Fixture | list[str]:

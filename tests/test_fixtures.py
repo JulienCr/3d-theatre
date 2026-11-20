@@ -184,6 +184,19 @@ def test_each_validation_rule_rejects_a_broken_sheet(name):
     assert expected in errors_of(data, SHEET)
 
 
+@pytest.mark.parametrize(("value", "expected"), [(False, None), (None, None), ("2026-01-01", "2026-01-01")])
+def test_qlc_verified_false_means_unverified(value, expected):
+    data = raw()
+    data["qlc"] = {"manufacturer": "Test", "model": "Mover", "modes": {"Standard": "Standard"}, "verified": value}
+    assert F.validate_fixture(data, SHEET).qlc.verified == expected
+
+
+def test_qlc_verified_must_be_a_date_or_text():
+    data = raw()
+    data["qlc"] = {"manufacturer": "Test", "model": "Mover", "modes": {"Standard": "Standard"}, "verified": 3}
+    assert "qlc.verified" in errors_of(data, SHEET)
+
+
 def test_folder_name_must_equal_the_id(tmp_path):
     folder = tmp_path / "other_name"
     shutil.copytree(SHEET, folder)
