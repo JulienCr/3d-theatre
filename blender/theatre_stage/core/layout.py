@@ -10,6 +10,7 @@ from __future__ import annotations
 import math
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from .meshes import MAX_DEPTH_FACTOR
 from .params import module_sets, validate_params
@@ -21,6 +22,10 @@ from .primitives import (
     SlatGrid, Tube,
 )
 
+if TYPE_CHECKING:
+    from .fixtures import Library
+    from .rig import Rig
+
 ROOT_COLLECTION = "Theatre"
 ARCHITECTURE = "Theatre_Architecture"
 STAIRS = "Theatre_Stairs"
@@ -30,7 +35,9 @@ MASKING = "Theatre_Masking"
 CURTAINS = "Theatre_Curtains"
 LIGHTS = "Theatre_Lights"
 CAMERAS = "Theatre_Cameras"
-COLLECTIONS = (ARCHITECTURE, STAIRS, MODULES, GRID, MASKING, CURTAINS, LIGHTS, CAMERAS)
+RIG = "Theatre_Rig"
+FIXTURES = "Theatre_Fixtures"
+COLLECTIONS = (ARCHITECTURE, STAIRS, MODULES, GRID, MASKING, CURTAINS, LIGHTS, CAMERAS, RIG, FIXTURES)
 
 MATERIAL_COLORS: dict[str, tuple[float, float, float, float]] = {
     "TS_Enclosure": (0.35, 0.03, 0.05, 1.0),
@@ -44,6 +51,7 @@ MATERIAL_COLORS: dict[str, tuple[float, float, float, float]] = {
     "TS_Module": (0.04, 0.035, 0.03, 1.0),
     "TS_Grid": (0.10, 0.10, 0.11, 1.0),
     "TS_Batten": (0.10, 0.10, 0.11, 1.0),
+    "TS_Truss": (0.08, 0.08, 0.09, 1.0),
     "TS_Masking": (0.01, 0.01, 0.01, 1.0),
     "TS_MainCurtain": (0.40, 0.02, 0.03, 1.0),
     "TS_Cyclorama": (0.90, 0.90, 0.90, 1.0),
@@ -63,6 +71,7 @@ MATERIAL_LABELS: dict[str, str] = {
     "TS_Module": "Modules",
     "TS_Grid": "Gril",
     "TS_Batten": "Porteuses",
+    "TS_Truss": "Pylônes (truss)",
     "TS_Masking": "Pendrillons, frises, fond",
     "TS_MainCurtain": "Rideau de scène",
     "TS_Cyclorama": "Cyclorama",
@@ -151,6 +160,7 @@ class Layout:
     clearances: tuple[tuple[str, tuple], ...] = ()
     root_collection: str = ROOT_COLLECTION
     materials: Mapping = field(default_factory=lambda: dict(MATERIAL_COLORS))
+    rig: Rig | None = None
 
     def find(self, name: str):
         for item in self.objects + self.lights + self.cameras:
@@ -947,8 +957,13 @@ def haze_view_range(layout: Layout) -> tuple[float, float] | None:
     return max(min(depths), 0.1), max(max(depths), 0.2)
 
 
-def compute_layout(params: Mapping | None = None) -> Layout:
-    """Full scene description for `params` (nested dict, validated and clamped)."""
+def compute_layout(params: Mapping | None = None, library: Library | None = None) -> Layout:
+    """Full scene description for `params` (nested dict, validated and clamped).
+
+    `library` supplies the fiches of the lighting rig; None reads the shipped library.
+    """
+    from .rig import compute_rig, default_library  # rig.py imports this module
+
     ctx, warnings = _make_context(params)
     objects, lights, cameras, clearances = [], [], [], []
     for family in FAMILIES:
@@ -958,6 +973,9 @@ def compute_layout(params: Mapping | None = None) -> Layout:
         cameras.extend(part.cameras)
         clearances.extend(part.clearances)
         warnings.extend(part.warnings)
+    rig, rig_part = compute_rig(ctx, default_library() if library is None else library)
+    objects.extend(rig_part.objects)
+    warnings.extend(rig_part.warnings)
     masking_battens = sum(1 for o in objects if o.name.startswith("MaskingBatten_"))
     derived = Derived(
         total_width=ctx.Wt, cage_width=ctx.Wk, frame_opening=ctx.Wc, cage_front_y=ctx.Yc, side_zone=ctx.Z,
@@ -968,4 +986,4 @@ def compute_layout(params: Mapping | None = None) -> Layout:
         border_bottoms=ctx.sight.derived_bottoms, visible_depths=ctx.sight.depths,
     )
     return Layout(tuple(objects), tuple(lights), tuple(cameras), derived, tuple(warnings),
-                  clearances=tuple(clearances))
+                  clearances=tuple(clearances), rig=rig)

@@ -1,0 +1,47 @@
+version: 1
+id: rig_profile_motor
+manufacturer: Test
+model: Synthetic motorised profile
+family: profile
+sources:
+  - {kind: datasheet, url: "https://example.org/profile2.pdf", note: synthetic}
+physical:
+  weight: 9.0
+  dimensions: {width: 0.30, depth: 0.60, height: 0.45}
+  mount: {hook_height: 0.04, tilt_axis_height: 0.30}
+optics:
+  beam_type: profile
+  lens_diameter: 0.19
+  lens_offset: 0.40
+  flux: 9000
+  lens_tubes:
+    - {name: "30", beam_angle: 26, field_angle: 30, lens_diameter: null, ies: null}
+    - {name: "90", beam_angle: 75, field_angle: 90, lens_diameter: null, ies: null}
+colour: {systems: [cct], cct_range: {min: 2000, max: 8000}}
+motion: {type: static}
+blades:
+  count: 4
+  mode: motorised
+  gate_from_lens: 0.275
+  span: 0.10
+  travel: {open: 0.045, closed: -0.040}
+  sides: [0, 90, 180, 270]
+  angle_limit: 20
+  rotation: {min: -60, max: 60, invert: true}
+modes:
+  - name: Full
+    footprint: 11
+    channels:
+      - {offset: 1, attribute: dimmer, bits: 8, default: 0}
+      - {offset: 2, attribute: cct, bits: 8, default: 0}
+      - {offset: 3, attribute: blade_1a, bits: 8, default: 0}
+      - {offset: 4, attribute: blade_1b, bits: 8, default: 0}
+      - {offset: 5, attribute: blade_2a, bits: 8, default: 0}
+      - {offset: 6, attribute: blade_2b, bits: 8, default: 0}
+      - {offset: 7, attribute: blade_3a, bits: 8, default: 0}
+      - {offset: 8, attribute: blade_3b, bits: 8, default: 0}
+      - {offset: 9, attribute: blade_4a, bits: 8, default: 0}
+      - {offset: 10, attribute: blade_4b, bits: 8, default: 0}
+      - {offset: 11, attribute: blade_rot, bits: 8, default: 128}
+default_mode: Full
+model3d: {kind: procedural, shape: profile, body: {width: 0.3, depth: 0.3, height: 0.3}, barrel: {diameter: 0.2, length: 0.3}}

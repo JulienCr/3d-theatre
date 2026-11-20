@@ -12,7 +12,8 @@ import zlib
 from dataclasses import dataclass
 
 from .primitives import (
-    Box, FlatSurface, HorizontalFace, Panel, PleatedSurface, PleatState, Prism, SlatGrid, Tube,
+    Box, FlatSurface, HorizontalFace, Panel, PleatedSurface, PleatState, Prism, SlatGrid, Truss,
+    Tube,
 )
 
 PLEAT_SAMPLES = 8
@@ -29,6 +30,10 @@ DRIFT_WIDTH_RATIO = 0.25
 DRIFT_WAVES = 2.4 * math.pi
 CREST_FLATTEN = 0.15
 CREST_NORM = 0.86
+PLATE_THICKNESS = 0.02
+POST_RADIUS = 0.025
+BRACE_RADIUS = 0.012
+FRAME_PITCH = 0.50
 MAX_DEPTH_FACTOR = (1 + DEPTH_JITTER) * (1 + OPEN_GROWTH) * (1 + HEM_FLARE)
 
 
@@ -161,6 +166,34 @@ def _tube_mesh(tube: Tube) -> Mesh:
         j = (i + 1) % n
         mid = [radial[i][k] + radial[j][k] for k in range(3)]
         b.face([ring0[i], ring0[j], ring1[j], ring1[i]], mid)
+    return b.result()
+
+
+def _truss_mesh(truss: Truss) -> Mesh:
+    """Plate, four posts, a horizontal frame every `FRAME_PITCH` and one diagonal per face and bay."""
+    b = _Builder()
+    cx, cy = truss.center
+    half = truss.base / 2
+    _add_box(b, (cx - half, cy - half, 0.0), (cx + half, cy + half, PLATE_THICKNESS))
+    inset = truss.size / 2 - POST_RADIUS
+    corners = [(cx + sx * inset, cy + sy * inset) for sx, sy in ((-1, -1), (1, -1), (1, 1), (-1, 1))]
+    steps = int(truss.height / FRAME_PITCH + 1e-9)
+    top = truss.height - 2 * BRACE_RADIUS
+    levels = [PLATE_THICKNESS] + [FRAME_PITCH * k for k in range(1, steps + 1)
+                                  if FRAME_PITCH * k < top - 1e-9] + [top]
+    tubes = [Tube("", "", "", (*c, PLATE_THICKNESS), (*c, truss.height), POST_RADIUS, 12)
+             for c in corners]
+    for z in levels[1:]:
+        tubes += [Tube("", "", "", (*c, z), (*corners[(i + 1) % 4], z), BRACE_RADIUS, 6)
+                  for i, c in enumerate(corners)]
+    for z0, z1 in zip(levels, levels[1:]):
+        tubes += [Tube("", "", "", (*c, z0), (*corners[(i + 1) % 4], z1), BRACE_RADIUS, 6)
+                  for i, c in enumerate(corners)]
+    for tube in tubes:
+        mesh = _tube_mesh(tube)
+        base = len(b.vertices)
+        b.vertices.extend(mesh.vertices)
+        b.faces.extend(tuple(i + base for i in face) for face in mesh.faces)
     return b.result()
 
 
@@ -338,6 +371,8 @@ def build_mesh(primitive) -> Mesh:
         return _panel_mesh(primitive)
     if isinstance(primitive, Tube):
         return _tube_mesh(primitive)
+    if isinstance(primitive, Truss):
+        return _truss_mesh(primitive)
     if isinstance(primitive, SlatGrid):
         return _slat_mesh(primitive)
     if isinstance(primitive, PleatedSurface):

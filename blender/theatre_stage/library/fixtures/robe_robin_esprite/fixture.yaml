@@ -38,7 +38,8 @@ motion:
     max: 270.0
   tilt:
     min: -131.8
-    max: 131.8   # GDTF 263.6 deg (DMX 0 = +131.8, inverted); manual and datasheet say 265; sign versus spec 13.9 unchecked
+    max: 131.8   # GDTF 263.6 deg (DMX 0 = +131.8); manual and datasheet say 265; sign versus spec 13.9 unchecked
+    invert: true
 blades:
   count: 4
   mode: motorised
@@ -49,7 +50,8 @@ blades:
   angle_limit: 30          # manual and GDTF: swivel +-30 deg per blade
   rotation:
     min: -60.0
-    max: 60.0              # GDTF DMX 0 = +60 (inverted)
+    max: 60.0              # GDTF ShaperRot, DMX 0 = +60
+    invert: true
 gobos:
   wheels:
     - name: gobo1

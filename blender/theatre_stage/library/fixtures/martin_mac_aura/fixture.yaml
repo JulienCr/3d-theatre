@@ -36,8 +36,8 @@ colour:
 
 motion:
   type: moving
-  pan: {min: -270, max: 270}   # manual p.33: 540 deg; GDTF maps DMX 0 to +270 (inverted), sign versus spec 13.9 unchecked
-  tilt: {min: -116, max: 116}  # manual p.33: 232 deg; GDTF maps DMX 0 to +116 (inverted), sign versus spec 13.9 unchecked
+  pan: {min: -270, max: 270, invert: true}   # manual p.33: 540 deg; GDTF maps DMX 0 to +270; sign versus spec 13.9 unchecked
+  tilt: {min: -116, max: 116, invert: true}  # manual p.33: 232 deg; GDTF maps DMX 0 to +116; sign versus spec 13.9 unchecked
 
 strobe:
   open: [20, 24]

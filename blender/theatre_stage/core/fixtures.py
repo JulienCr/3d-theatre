@@ -45,12 +45,21 @@ def is_known_attribute(attribute: str) -> bool:
 
 @dataclass(frozen=True)
 class Range:
+    """`invert` (pan, tilt, blade_rot only): DMX 0 is `max`, so `v` reads as `1 - v`."""
+
     min: float
     max: float
+    invert: bool = False
 
     def lerp(self, v: float) -> float:
         """`min + v * (max - min)`: how pan, tilt, zoom, cct and blade_rot read `v`."""
-        return self.min + v * (self.max - self.min)
+        return self.min + (1.0 - v if self.invert else v) * (self.max - self.min)
+
+    def fraction(self, value: float) -> float:
+        """Inverse of `lerp`: the normalized `v` that reads as `value` (0 for an empty range)."""
+        span = self.max - self.min
+        v = (value - self.min) / span if span else 0.0
+        return 1.0 - v if self.invert else v
 
 
 @dataclass(frozen=True)
@@ -473,18 +482,19 @@ class _Parser:
             return None
         return values[0], values[1]
 
-    def range(self, data, key, prefix, required=True, lo=None) -> Range | None:
+    def range(self, data, key, prefix, required=True, lo=None, invertible=False) -> Range | None:
         node = self.mapping(data, key, prefix, required)
         if node is None:
             return None
         inner = f"{prefix}{key}."
+        invert = self.boolean(node, "invert", inner) if invertible else False
         lo_v, hi_v = (self.number(node, k, inner, True, lo=lo) for k in ("min", "max"))
         if lo_v is None or hi_v is None:
             return None
         if lo_v > hi_v:
             self.fail(f"{prefix}{key}", f"min ({lo_v:g}) doit être inférieur ou égal à max ({hi_v:g}).")
             return None
-        return Range(lo_v, hi_v)
+        return Range(lo_v, hi_v, invert)
 
     def file(self, relative: str | None, path: str, suffixes=None) -> None:
         if relative is None:
@@ -656,8 +666,8 @@ def _parse_motion(p: _Parser, data, hazer: bool) -> Motion | None:
         return None
     kind = p.text(node, "type", "motion.", choices=("moving", "static"))
     moving = kind == "moving"
-    pan = p.range(node, "pan", "motion.", required=moving)
-    tilt = p.range(node, "tilt", "motion.", required=moving)
+    pan = p.range(node, "pan", "motion.", required=moving, invertible=True)
+    tilt = p.range(node, "tilt", "motion.", required=moving, invertible=True)
     return Motion(kind, pan, tilt) if kind else None
 
 
@@ -685,7 +695,7 @@ def _parse_blades(p: _Parser, data) -> Blades | None:
             p.fail("blades.sides", "les quatre angles doivent être distincts.")
         else:
             clean_sides = tuple(float(v) for v in sides)
-    rotation = p.range(node, "rotation", pre, required=mode == "motorised")
+    rotation = p.range(node, "rotation", pre, required=mode == "motorised", invertible=True)
     if None in (count, mode, gate, span, limit, travel) or not clean_sides:
         return None
     return Blades(count, mode, gate, span, travel, clean_sides, limit, rotation)
