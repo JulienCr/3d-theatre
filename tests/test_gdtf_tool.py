@@ -1,6 +1,7 @@
 import struct
 import sys
 import zipfile
+from xml.etree import ElementTree
 from pathlib import Path
 
 import pytest
@@ -231,3 +232,28 @@ def test_yaml_emitter_round_trips_awkward_scalars():
     text = tool.to_yaml(document)
     assert yaml.safe_load(text) == document
     assert "d: null  # " in text
+
+
+def test_ctc_functions_with_several_physical_values_become_a_linear_curve(converted):
+    _, out = converted
+    document = yaml.safe_load((out / "fixture.yaml").read_text(encoding="utf-8"))
+    full = next(m for m in document["modes"] if m["name"] == "Full")["channels"]
+    cct = next(c for c in full if c["attribute"] == "cct")
+    assert cct["curve"] == [[0, 6500], [round(19 / 255, 6), 6500], [round(20 / 255, 6), 10000], [1, 2500]]
+    assert "curve_mode" not in cct
+    assert all("curve" not in c for c in full if c["attribute"] != "cct")
+
+
+def test_discrete_channel_sets_with_physical_values_become_a_step_curve():
+    sets = "".join(f'<ChannelSet DMXFrom="{start}/1" Name="S{start}" PhysicalFrom="{kelvin}"/>'
+                   for start, kelvin in ((0, 3200), (100, 5600), (200, 8000)))
+    element = ElementTree.fromstring(channel("1", "Head", "CTC", (
+        f'<ChannelFunction Name="CTC" Attribute="CTC" DMXFrom="0/1" Default="0/1">{sets}</ChannelFunction>')))
+    curve, mode = tool._curve(tool._read_channel(element))
+    assert mode == "step"
+    assert curve == [[0, 3200], [round(100 / 255, 6), 5600], [round(200 / 255, 6), 8000]]
+
+
+def test_a_single_physical_range_gives_no_curve():
+    element = ElementTree.fromstring(channel("1", "Head", "Zoom", function("Zoom", "Zoom", "0/1", "0/1", "40", "8")))
+    assert tool._curve(tool._read_channel(element)) is None

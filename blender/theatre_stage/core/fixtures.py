@@ -81,6 +81,25 @@ class Physical:
 
 
 @dataclass(frozen=True)
+class LensTube:
+    """A fixed lens. `lens_diameter` and `ies` are None when the tube has no own value."""
+
+    name: str
+    beam_angle: float
+    field_angle: float
+    lens_diameter: float | None
+    ies: str | None
+
+
+@dataclass(frozen=True)
+class IesProfile:
+    """`field_angle` is None for the single profile of a fixture without zoom."""
+
+    field_angle: float | None
+    file: str
+
+
+@dataclass(frozen=True)
 class Optics:
     beam_type: str
     lens_diameter: float
@@ -88,9 +107,13 @@ class Optics:
     flux: float
     field_angle: Range | None
     beam_angle: Range | None
-    lens_tubes: tuple[float, ...]
+    lens_tubes: tuple[LensTube, ...]
     zoom_invert: bool
-    ies: str | None
+    ies: tuple[IesProfile, ...]
+
+    def aperture(self, tube: LensTube | None = None) -> float:
+        """Lens diameter of `tube`, falling back to `lens_diameter`."""
+        return self.lens_diameter if tube is None or tube.lens_diameter is None else tube.lens_diameter
 
 
 @dataclass(frozen=True)
@@ -178,6 +201,24 @@ class Channel:
     bits: int
     default: int
     fine: int | None
+    curve: tuple[tuple[float, float], ...] = ()
+    curve_mode: str = "linear"
+
+    def physical(self, v: float, default: Range | None = None) -> float:
+        """Physical value of the normalized `v`: the DMX curve, else `default.lerp(v)` (spec 12.3).
+
+        Outside the curve, the nearest end value holds. `step` keeps each value until the next point.
+        """
+        if not self.curve:
+            if default is None:
+                raise ValueError(f"{self.attribute} : ni courbe ni plage pour convertir la valeur.")
+            return default.lerp(v)
+        if v <= self.curve[0][0]:
+            return self.curve[0][1]
+        for (x0, y0), (x1, y1) in zip(self.curve, self.curve[1:]):
+            if v < x1:
+                return y0 if self.curve_mode == "step" else y0 + (v - x0) / (x1 - x0) * (y1 - y0)
+        return self.curve[-1][1]
 
     @property
     def offsets(self) -> tuple[int, ...]:
@@ -295,6 +336,16 @@ class Fixture:
 
     def channel(self, attribute: str, mode: str | None = None) -> Channel | None:
         return self.mode(mode).channel(attribute)
+
+    def ies_for(self, field_angle: float, tube: LensTube | None = None) -> str | None:
+        """IES file for a lens tube, else the profile nearest `field_angle`, else None."""
+        if tube is not None:
+            return tube.ies
+        profiles = self.optics.ies if self.optics else ()
+        known = [q for q in profiles if q.field_angle is not None]
+        if known:
+            return min(known, key=lambda q: abs(q.field_angle - field_angle)).file
+        return profiles[0].file if profiles else None
 
     def path(self, relative: str) -> Path:
         """Absolute path of a file cited by the sheet (relative to its folder)."""
@@ -503,24 +554,70 @@ def _parse_optics(p: _Parser, data, hazer: bool) -> Optics | None:
     elif not has_field and not has_tubes:
         p.fail("optics.field_angle", "obligatoire (zoom) ; sinon lens_tubes (lentilles fixes).")
     beam = p.range(node, "beam_angle", pre, required=beam_type == "wash", lo=0)
-    ies = p.text(node, "ies", pre, required=False)
-    p.file(ies, "optics.ies")
+    ies = _parse_ies(p, node)
     invert = p.boolean(node, "zoom_invert", pre)
     if None in (beam_type, diameter, offset, flux):
         return None
     return Optics(beam_type, diameter, offset, flux, field, beam, tubes, invert, ies)
 
 
-def _parse_tubes(p: _Parser, node) -> tuple[float, ...]:
+def _parse_ies(p: _Parser, node) -> tuple[IesProfile, ...]:
+    raw = node.get("ies")
+    if raw is None:
+        return ()
+    if isinstance(raw, str):
+        p.file(raw, "optics.ies")
+        return (IesProfile(None, raw),)
+    if not isinstance(raw, list) or not raw:
+        p.fail("optics.ies", "un chemin ou une liste {field_angle, file} est attendu.")
+        return ()
+    profiles = []
+    for index, item in enumerate(raw):
+        path = f"optics.ies[{index}]."
+        if not isinstance(item, Mapping):
+            p.fail(f"optics.ies[{index}]", "un dictionnaire {field_angle, file} est attendu.")
+            continue
+        angle = p.number(item, "field_angle", path, lo=0, strict_lo=True)
+        file = p.text(item, "file", path)
+        p.file(file, f"{path}file")
+        if angle is not None and file:
+            profiles.append(IesProfile(angle, file))
+    angles = [q.field_angle for q in profiles]
+    if len(set(angles)) != len(angles):
+        p.fail("optics.ies", "deux profils ont le même field_angle.")
+    return tuple(profiles)
+
+
+def _parse_tubes(p: _Parser, node) -> tuple[LensTube, ...]:
     values = p.sequence(node, "lens_tubes", "optics.", required=False)
     if values is None:
         return ()
-    if not values or not all(_is_number(v) and v > 0 for v in values):
-        p.fail("optics.lens_tubes", "une liste de champs positifs est attendue.")
+    if not values:
+        p.fail("optics.lens_tubes", "au moins un tube est attendu.")
         return ()
-    if any(b <= a for a, b in zip(values, values[1:])):
-        p.fail("optics.lens_tubes", "les tubes doivent être triés par angle croissant, sans doublon.")
-    return tuple(float(v) for v in values)
+    tubes = []
+    for index, item in enumerate(values):
+        path = f"optics.lens_tubes[{index}]."
+        if not isinstance(item, Mapping):
+            p.fail(f"optics.lens_tubes[{index}]",
+                   "un dictionnaire {name, beam_angle, field_angle, lens_diameter, ies} est attendu.")
+            continue
+        name = p.text(item, "name", path)
+        beam = p.number(item, "beam_angle", path, lo=0, strict_lo=True)
+        field = p.number(item, "field_angle", path, lo=0, strict_lo=True)
+        diameter = p.number(item, "lens_diameter", path, required=False, lo=0, strict_lo=True)
+        ies = p.text(item, "ies", path, required=False)
+        p.file(ies, f"{path}ies")
+        if beam is not None and field is not None and beam > field:
+            p.fail(path.rstrip("."), f"beam_angle ({beam:g}) doit être inférieur ou égal à field_angle ({field:g}).")
+        elif name and beam is not None and field is not None:
+            tubes.append(LensTube(name, beam, field, diameter, ies))
+    names = [t.name for t in tubes]
+    for name in {n for n in names if names.count(n) > 1}:
+        p.fail("optics.lens_tubes", f"tube « {name} » déclaré deux fois.")
+    if any(b.field_angle < a.field_angle for a, b in zip(tubes, tubes[1:])):
+        p.fail("optics.lens_tubes", "les tubes doivent être triés par field_angle croissant.")
+    return tuple(tubes)
 
 
 def _parse_colour(p: _Parser, data) -> Colour:
@@ -685,9 +782,34 @@ def _parse_channel(p: _Parser, item, path: str, footprint: int | None) -> Channe
             return None
     elif bits == 8 and item.get("fine") is not None:
         p.fail(f"{path}fine", "réservé aux canaux 16 bits.")
+    curve, mode = _parse_curve(p, item, path)
     if None in (offset, attribute, bits, default):
         return None
-    return Channel(offset, attribute, bits, default, fine)
+    return Channel(offset, attribute, bits, default, fine, curve, mode)
+
+
+def _parse_curve(p: _Parser, item, path: str) -> tuple[tuple[tuple[float, float], ...], str]:
+    mode = p.text(item, "curve_mode", path, required=False, choices=("linear", "step")) or "linear"
+    points = p.sequence(item, "curve", path, required=False)
+    if points is None:
+        if item.get("curve_mode") is not None:
+            p.fail(f"{path}curve_mode", "réservé aux canaux qui ont une courbe.")
+        return (), "linear"
+    clean = []
+    for k, point in enumerate(points):
+        if not (isinstance(point, list) and len(point) == 2 and all(_is_number(v) for v in point)):
+            p.fail(f"{path}curve[{k}]", "une paire [dmx, valeur] est attendue.")
+        elif not 0 <= point[0] <= 1:
+            p.fail(f"{path}curve[{k}]", "dmx normalisé entre 0 et 1 attendu.")
+        else:
+            clean.append((float(point[0]), float(point[1])))
+    if len(clean) != len(points):
+        return (), mode
+    if len(clean) < 2:
+        p.fail(f"{path}curve", "au moins deux points sont attendus.")
+    elif any(b[0] <= a[0] for a, b in zip(clean, clean[1:])):
+        p.fail(f"{path}curve", "le dmx doit être strictement croissant.")
+    return tuple(clean), mode
 
 
 def _parse_mode(p: _Parser, item, index: int) -> Mode | None:

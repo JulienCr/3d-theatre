@@ -27,6 +27,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "blender" / "the
 from core import meshio  # noqa: E402
 from core.meshes import Mesh  # noqa: E402
 
+CURVE_ATTRIBUTES = ("cct", "cto", "zoom")
+
 ATTRIBUTE_MAP = {
     "Dimmer": "dimmer", "Pan": "pan", "Tilt": "tilt", "Zoom": "zoom",
     "ColorAdd_R": "color_r", "ColorAdd_G": "color_g", "ColorAdd_B": "color_b", "ColorAdd_W": "color_w",
@@ -100,6 +102,7 @@ class _Function:
     phys_to: float | None
     wheel: str | None
     slots: list[tuple[int, str, int, int]]  # (wheel slot index, name, from, to)
+    set_values: list[tuple[int, float]] = field(default_factory=list)  # (set start, PhysicalFrom)
 
 
 @dataclass
@@ -134,9 +137,11 @@ def _read_channel(element) -> _Channel | None:
         for k, item in enumerate(sets):
             end = (set_starts[k + 1] - 1) if k + 1 < len(sets) else stop
             slots.append((int(item.get("WheelSlotIndex") or 0), item.get("Name") or "", set_starts[k], end))
+        set_values = [(set_starts[k], v) for k, item in enumerate(sets)
+                      if (v := _float(item.get("PhysicalFrom"))) is not None]
         functions.append(_Function(
             raw.get("Attribute") or "", raw.get("Name") or "", start, stop,
-            _float(raw.get("PhysicalFrom")), _float(raw.get("PhysicalTo")), raw.get("Wheel"), slots))
+            _float(raw.get("PhysicalFrom")), _float(raw.get("PhysicalTo")), raw.get("Wheel"), slots, set_values))
     default = _dmx_value(element.get("Default"), size)
     if default is None:
         wanted = (element.get("InitialFunction") or "").split(".")[-1]
@@ -145,6 +150,23 @@ def _read_channel(element) -> _Channel | None:
         default = _dmx_value(initial.get("Default"), size) if initial is not None else None
     return _Channel(offsets, element.get("Geometry") or "", logical.get("Attribute") or "",
                     default or 0, functions)
+
+
+def _curve(channel: _Channel) -> tuple[list[list[float]], str] | None:
+    """`[dmx, value]` points of a channel whose functions or sets carry several physical values."""
+    top = 256 ** min(channel.size, 2) - 1
+    sets = [pair for f in channel.functions for pair in f.set_values]
+    if len(sets) >= 2:
+        points, mode = [[start / top, value] for start, value in sets], "step"
+    else:
+        ranges = [f for f in channel.functions if f.phys_from is not None and f.phys_to is not None]
+        if len(ranges) < 2:
+            return None
+        points = [[x / top, v] for f in ranges for x, v in ((f.start, f.phys_from), (f.stop, f.phys_to))]
+        mode = "linear"
+    if any(b[0] <= a[0] for a, b in zip(points, points[1:])):
+        return None
+    return [[round(x, 6), v] for x, v in points], mode
 
 
 def _mode_channels(mode) -> list[_Channel]:
@@ -173,6 +195,11 @@ def _name_channels(channels: list[_Channel], warnings: list[str]) -> list[dict]:
                  "bits": 16 if channel.size >= 2 else 8, "default": channel.default}
         if channel.size >= 2:
             entry["fine"] = channel.offsets[1]
+        curve = _curve(channel) if name in CURVE_ATTRIBUTES else None
+        if curve:
+            entry["curve"], mode = curve
+            if mode == "step":
+                entry["curve_mode"] = mode
         out.append(entry)
     return out
 
@@ -249,7 +276,8 @@ def _is_flat(value) -> bool:
     """True for a list of scalars or a dict of scalars and lists of scalars (one-line flow style)."""
     if isinstance(value, dict):
         return all(not isinstance(v, dict) and (not isinstance(v, list) or _is_flat(v)) for v in value.values())
-    return isinstance(value, list) and all(not isinstance(v, (dict, list)) for v in value)
+    return isinstance(value, list) and all(
+        not isinstance(v, dict) and (not isinstance(v, list) or _is_flat(v)) for v in value)
 
 
 def _flow(value) -> str:

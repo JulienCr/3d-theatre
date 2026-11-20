@@ -59,7 +59,17 @@ optics:
   field_angle: {min: 13.0, max: 54.4}   # 10% angle, photometric report (min zoom / max zoom)
   beam_angle: {min: 8.5, max: 31.0}     # 50% angle, photometric report
   zoom_invert: false
-  ies: null                # one IES per zoom position in ies/; the schema holds a single path
+  # one IES per zoom DMX position; field_angle = full angle at 10% of peak measured on each file
+  ies:
+    - {field_angle: 13.1, file: ies/t15_pc_zoom_255.ies}
+    - {field_angle: 13.9, file: ies/t15_pc_zoom_224.ies}
+    - {field_angle: 18.0, file: ies/t15_pc_zoom_192.ies}
+    - {field_angle: 23.7, file: ies/t15_pc_zoom_160.ies}
+    - {field_angle: 29.1, file: ies/t15_pc_zoom_128.ies}
+    - {field_angle: 35.0, file: ies/t15_pc_zoom_96.ies}
+    - {field_angle: 41.3, file: ies/t15_pc_zoom_64.ies}
+    - {field_angle: 47.7, file: ies/t15_pc_zoom_32.ies}
+    - {field_angle: 54.5, file: ies/t15_pc_zoom_0.ies}
 
 colour:
   systems: [cct]

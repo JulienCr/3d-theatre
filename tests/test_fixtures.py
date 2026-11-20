@@ -104,6 +104,21 @@ def setter(path, value):
     return mutate
 
 
+def tube(name, beam, field, diameter=None, ies=None):
+    return {"name": name, "beam_angle": beam, "field_angle": field, "lens_diameter": diameter, "ies": ies}
+
+
+def with_tubes(*tubes):
+    def mutate(d):
+        d["optics"].pop("field_angle")
+        d["optics"]["lens_tubes"] = list(tubes)
+    return mutate
+
+
+def with_curve(points, **extra):
+    return lambda d: d["modes"][0]["channels"][2].update(curve=points, **extra)
+
+
 INVALID = {
     "missing top-level key": (drop("manufacturer"), "manufacturer"),
     "null mandatory key": (setter("physical.mount.hook_height", None), "physical.mount.hook_height"),
@@ -129,10 +144,22 @@ INVALID = {
     "duplicate mode name": (setter("modes.1.name", "Standard"), "deux fois"),
     "attribute twice in a mode": (setter("modes.0.channels.4.attribute", "dimmer"), "présent deux fois"),
     "unknown attribute with a space": (setter("modes.0.channels.6.attribute", "Prism 1"), "attribute"),
-    "lens tubes unsorted": (lambda d: (d["optics"].pop("field_angle"),
-                                      d["optics"].update(lens_tubes=[10, 5, 20])), "triés"),
-    "lens tubes duplicated": (lambda d: (d["optics"].pop("field_angle"),
-                                        d["optics"].update(lens_tubes=[10, 10])), "triés"),
+    "lens tubes unsorted": (with_tubes(tube("10", 9, 10), tube("5", 4, 5)), "triés"),
+    "lens tube names duplicated": (with_tubes(tube("5", 4, 5), tube("5", 8, 10)), "déclaré deux fois"),
+    "lens tube beam above field": (with_tubes(tube("5", 6, 5)), "beam_angle"),
+    "lens tube is a bare number": (lambda d: (d["optics"].pop("field_angle"),
+                                              d["optics"].update(lens_tubes=[5, 10])), "dictionnaire"),
+    "lens tube ies missing": (with_tubes(tube("5", 4, 5, ies="ies/none.ies")), "introuvable"),
+    "ies profiles share a field angle": (setter("optics.ies", [{"field_angle": 10, "file": "gobos/g1.png"},
+                                                              {"field_angle": 10, "file": "gobos/g1.png"}]),
+                                         "même field_angle"),
+    "ies profile file missing": (setter("optics.ies", [{"field_angle": 10, "file": "ies/none.ies"}]), "introuvable"),
+    "curve with one point": (with_curve([[0, 1]]), "au moins deux points"),
+    "curve not increasing": (with_curve([[0, 1], [0.5, 2], [0.5, 3]]), "strictement croissant"),
+    "curve dmx above 1": (with_curve([[0, 1], [1.5, 2]]), "entre 0 et 1"),
+    "curve point is not a pair": (with_curve([[0, 1, 2], [1, 2]]), "paire"),
+    "curve_mode unknown": (with_curve([[0, 1], [1, 2]], curve_mode="cubic"), "curve_mode"),
+    "curve_mode without a curve": (setter("modes.0.channels.2.curve_mode", "step"), "réservé"),
     "blade sides not distinct": (setter("blades.sides", [0, 90, 180, 90]), "distincts"),
     "blade sides wrong count": (setter("blades.sides", [0, 90, 180]), "quatre"),
     "missing gobo image": (setter("gobos.wheels.0.slots.1.image", "gobos/none.png"), "introuvable"),
@@ -188,6 +215,98 @@ def test_errors_list_every_faulty_key_at_once():
     data["default_mode"] = "Nope"
     text = errors_of(data)
     assert "manufacturer" in text and "optics.flux" in text and "default_mode" in text
+
+
+# ------------------------------------------------------- optics and curves
+
+def tubed(*tubes, **optics):
+    data = raw()
+    data["optics"].pop("field_angle")
+    data["optics"].update(lens_tubes=list(tubes), **optics)
+    return data
+
+
+def test_lens_tubes_are_objects_with_their_own_angles_and_aperture():
+    fixture = F.validate_fixture(tubed(tube("5", 7.3, 8.7, 0.445, "gobos/g1.png"), tube("10", 10, 12),
+                                       lens_diameter=0.19), SHEET)
+    assert isinstance(fixture, F.Fixture)
+    five, ten = fixture.optics.lens_tubes
+    assert five == F.LensTube("5", 7.3, 8.7, 0.445, "gobos/g1.png")
+    assert ten.lens_diameter is None and ten.ies is None
+    assert fixture.optics.aperture(five) == 0.445
+    assert fixture.optics.aperture(ten) == fixture.optics.aperture() == 0.19
+
+
+def test_a_single_ies_path_is_one_profile_without_field_angle():
+    data = raw()
+    data["optics"]["ies"] = "gobos/g1.png"
+    fixture = F.validate_fixture(data, SHEET)
+    assert fixture.optics.ies == (F.IesProfile(None, "gobos/g1.png"),)
+    assert F.load_fixture(SHEET).optics.ies == ()
+    assert fixture.ies_for(30.0) == "gobos/g1.png"
+
+
+def test_ies_for_prefers_the_tube_then_the_nearest_zoom_profile(tmp_path):
+    folder = tmp_path / "test_mover"
+    shutil.copytree(SHEET, folder)
+    for name in ("narrow", "mid", "wide"):
+        (folder / f"{name}.ies").write_text("IESNA")
+    data = raw()
+    data["optics"]["ies"] = [{"field_angle": 10, "file": "narrow.ies"}, {"field_angle": 30, "file": "mid.ies"},
+                             {"field_angle": 50, "file": "wide.ies"}]
+    fixture = F.validate_fixture(data, folder)
+    assert (fixture.ies_for(12), fixture.ies_for(26), fixture.ies_for(80)) == ("narrow.ies", "mid.ies", "wide.ies")
+    assert fixture.ies_for(30, F.LensTube("5", 4, 5, None, "tube.ies")) == "tube.ies"
+    assert fixture.ies_for(30, F.LensTube("5", 4, 5, None, None)) is None
+    assert F.validate_fixture(raw(), SHEET).ies_for(30) is None
+
+
+def test_curve_is_parsed_and_defaults_to_linear():
+    data = raw()
+    data["modes"][0]["channels"][2].update(curve=[[0, 3200], [0.5, 2700], [1, 10000]])
+    fixture = F.validate_fixture(data, SHEET)
+    channel = fixture.mode().channels[2]
+    assert channel.curve == ((0.0, 3200.0), (0.5, 2700.0), (1.0, 10000.0)) and channel.curve_mode == "linear"
+    assert F.load_fixture(SHEET).mode().channels[2].curve == ()
+
+
+def stepped():
+    return F.Channel(1, "cct", 8, 0, None, ((0.0, 3200.0), (0.2, 1900.0), (0.8, 6000.0)), "step")
+
+
+def test_physical_without_a_curve_is_the_linear_range_mapping():
+    channel = F.Channel(1, "cct", 8, 0, None)
+    assert channel.physical(0.25, F.Range(2700, 8000)) == F.Range(2700, 8000).lerp(0.25)
+    with pytest.raises(ValueError):
+        channel.physical(0.25)
+
+
+def test_physical_linear_curve_interpolates_and_holds_the_ends():
+    channel = F.Channel(1, "cct", 8, 0, None, ((0.2, 1000.0), (0.6, 3000.0), (1.0, 3000.0)))
+    assert channel.physical(0.4) == pytest.approx(2000)
+    assert channel.physical(0.0) == 1000 and channel.physical(1.0) == 3000
+    assert channel.physical(0.8, F.Range(0, 1)) == 3000
+
+
+def test_physical_step_curve_holds_each_value_until_the_next_point():
+    channel = stepped()
+    assert (channel.physical(0.0), channel.physical(0.19), channel.physical(0.2)) == (3200, 3200, 1900)
+    assert (channel.physical(0.79), channel.physical(0.8), channel.physical(1.0)) == (1900, 6000, 6000)
+
+
+# ---------------------------------------------------------------- shipped
+
+SHIPPED = sorted(p for p in F.SHIPPED_DIR.iterdir() if (p / F.SHEET_NAME).is_file())
+
+
+def test_shipped_library_is_not_empty():
+    assert len(SHIPPED) >= 4
+
+
+@pytest.mark.parametrize("folder", SHIPPED, ids=lambda p: p.name)
+def test_every_shipped_sheet_validates(folder):
+    result = F.load_fixture(folder)
+    assert isinstance(result, F.Fixture), "; ".join(result)
 
 
 # ---------------------------------------------------------------- discovery
@@ -304,3 +423,16 @@ def test_cct_to_rgb_is_warm_below_6500_k_and_normalised():
     assert blue >= red
     r, g, b = F.cct_to_rgb(6500)
     assert abs(r - g) < 0.1 and abs(b - g) < 0.1
+
+
+def test_etc_fixtures_expose_per_tube_optics_and_the_stepped_cct_table():
+    for fixture_id in ("etc_s4led_s3_lustr_x8", "etc_s4led_s3_daylight_hdr"):
+        fixture = F.load_fixture(F.SHIPPED_DIR / fixture_id)
+        tubes = fixture.optics.lens_tubes
+        assert tubes[0].name == "5" and tubes[0].lens_diameter == 0.4445 and tubes[0].ies == "ies/xdlt_5.ies"
+        assert all(t.beam_angle <= t.field_angle for t in tubes)
+        cct = fixture.channel("cct", "Studio")
+        assert cct.physical(0 / 255) == 3200 and cct.physical(1 / 255) == pytest.approx(1900, abs=0.01)
+        assert cct.physical(165 / 255) == pytest.approx(6000, abs=0.01)
+        assert cct.physical(254 / 255) == pytest.approx(10450, abs=0.01)
+        assert fixture.channel("cct", "Studio 16bit").curve == cct.curve

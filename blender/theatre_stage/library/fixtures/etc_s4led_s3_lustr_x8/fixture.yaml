@@ -40,14 +40,25 @@ physical:
 
 optics:
   beam_type: profile
-  lens_diameter: 0.190     # datasheet "aperture size 6.25-17.5 in depending on lens tube"; 7.5 in (190 mm) for the 26/36/50/70 tubes, 355 mm for 10, 445 mm for 5
+  lens_diameter: 0.190     # default for the tubes with no own aperture; per-tube apertures in lens_tubes
   lens_offset: 0.392       # derived: 658 mm overall length minus 266 mm rear-to-pivot (datasheet drawing), shortest tube
   flux: 10889              # lm, datasheet maximum (best lens tube); per-tube values: see datasheet photometry page
-  lens_tubes: [5, 10, 14, 19, 26, 36, 50, 70]  # ETC nominal tube names; in the IES the nominal matches the 50% angle (5 deg tube: 7.3), the 10% field is 8.7 to 51.6
-  ies: null                # one IES per lens tube in ies/ (xdlt_<tube>.ies); the schema holds a single path
+  # beam/field: full angles at 50% / 10% of peak, measured on each tube's IES (C-planes averaged);
+  # aperture: datasheet XDLT lens table (inches), tube names are ETC nominal values
+  lens_tubes:
+    - {name: "5", beam_angle: 7.3, field_angle: 8.7, lens_diameter: 0.4445, ies: ies/xdlt_5.ies}  # 17.5 in
+    - {name: "10", beam_angle: 10.1, field_angle: 11.9, lens_diameter: 0.3556, ies: ies/xdlt_10.ies}  # 14 in
+    - {name: "14", beam_angle: 14.0, field_angle: 17.0, lens_diameter: 0.254, ies: ies/xdlt_14.ies}  # 10 in
+    - {name: "19", beam_angle: 17.5, field_angle: 20.1, lens_diameter: 0.254, ies: ies/xdlt_19.ies}  # 10 in
+    - {name: "26", beam_angle: 25.3, field_angle: 28.7, lens_diameter: 0.1905, ies: ies/xdlt_26.ies}  # 7.5 in
+    - {name: "36", beam_angle: 35.4, field_angle: 38.3, lens_diameter: 0.1905, ies: ies/xdlt_36.ies}  # 7.5 in
+    - {name: "50", beam_angle: 44.1, field_angle: 51.6, lens_diameter: 0.1905, ies: ies/xdlt_50.ies}  # 7.5 in
+    - {name: "70", beam_angle: 55.7, field_angle: 72.5, lens_diameter: 0.1905, ies: null}  # 7.5 in; estimated: no Lustr IES for the 70 tube, beam and field from the Daylight HDR 70 IES
 
 colour:
   systems: [emitters, cct, rgbw]
+  # cct curve (modes): 8-bit table of the ETC manual, 0 = 3200 K, 1-165 = 1900-6000 K in 25 K steps,
+  # 166-254 = 6050-10450 K in 50 K steps, 255 held; the 16-bit modes reuse it (estimated)
   cct_range: {min: 1900, max: 10450}  # manual DMX control table (CCT 1-165: 1900-6000 K, 166-254: 6050-10450 K); Studio/Expanded modes
   emitters:
     - {attribute: emitter_1, rgb: [0.35, 0.0, 0.0]}  # deep_red
@@ -97,7 +108,7 @@ modes:
     footprint: 11
     channels:
       - {offset: 1, attribute: dimmer, bits: 8, default: 0}
-      - {offset: 2, attribute: cct, bits: 8, default: 0}
+      - {offset: 2, attribute: cct, bits: 8, default: 0, curve: &etc_cct [[0, 3200], [0.003921569, 1900], [0.647058824, 6000], [0.650980392, 6050], [0.996078431, 10450], [1, 10450]]}
       - {offset: 3, attribute: tint, bits: 8, default: 0}
       - {offset: 4, attribute: tuning, bits: 8, default: 0}
       - {offset: 5, attribute: mix, bits: 8, default: 0}
@@ -111,7 +122,7 @@ modes:
     footprint: 7
     channels:
       - {offset: 1, attribute: dimmer, bits: 8, default: 0}
-      - {offset: 2, attribute: cct, bits: 8, default: 0}
+      - {offset: 2, attribute: cct, bits: 8, default: 0, curve: *etc_cct}
       - {offset: 3, attribute: tint, bits: 8, default: 0}
       - {offset: 4, attribute: tuning, bits: 8, default: 0}
       - {offset: 5, attribute: strobe, bits: 8, default: 0}
@@ -133,7 +144,7 @@ modes:
       - {offset: 1, attribute: hue, bits: 16, default: 0, fine: 2}
       - {offset: 3, attribute: saturation, bits: 8, default: 0}
       - {offset: 4, attribute: dimmer, bits: 8, default: 0}
-      - {offset: 5, attribute: cct, bits: 8, default: 0}
+      - {offset: 5, attribute: cct, bits: 8, default: 0, curve: *etc_cct}
       - {offset: 6, attribute: strobe, bits: 8, default: 0}
       - {offset: 7, attribute: curve, bits: 8, default: 0}
       - {offset: 8, attribute: fan, bits: 8, default: 0}
@@ -156,7 +167,7 @@ modes:
     footprint: 16
     channels:
       - {offset: 1, attribute: dimmer, bits: 16, default: 0, fine: 2}
-      - {offset: 3, attribute: cct, bits: 16, default: 0, fine: 4}
+      - {offset: 3, attribute: cct, bits: 16, default: 0, fine: 4, curve: *etc_cct}
       - {offset: 5, attribute: tint, bits: 8, default: 0}
       - {offset: 6, attribute: tuning, bits: 8, default: 0}
       - {offset: 7, attribute: mix, bits: 8, default: 0}
@@ -170,7 +181,7 @@ modes:
     footprint: 9
     channels:
       - {offset: 1, attribute: dimmer, bits: 16, default: 0, fine: 2}
-      - {offset: 3, attribute: cct, bits: 16, default: 0, fine: 4}
+      - {offset: 3, attribute: cct, bits: 16, default: 0, fine: 4, curve: *etc_cct}
       - {offset: 5, attribute: tint, bits: 8, default: 0}
       - {offset: 6, attribute: tuning, bits: 8, default: 0}
       - {offset: 7, attribute: strobe, bits: 8, default: 0}
@@ -182,7 +193,7 @@ modes:
       - {offset: 1, attribute: hue, bits: 16, default: 0, fine: 2}
       - {offset: 3, attribute: saturation, bits: 16, default: 0, fine: 4}
       - {offset: 5, attribute: dimmer, bits: 16, default: 0, fine: 6}
-      - {offset: 7, attribute: cct, bits: 16, default: 0, fine: 8}
+      - {offset: 7, attribute: cct, bits: 16, default: 0, fine: 8, curve: *etc_cct}
       - {offset: 9, attribute: strobe, bits: 8, default: 0}
       - {offset: 10, attribute: curve, bits: 8, default: 0}
       - {offset: 11, attribute: fan, bits: 8, default: 0}

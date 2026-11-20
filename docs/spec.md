@@ -1043,9 +1043,9 @@ obligatoire à `null` (laissée ainsi par l'outil GDTF) rend la fiche invalide.
 | `optics.flux` | lm | si pas `hazer` | flux total, pleine intensité, blanc |
 | `optics.field_angle` | `{min, max}` | si pas `lens_tubes` | angle de champ plein (bord à 10 %) aux deux extrémités du zoom, DMX ou mécanique ; un appareil sans zoom ni tubes donne `min` = `max` |
 | `optics.beam_angle` | `{min, max}` | si `wash` | angle de faisceau plein (50 %), mêmes extrémités |
-| `optics.lens_tubes` | liste d'angles de champ, strictement croissante | si pas `field_angle` | lentilles fixes ; exclusif de `field_angle` : exactement l'un des deux |
+| `optics.lens_tubes` | liste de `{name, beam_angle, field_angle, lens_diameter, ies}`, triée par `field_angle` croissant | si pas `field_angle` | lentilles fixes ; exclusif de `field_angle` : exactement l'un des deux. `name` : nom du tube, unique (nominal constructeur) ; `beam_angle` ≤ `field_angle`, angles pleins mesurés (50 % et 10 %) ; `lens_diameter` : m, `null` = `optics.lens_diameter` ; `ies` : chemin ou `null` |
 | `optics.zoom_invert` | booléen | non (`false`) | `false` : 0 = `min` ; `true` : 0 = `max` |
-| `optics.ies` | chemin | non | profil IES, Cycles seulement |
+| `optics.ies` | chemin, ou liste de `{field_angle, file}` | non | profil IES, Cycles seulement. Une liste donne un profil par position de zoom (`field_angle` : degrés, uniques) ; le profil d'un tube est `lens_tubes[].ies` |
 | `colour.systems` | liste parmi `rgbw`, `cmy`, `cto`, `cct`, `emitters` | non (vide = blanc fixe) | systèmes de couleur présents |
 | `colour.cct_range` | `{min, max}` K | si `cct` | plage de température de couleur |
 | `colour.cto_kelvin` | K | si `cto` | température de couleur du filtre CTO plein |
@@ -1069,11 +1069,16 @@ obligatoire à `null` (laissée ainsi par l'outil GDTF) rend la fiche invalide.
 | `qlc` | `{manufacturer, model, modes, verified}` | non | définition QLC+ équivalente (section 16.3) |
 
 Un mode : `{name, footprint, channels}`, `footprint` = nombre de canaux
-occupés. Un canal : `{offset, attribute, bits, default, fine}` :
+occupés. Un canal : `{offset, attribute, bits, default, fine, curve,
+curve_mode}` :
 `offset` à partir de 1 ; `attribute` du vocabulaire 12.3 ; `bits` 8 ou 16 ;
 `default` : octet (8 bits) ou entier 0–65535 (16 bits) ; `fine` : offset du
-canal fin si `bits` vaut 16 (défaut `offset + 1`). Les offsets d'un mode sont
-uniques et inférieurs ou égaux à `footprint`.
+canal fin si `bits` vaut 16 (défaut `offset + 1`) ; `curve` (facultatif) :
+liste de paires `[dmx, valeur]`, `dmx` normalisé 0–1 (indépendant de 8 ou 16
+bits), strictement croissant, deux points au moins ; `curve_mode` : `linear`
+(défaut, interpolation entre points) ou `step` (chaque valeur tenue jusqu'au
+point suivant). Les offsets d'un mode sont uniques et inférieurs ou égaux à
+`footprint`.
 
 `model3d` :
 
@@ -1099,6 +1104,12 @@ section 14.1).
 Identifiants anglais, valeur normalisée `v` dans [0, 1] (section 12.4). Un
 attribut absent du mode n'est tout simplement pas lu : l'appareil garde sa
 valeur neutre.
+
+**Courbe.** Un canal qui porte une `curve` (12.2) convertit `v` en valeur
+physique par cette courbe (`Channel.physical`) au lieu de la formule linéaire
+ci-dessous : c'est le cas d'un CCT 8 bits par paliers (0 = 3200 K chez ETC) ou
+d'un CTC inversé et non linéaire (Robe). Avant le premier point et après le
+dernier, la valeur de l'extrémité est tenue.
 
 | Attribut | Sens de `v` |
 |---|---|
@@ -1178,6 +1189,10 @@ blender/theatre_stage/library/fixtures/<id>/` (Python système, `zipfile` et
   géométrie de faisceau (`LuminousFlux`, `BeamRadius`), `optics.beam_type` ;
 - `gobos.wheels` : fentes, plages DMX, images extraites dans `gobos/` ;
 - `strobe`, `iris.min_ratio` d'après les fonctions de canal ;
+- `curve` d'un canal (`CTC`, `CTO`, `Zoom`...) dont les fonctions ou les jeux de
+  valeurs ont plusieurs valeurs physiques : paires `[début DMX normalisé,
+  valeur physique]`, `curve_mode: step` si les jeux sont discrets (au mieux,
+  à vérifier) ;
 - `model3d.kind: mesh` : fichiers de `Models` placés dans `meshes/`, `offset`
   d'après l'arbre de géométries (translation seule, relative à la pièce
   parente) ; `physical.weight` d'après `Properties/Weight`, et
@@ -1229,10 +1244,11 @@ la géométrie des lames (`gate_from_lens`, `span`, `travel`, `sides`,
 ### 12.7 Validation
 
 `core/fixtures.py` rend, pour chaque fiche, un objet figé ou une liste
-d'erreurs en français. Contrôles : clés obligatoires (conditions du tableau
+d'erreurs en français. `Fixture.ies_for(field_angle, tube)` donne le fichier IES
+du tube, sinon celui du profil de zoom le plus proche, sinon `None`. Contrôles : clés obligatoires (conditions du tableau
 12.2) ; `id` égal au nom du dossier ; offsets uniques et ≤ `footprint` ; canaux
 16 bits dont `fine` est libre ; `default_mode` existant ; `min` ≤ `max` ;
-`lens_tubes` triés et sans doublon ; `blades.sides` à quatre angles distincts ;
+`lens_tubes` triés par `field_angle`, noms uniques, `beam_angle` ≤ `field_angle` ; `curve` d'au moins deux points, `dmx` strictement croissant dans [0, 1] ; `ies` en liste : `field_angle` uniques ; `blades.sides` à quatre angles distincts ;
 un attribut du vocabulaire n'apparaît qu'une fois par mode (sauf attributs
 inconnus) ; exactement l'un de `field_angle` et `lens_tubes` ; au moins une
 source ; fichiers cités présents (images de gobos, maillages, IES, sources
@@ -1396,11 +1412,12 @@ Normale du plan : `n = (Q − S) × u / |(Q − S) × u|`, orientée vers le cô
    `c = n₁ × n₂` pour les couples (bas, gauche), (bas, droite), (haut,
    gauche), (haut, droite), signe tel que `c·a > 0`.
    `F_req = 2·max_k angle(a, c_k)`.
-2. Tube = le plus petit de `lens_tubes` qui vérifie `tube ≥ 1,05·F_req`
-   *(choix : marge de 5 %)*. `tube_angle ≠ 0` : le tube de la liste le plus
-   proche de cette valeur. Aucun tube assez large : le plus large, alerte
+2. Tube = le plus petit de `lens_tubes` dont le `field_angle` vérifie
+   `field_angle ≥ 1,05·F_req` *(choix : marge de 5 %)*. `tube_angle ≠ 0` :
+   le tube dont le `field_angle` est le plus proche de cette valeur. Aucun tube assez large : le plus large, alerte
    « Découpe … : aucun tube ne couvre le cadrage ».
-3. `F = tube`. Source `S = P + a·(lens_offset − d)` avec
+3. `F` = `field_angle` du tube ; `lens_diameter` = celui du tube (à défaut
+   `optics.lens_diameter`). Source `S = P + a·(lens_offset − d)` avec
    `d = r / tan(F/2)`, `r = lens_diameter/2` (14.3). Les plans et les `n` sont recalculés
    avec ce `S`.
 
@@ -1552,7 +1569,7 @@ matériaux cherchés par nom.
   derrière la lentille** pour que le cône passe par le bord de la lentille :
   position `z = lens_offset − d`, `d = r / tan(F_ref/2)`, direction `+Z` de la
   tête (rotation de 180° autour de X de la lumière, dont l'axe de tir est
-  `−Z`). `F_ref` : le tube pour une lentille fixe, `field_angle.max` pour un
+  `−Z`). `F_ref` : le `field_angle` du tube pour une lentille fixe, `field_angle.max` pour un
   zoom. `spot_size` = champ courant `F` (constante ou piloté par `zoom`).
   Faisceau net aux lames, aucune ombre du corps de l'appareil.
 - **Wash et PC** (`beam_type: wash`) : lumière `AREA`, forme `DISK`, `size =
