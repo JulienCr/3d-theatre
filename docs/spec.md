@@ -322,6 +322,7 @@ Chaque jeu :
 | `barn_doors` | Volets | automatique | aucun / automatique / manuel |
 | `row<j>_<d>_leaf_<k>` | Volet `k` (rang `j`, direction `d`) | 0° | 0 – 80° |
 | `row<j>_<d>_rotation` | Rotation des volets (rang `j`, direction `d`) | 0° | −90 – 90° |
+| `face_tilt` | Remonter la face | 0° *(choix)* | −15 – +15° |
 | `window_margin` | Marge de la fenêtre de face | 0 *(choix)* | 0 – 2 m |
 | `min_mean_ratio` | Moyenne minimale de l'égalisation | 0,85 *(choix)* | 0,5 – 1 |
 
@@ -1629,8 +1630,10 @@ Deux appareils par zone, un par direction `d` : `L` (accroché côté jardin,
   couverte sont dans le champ (`F ≥ F_req`) et où les **points du nez** sont
   dans le **faisceau** (angle plein à 50 %, interpolé linéairement avec le
   zoom entre `beam_angle` min et max de la fiche, celui du tube pour des
-  lentilles fixes), on prend le plus petit champ, puis l'axe le plus bas
-  (le plus proche du nez). Points du nez d'un appareil : le sol du nez au
+  lentilles fixes), on prend le plus petit champ, puis l'axe le plus haut
+  (le moins incliné : le nez est au bord bas du faisceau, pas en son cœur). Le
+  paramètre `front_pc.face_tilt` (« Remonter la face », 0°, −15° à +15°) relève
+  (positif) ou abaisse (négatif) ensuite cet axe dans son plan vertical. Points du nez d'un appareil : le sol du nez au
   centre de la zone, `(xc, 0, Hp)`, et un point à la fraction `reach` du
   chemin vers le bord de **sa** moitié de zone (`L` : bord jardin, `R` : bord
   cour, `±W/2` pour la zone extrême). `reach` vaut 1, puis 0,75 ; 0,5 ; 0,25 ;
@@ -2010,11 +2013,12 @@ rig et range le résultat dans la scène (13.14).
   (`Hp + 1,20` *(choix)*, `FaceSetup.z_torso`), comptées à égalité : 2 × 212 = 424 sondes par défaut. Les coins
   du nez hors cadre, que les volets coupaient exprès, n'y étaient plus avant la fenêtre : ils fixaient
   seuls `U`.
-- **Sondes de débord** (`FaceSetup.spill`, 236 par défaut) : des points hors de la fenêtre,
+- **Sondes de débord** (`FaceSetup.spill`) : des points hors de la fenêtre,
   à 0,30 m de ses bords, avec leur normale : la façade de part et d'autre de l'ouverture
   (3 colonnes, pas de 0,5 m, du sol à la hauteur de façade), le linteau (2 rangées), les murs de
-  salle (7 mètres le long de la façade, de 1,5 m de haut au plafond) et la face avant de la scène
-  (3 hauteurs). Seuls les PC accrochés en avant de la façade (`Emitter.spill`) les éclairent : les
+  salle (7 mètres le long de la façade, de 1,5 m de haut au plafond) la face avant de la scène
+  (3 hauteurs) et le sol de salle devant le nez (`Z = 0`, normale vers le haut, `Y` de −0,30 à
+  −2,50, six rangées, pas d'environ 0,5 m en `X` sur `±W/2`). Seuls les PC accrochés en avant de la façade (`Emitter.spill`) les éclairent : les
   autres sont cachés par elle.
 - Éclairement vertical `E = niveau · I(θ, φ) · max(0, s·n) / d²` (lux), `s`
   unitaire vers la source. Ni ombre, ni réflexion, ni brume.

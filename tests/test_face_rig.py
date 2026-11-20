@@ -184,7 +184,11 @@ def test_row_0_barn_doors_cut_on_the_window_edges():
 
 def test_spill_probes_surround_the_window_and_rear_rows_cannot_reach_them(plain):
     labels = {label for label, _ in plain.rig.face.spill}
-    assert labels == {"façade", "linteau", "murs de salle", "face du nez"}
+    assert labels == {"façade", "linteau", "murs de salle", "face du nez", "sol de salle"}
+    floor = [p for label, p in plain.rig.face.spill if label == "sol de salle"]
+    assert floor and all(p.position[2] == 0.0 and p.normal == (0.0, 0.0, 1.0) for p in floor)
+    assert {round(p.position[1], 2) for p in floor} == {-0.3, -0.74, -1.18, -1.62, -2.06, -2.5}
+    assert min(p.position[0] for p in floor) == -max(p.position[0] for p in floor) == -plain.rig.face.nose_width / 2
     face = plain.rig.face
     assert all(p.position[1] <= face.forestage_depth + 0.1 for _, p in plain.rig.face.spill)
     emitters = emitters_of(plain.rig, LIB)

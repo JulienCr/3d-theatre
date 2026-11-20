@@ -1100,8 +1100,9 @@ def _fit_beam(optics: Optics, need_field: float, need_beam: float) -> tuple[Lens
 def _focus(w: _Work, sheet: _Sheet, zone: tuple[float, float], side: str, pivot: Vec3) -> _Focus:
     """Axis and zoom of a row 0 PC (spec 13.7). The heading is the zone centre's. Among the
     (field, elevation) pairs with the corners of the covered area in the field and the nez points
-    in the beam, take the smallest field, then the steepest axis. The nez points are the zone centre
-    and a point `reach` of the way to the PC's own edge of the zone; `reach` drops until a pair exists."""
+    in the beam, take the smallest field, then the shallowest axis, then lift or lower it by
+    `front_pc.face_tilt`. The nez points are the zone centre and a point `reach` of the way to the PC's
+    own edge of the zone; `reach` drops until a pair exists."""
     key = (sheet.fixture.id, zone, side, pivot)
     if key in w.focus:
         return w.focus[key]
@@ -1120,22 +1121,29 @@ def _focus(w: _Work, sheet: _Sheet, zone: tuple[float, float], side: str, pivot:
     result = None
     for reach in NEZ_REACH:
         nez = [_sub((xc + reach * (edge - xc), 0.0, hp), pivot), _sub((xc, 0.0, hp), pivot)]
-        best = None
+        fits = []
         for _, axis, need_field in table:
             fit = _fit_beam(optics, need_field, 2 * max(_angle_between(axis, d) for d in nez))
-            if fit is None:
-                continue
-            if best is None or fit[1] < best[0] - EPS:
-                best = (fit[1], fit[0], axis)
-            elif fit[1] <= best[0] + EPS:
-                best = (best[0], fit[0], axis)  # same field: the steeper axis, scanned later
+            if fit is not None:
+                fits.append((fit[1], fit[0], axis))
+        best = None
+        if fits:
+            smallest = min(f[0] for f in fits)
+            best = next(f for f in fits if f[0] <= smallest + EPS)
         if best is not None:
-            result = _Focus(best[2], best[0], best[1], True, reach)
+            result = _Focus(_tilted(best[2], w.c.p["front_pc"]["face_tilt"]), best[0], best[1], True, reach)
             break
     if result is None:
         result = _focus_fallback(optics, table, _sub((xc, 0.0, hp), pivot))
     w.focus[key] = result
     return result
+
+
+def _tilted(axis: Vec3, degrees: float) -> Vec3:
+    """`axis` raised by `degrees` in its vertical plane (negative lowers it)."""
+    flat = math.hypot(axis[0], axis[1])
+    t = math.atan2(-axis[2], flat) - math.radians(degrees)
+    return (axis[0] / flat * math.cos(t), axis[1] / flat * math.cos(t), -math.sin(t))
 
 
 def _focus_fallback(optics: Optics, table, centre: Vec3) -> _Focus:
@@ -2038,7 +2046,8 @@ def _pipe_part(w: _Work, pipe: _Support, index: int) -> None:
 
 def _spill_probes(c: Ctx) -> tuple[tuple[str, Probe], ...]:
     """Probes where face light is not wanted, `SPILL_MARGIN` outside the face window (spec 13.13): the
-    facade beside the opening, the lintel, the house walls near the stage and the front of the stage."""
+    facade beside the opening, the lintel, the house walls near the stage, the front of the stage
+    and the house floor in front of the nez."""
     half, ys = c.W / 2, c.Ys
     facing = (0.0, -1.0, 0.0)
     out: list[tuple[str, Probe]] = []
@@ -2055,6 +2064,10 @@ def _spill_probes(c: Ctx) -> tuple[tuple[str, Probe], ...]:
         for j in range(1, SPILL_WALL_ROWS + 1):
             for z in [1.5 + k for k in range(int(c.Hf - 2.0))]:
                 out.append(("murs de salle", Probe((sign * c.Wt / 2, ys - j, z), (-float(sign), 0.0, 0.0))))
+    n = math.ceil(2 * half / SPILL_PITCH)
+    house = [-half + 2 * half * i / n for i in range(n + 1)]
+    out += [("sol de salle", Probe((x, -y, 0.0), (0.0, 0.0, 1.0)))
+            for x in house for y in (SPILL_MARGIN + 0.44 * k for k in range(6))]
     for x in xs[::2]:
         out += [("face du nez", Probe((x, -FRONT_BAND_THICKNESS, c.Hp * f), facing)) for f in (0.25, 0.5, 0.75)]
     return tuple(out)

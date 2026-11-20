@@ -1222,6 +1222,16 @@ def row0(rig):
     return [f for f in pcs(rig) if f.support == "FrontPipe"]
 
 
+def test_face_tilt_raises_and_lowers_the_row_zero_axis_by_the_given_angle():
+    def head(tilt):
+        f = shipped_layout(make(front_pc={"face_tilt": tilt})).rig.find("FrontPC_L_03")
+        return f.pivot, math.degrees(math.asin(-f.axis[2]))
+
+    (pivot, base), (raised_pivot, raised), (lowered_pivot, lowered) = head(0.0), head(2.0), head(-0.5)
+    assert pivot == raised_pivot == lowered_pivot
+    assert raised == pytest.approx(base - 2.0, abs=0.01) and lowered == pytest.approx(base + 0.5, abs=0.01)
+
+
 def beam_miss(rig, points):
     """Points of the floor outside the 50 % cone of every row 0 PC."""
     return [p for p in points

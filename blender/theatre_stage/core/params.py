@@ -405,6 +405,9 @@ SCHEMA: tuple[Group, ...] = (
                "restent dans l'ouverture de la façade)."),
         _float("overlap", 0.20, 0.0, 1.0, "Recouvrement",
                "Fraction de la taille d'une zone ajoutée au champ couvert, pour les zones voisines."),
+        _angle("face_tilt", 0.0, -15.0, 15.0, "Remonter la face",
+               "Relève (positif) ou abaisse (négatif) la visée des PC de face du premier rang, vers le fond "
+               "de la scène ou vers le nez."),
         _length("window_margin", 0.0, 0.0, 2.0, "Marge de la fenêtre de face",
                 "Distance dont la fenêtre de face (l'ouverture de la façade, du nez au linteau) est rétrécie "
                 "de chaque côté : la lumière de face doit y rester."),
