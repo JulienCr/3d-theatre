@@ -51,9 +51,8 @@ class Emitter:
     `beam_of_field`: 50 % angle at a field, a callable or `((field, beam), ...)` ascending; read by the
     fallback profile only. `cut_planes`: `(point, normal)` through the lens centre, normal toward the
     lit side; a probe behind any plane gets 0. `aim_z`: height of the plane where aim offsets apply
-    (None: the plane of the probes). `cut_edges` and `lens_radius`: leaf edges seen by a lens disc of that
-    radius; a probe sees the part of the disc not hidden by the leaf, so the cut has a penumbra
-    (`lens_radius` 0 gives a sharp plane).
+    (None: the plane of the probes). `cut_edges`: leaf edges; a probe sees the part of the lens disc of
+    `lens_radius` they leave open (penumbra; radius 0 gives a sharp plane).
     """
 
     name: str
