@@ -886,16 +886,24 @@ Pour voir les faisceaux, sans alourdir le rendu.
   paroi nette partout où une face tombe dans le vide (retour utilisateur :
   la brume « s'arrêtait pile sur le devant de la scène »). Règle : chaque
   face de la boîte est sur un mur, un sol, un plancher ou un plafond, ou
-  derrière ; la seule frontière ouverte autorisée est le fondu ci-dessous.
+  derrière (de 1 cm dans le solide, voir ci-dessous) ; la seule frontière ouverte autorisée est le fondu ci-dessous.
 - `Haze_Volume` (`TS_Haze`) : **une seule boîte**, pas un volume de World.
   Étendue « plateau et salle » (défaut) : toute l'enceinte, de `−Yh` au fond
   `D`, entre les murs (salle et cage), du sol de salle au plus haut du
   plafond de salle et du gril ; le plateau et ses volumes sont dedans. La
   brume reste homogène.
-  Quand le plafond de salle est le plus haut, le dessus de la boîte reste
-  **1 cm en dessous** (`HAZE_CEILING_CLEARANCE`) : coplanaire avec le plafond,
-  il fait que Cycles saute la face opaque et rend le plafond transparent
-  (mesuré : décaler le dessus de ±1 cm suffit à le corriger).
+- **Aucune face de la boîte n'est coplanaire avec un solide.** Quand une
+  face de la boîte coïncide avec une face opaque, Cycles départage mal les
+  deux et saute le solide : plafond, murs, sol et objets
+  accrochés aux murs disparaissent, la brume allumée. Mesuré en Cycles : le
+  décalage de 1 cm du dessus corrige le plafond, celui des côtés les murs, celui
+  du dessous le sol. `HAZE_INSET` = 1 cm : chaque face entre de 1 cm **dans** le
+  solide sur lequel elle s'appuie (côtés à `±(max(Wk, Wt)/2 + 1 cm)`, dans les
+  murs de salle et de cage ; dessous à `Z = −1 cm`, dans la dalle ; fond à
+  `D + 1 cm`, dans `Cage_Back` ; devant à `−Yh − 1 cm`, dans le vide). Le dessus
+  est à `facade_height − 1 cm`, sous le plafond de salle (une face sans épaisseur),
+  ou à `Hp + grid_height + 1 cm` quand le gril est plus haut. Le test de
+  régression refuse toute face de solide coplanaire avec la boîte.
 - Étendue « plateau » : même largeur et même hauteur que la boîte « plateau
   et salle » (une boîte limitée à la cage aurait ses côtés, son dessus et
   son dessous en plein vide dans la zone de fondu), de `D` jusqu'à

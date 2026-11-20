@@ -2,7 +2,7 @@ import math
 
 import pytest
 
-from core.layout import HAZE_CEILING_CLEARANCE, compute_layout
+from core.layout import HAZE_INSET, compute_layout
 from core.meshes import build_mesh
 from helpers import approx_bounds, bounds, layout, make, modules_off
 
@@ -287,16 +287,17 @@ def test_haze_volume_is_a_single_box_only_when_enabled():
 
 @pytest.mark.parametrize("stairs,stage", [({}, {}), ({"side_angle": 0.0}, {}),
                                           ({}, {"wings": 5.0}), ({}, {"wings": 0.0})])
-def test_house_haze_box_ends_on_walls_floor_and_ceiling(stairs, stage):
+def test_house_haze_box_ends_inside_walls_floor_back_wall_and_under_ceiling(stairs, stage):
     lay = layout(haze={"enabled": True}, stairs=stairs, stage=stage)
     (x0, x1), (y0, y1), (z0, z1) = bounds(lay, "Haze_Volume")
     floor, ceiling = bounds(lay, "House_Floor"), bounds(lay, "House_Ceiling")
     wall_l, wall_r = bounds(lay, "Cage_Wall_L"), bounds(lay, "Cage_Wall_R")
-    assert x0 == pytest.approx(min(floor[0][0], wall_l[0][1]))
-    assert x1 == pytest.approx(max(floor[0][1], wall_r[0][0]))
-    assert y0 == pytest.approx(floor[1][0]) and y1 == pytest.approx(bounds(lay, "Cage_Back")[1][0])
-    assert z0 == pytest.approx(floor[2][1])
-    assert z1 == pytest.approx(max(ceiling[2][0], lay.find("Grid_Deck").z_min) - HAZE_CEILING_CLEARANCE)
+    e = HAZE_INSET
+    assert x0 == pytest.approx(min(floor[0][0], wall_l[0][1]) - e)
+    assert x1 == pytest.approx(max(floor[0][1], wall_r[0][0]) + e)
+    assert y0 == pytest.approx(floor[1][0] - e) and y1 == pytest.approx(bounds(lay, "Cage_Back")[1][0] + e)
+    assert z0 == pytest.approx(floor[2][1] - e)
+    assert z1 == pytest.approx(max(ceiling[2][0], lay.find("Grid_Deck").z_min) - e)
 
 
 def test_stage_haze_fades_toward_the_house_and_keeps_every_side_on_a_wall():
