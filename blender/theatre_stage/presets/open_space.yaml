@@ -103,7 +103,7 @@ cameras:
 rig:
   enabled: true
   aim_height: 1.7
-  site: 45.0
+  site: 44.0
   area_depth: 6.0
 rig_front:
   ceiling_gap: 0.3
@@ -149,10 +149,10 @@ front_pc:
   fixture_far: generic_fresnel_led
   mode_far: default
   zone_mode: auto
-  zone_width: 3.0
+  zone_width: 3.4
   columns: 3
   rows: 2
-  azimuth: 45.0
+  azimuth: 16.0
   overlap: 0.2
   window_margin: 0.0
   min_mean_ratio: 0.85

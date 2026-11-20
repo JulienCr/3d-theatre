@@ -201,3 +201,20 @@ def test_equalise_params_reports_the_rig_as_built():
     stats, spill = measure(layout.rig, tuned, 0.05)
     assert result.after["sum"].cv == pytest.approx(stats["sum"].cv) and result.spill_after["sum"] == spill["sum"]
     assert result.before["sum"].cv > result.after["sum"].cv and set(result.alerts) <= set(layout.warnings)
+
+
+def test_default_layout_hangs_the_face_pcs_inside_the_facade_opening():
+    """Pipe 2.6 m in front of the facade, 16 degrees, three columns (spec 13.7): beams enter the opening frontally."""
+    from core.params import default_params
+    rig = compute_layout(default_params(), LIB).rig
+    row0 = [f for f in faces(rig) if "Row1" in f.circuit]
+    assert rig.warnings == () and len(faces(rig)) == 12
+    assert rig.dims.pipe_y == pytest.approx(-2.58, abs=0.02) and rig.dims.pc_azimuths == (16.0, 16.0)
+    assert max(abs(f.hang[0]) for f in row0) < rig.face.nose_width / 2 - 1.0
+
+
+def test_manual_front_pipe_position_still_overrides_the_automatic_one():
+    from core.params import default_params
+    params = default_params()
+    params["rig_front"].update(auto_position=False, y=-1.4)
+    assert compute_layout(params, LIB).rig.dims.pipe_y == pytest.approx(-1.4)

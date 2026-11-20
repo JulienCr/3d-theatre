@@ -335,7 +335,7 @@ def test_blade_swivel_and_second_gobo_rotation_have_their_own_channels():
 def test_patched_from_rig_follows_the_computed_patch():
     rig = compute_layout(default_params()).rig
     patched = patched_from_rig(rig)
-    assert len(patched) == len(rig.fixtures) == 33
+    assert len(patched) == len(rig.fixtures) == 29
     for item, entry in zip(patched, rig.patch):
         assert (item.name, item.universe, item.address) == (entry.name, entry.universe, entry.address)
     by_name = {p.name: p for p in patched}

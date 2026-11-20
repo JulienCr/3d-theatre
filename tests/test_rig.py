@@ -16,7 +16,7 @@ from core.rig import (
     default_library, head_frame, posed_points, spread,
 )
 from core.params import default_params
-from helpers import bounds, make
+from helpers import bounds, classic, make
 
 DATA = Path(__file__).parent / "data" / "rig"
 LIB = discover([DATA])
@@ -849,8 +849,8 @@ def user_params(**front_pc):
 
 CASES = {
     "default": lambda: make(),
-    "reference_with_modules": lambda: read_preset(shipped_presets()["reference_with_modules"])[0],
-    "open_space": lambda: read_preset(shipped_presets()["open_space"])[0],
+    "reference_with_modules": lambda: classic(read_preset(shipped_presets()["reference_with_modules"])[0]),
+    "open_space": lambda: classic(read_preset(shipped_presets()["open_space"])[0]),
     "user_3": lambda: user_params(zone_width=3.0),
     "user_2": lambda: user_params(zone_width=2.0),
 }
@@ -947,14 +947,14 @@ def test_shipped_presets_raise_no_rig_alert():
     for name, path in presets.items():
         params, messages = read_preset(path)
         assert not messages, name
-        rig = shipped_layout(params).rig
+        rig = compute_layout(params, SHIPPED).rig
         assert rig.warnings == (), name
 
 
 def shipped_rigs():
     out = {"default": shipped_layout(make())}
     for name, path in shipped_presets().items():
-        out[name] = shipped_layout(read_preset(path)[0])
+        out[name] = shipped_layout(classic(read_preset(path)[0]))
     return out
 
 
@@ -1167,7 +1167,7 @@ def test_row_two_keeps_the_site_nearest_battens_when_there_is_no_front_border():
 
 
 def test_row_without_a_fitting_batten_keeps_the_nearest_site_and_alerts():
-    lay = shipped_layout(read_preset(shipped_presets()["open_space"])[0], far="generic_pc_led")
+    lay = shipped_layout(classic(read_preset(shipped_presets()["open_space"])[0]), far="generic_pc_led")
     assert [name for name, _ in lay.rig.dims.pc_supports] == ["FrontPipe", "Batten_02"]
     assert has(lay.rig.warnings, "Rang 2", "aucun azimut") and has(lay.rig.warnings, "Zone non couverte")
 

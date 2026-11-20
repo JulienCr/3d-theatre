@@ -222,11 +222,11 @@ n'agit que par driver (section 8.5).
 |---|---|---|---|
 | `enabled` | Implantation lumière | oui | |
 | `aim_height` | Hauteur de visée au-dessus du plancher *(choix)* | 1,70 | 0,50 – 2,50 |
-| `site` | Site de référence des projecteurs de face (élévation du faisceau) | 45° | 20 – 70 |
+| `site` | Site de référence des projecteurs de face (élévation du faisceau) | 44° *(choix)* | 20 – 70 |
 | `area_depth` | Profondeur de la zone de jeu depuis le nez *(choix)* | 6,00 | 1 – 30 |
 
-Site 45° : fiche ADEC 6-3, méthode McCandless (45° de site, 45° d'azimut,
-section 13). `enabled` décoché : aucun objet de la section 13, aucun patch.
+Site 45° et azimut 45° : fiche ADEC 6-3, méthode McCandless ; les défauts sont 44° et 16°
+(13.7, « Choix de l'implantation de face »). `enabled` décoché : aucun objet de la section 13, aucun patch.
 
 ### 3.11 Perche de face — `rig_front`
 
@@ -314,10 +314,10 @@ Chaque jeu :
 | `fixture_far` | Appareil des rangs du fond | `generic_fresnel_led` | énumération (famille `pc`) |
 | `mode_far` | Mode DMX des rangs du fond | mode par défaut de la fiche | énumération |
 | `zone_mode` | Découpage en zones | automatique | automatique / manuel |
-| `zone_width` | Largeur de zone **maximale** *(choix)* | 3,00 | 1 – 10 |
+| `zone_width` | Largeur de zone **maximale** *(choix)* | 3,40 | 1 – 10 |
 | `columns` | Zones en largeur (mode manuel) | 3 | 1 – 8 |
 | `rows` | Rangs en profondeur (mode manuel) | 2 | 1 – 4 |
-| `azimuth` | Azimut de croisement | 45° | 10 – 80 |
+| `azimuth` | Azimut de croisement | 16° *(choix)* | 10 – 80 |
 | `overlap` | Recouvrement des zones voisines *(choix)* | 0,20 | 0 – 1 |
 | `barn_doors` | Volets | automatique | aucun / automatique / manuel |
 | `row<j>_<d>_leaf_<k>` | Volet `k` (rang `j`, direction `d`) | 0° | 0 – 80° |
@@ -342,7 +342,7 @@ les clés `row…` ne s'affichent qu'en mode manuel (`shown_when` du schéma).
 le changer rend l'égalisation enregistrée périmée (13.14).
 
 `overlap` : fraction de la taille d'une zone ajoutée au champ couvert (section
-13.7). Azimut 45° : fiche ADEC 6-3, nominal : 13.7 le règle rang par rang
+13.7). Azimut 45° : fiche ADEC 6-3 ; défaut 16° ; nominal : 13.7 le règle rang par rang
 dans ±30°. `zone_width` est un plafond : le nombre de zones est arrondi au
 supérieur (13.1).
 
@@ -1420,8 +1420,9 @@ Tube Ø 0,048 (`TS_Batten`) sous le plafond de salle, parallèle au nez, X sur
   première rangée, l'azimut la répartit en Y et en X :
   `h = (Zp − Za) / tan(site)`, `ΔYp = h·cos(azimuth)`, `Yp = yr_0 − ΔYp` (`azimuth`
   de `front_pc`).
-  Par défaut `h = 4,10`, `ΔYp = 2,90`, `Yp = 1,50 − 2,90 = −1,40` : le
-  décalage en X du même appareil vaut aussi 2,90.
+  Par défaut (site 44°, azimut 16°) `h = 4,25`, `ΔYp = 4,08`, `Yp = 1,50 − 4,08 = −2,58` : le
+  décalage en X du même appareil vaut `ΔYp·tan(azimut) = 1,17` (avec 45° et 45° : −1,40 et
+  2,90, les PC extérieurs à `X = ±6,65`, hors de l'ouverture, à moins de 1 m des murs).
 - Mode manuel : `Yp = rig_front.y` ; `ΔYp` garde la valeur du calcul
   automatique (il sert en 13.7).
 - Alertes : `Zp ≤ Za` ; `Yp` hors de `[−Yh + 0,30, Ys − 0,30]` (perche hors de
@@ -1531,6 +1532,39 @@ Deux appareils par zone, un par direction `d` : `L` (accroché côté jardin,
   scène (`Y = 0`, `Z < Hp`) et le linteau ne doivent pas être éclairés : les coupes
   automatiques du rang 0 (13.12) en suivent les bords, l'égalisation (13.13) en mesure le
   débord.
+
+- **Choix de l'implantation de face** *(choix, 2026-11-20)* : la perche de face à 1,40 m de
+  la façade (site 45°, azimut 45°) croise les faisceaux à 45° : les PC extérieurs vont à
+  `X = ±6,65`, à moins de 1 m des murs de salle, et leurs faisceaux arrivent de biais sur la
+  façade ; ils éclairaient les murs (jusqu'à 6 % de la moyenne de la face) et la façade (15 %).
+  La perche étant un paramètre (`rig.site`, `front_pc.azimuth`, `rig_front.y`), on les a cherchés
+  avec le moteur d'égalisation (13.13) à l'intérieur : 54 + 36 + 9 + 20 candidats (perche `Y`
+  de −1,4 à −5,5 m, hauteur 4,2 à 7 m, azimut 12 à 45°, 3 à 5 colonnes, 2 à 3 rangs), chacun
+  construit, égalisé et mesuré tel que construit. Constats :
+  *(a)* aucune implantation ne tient 5 % de débord à 0,30 m des bords de la fenêtre : la pénombre
+  d'une feuille (± 26°, 13.13) y laisse 10 à 45 % (face avant de la scène, première colonne de
+  façade), et le meilleur débord maximal est 8 % (ancien défaut) contre 10 à 14 % ailleurs ;
+  *(b)* une perche plus loin (−2,1 à −2,8 m) avec un azimut de 12 à 20° suspend les PC dans
+  l'ouverture (`|X| ≤ 4,5`), rend les faisceaux frontaux et supprime le débord sur les murs et le
+  linteau ; *(c)* à −4 m et au-delà, le débord double (0,25 à 0,43, faisceaux rasants sur la
+  façade) ; plus bas que 5,8 m, il monte de 15 % ; *(d)* quatre colonnes (16 PC) ou trois rangs
+  (24 PC) n'apportent rien : `CV` 0,24 à 0,33 pour plus d'appareils.
+  Les volets (angles, rotation de l'accessoire) sont déjà ajustés par la coupe automatique sur les
+  bords de la fenêtre (13.12) pour chaque candidat ; les zones extérieures éclairées depuis la
+  même perche, pas depuis les pylônes, restent à étudier.
+
+  | Implantation | Perche `Y` / `Z` | Az. | Col. | PC | `X` max | Débord max / sondes > 5 % | `CV` | `Emin/Emoy` | sondes < 70 % | `Emoy` |
+  |---|---|---|---|---|---|---|---|---|---|---|
+  | A ancien défaut (45°, 45°) | −1,40 / 7,0 | 45° | 4 | 16 | 6,65 | 8 % / 34 | 0,325 | 0,195 | 52 | 333 lx |
+  | **B défaut (44°, 16°)** | −2,58 / 7,0 | 16° | 3 | 12 | 4,50 | 12 % / 42 | 0,265 | 0,324 | 16 | 402 lx |
+  | C perche −2,4, 24° | −2,38 / 7,0 | 24° | 3 | 12 | 6,10 | 12 % / 52 | 0,211 | 0,257 | 20 | 321 lx |
+  | D perche −2,8, 20° | −2,80 / 7,0 | 20° | 3 | 12 | 4,73 | 13 % / 42 | 0,252 | 0,327 | 14 | 392 lx |
+
+  (`CV`, `Emin/Emoy`, sondes < 70 % : somme, après égalisation, rig tel que construit ; débord :
+  somme, 236 sondes ; `Emoy` : éclairement vertical moyen de la face.) **B est le défaut** : il
+  garde le meilleur compromis (uniformité, éclairement, murs et linteau propres, 12 appareils
+  au lieu de 16) ; C est plus uniforme mais ses PC sortent de l'ouverture. La position
+  manuelle de la perche (`rig_front.auto_position` décoché) reste.
 
 - **Accroche en Y** : rang 0 sur la perche de face `(Yp, Zp)`. Rang `j ≥ 1` :
   sur une porteuse lumière `(Y, Zb)` avec `ΔY = yr_j − Y ≥ 0,10`. Candidates :
@@ -2127,33 +2161,38 @@ la scène, propriété `theatre_face_eq` (JSON : `signature`, `date`, par PC la 
   (13.13, ± 26° autour du plan) y laisse passer 10 à 45 % de la lumière, et décaler la
   droite de coupe vers l'intérieur de 0,15 à 0,5 m n'a presque rien changé au débord.
 
-  Luminance linéaire moyenne des régions de `Cam_Face` (PC de face seuls, rig sans égalisation
-  puis égalisé ; rapport à la scène dans la fenêtre, le sol visible entre `X = ±4,5` et
-  `Y = 0,5 … 5,5`) :
+  Même mesure (copie de la scène de l'utilisateur, PC de face seuls) avec la nouvelle
+  implantation (B) égalisée : corrélation 0,9986, pente 0,97 ; `CV` 0,261 mesuré / 0,248 calculé
+  en somme, `Emin/Emoy` 0,286 / 0,298, sondes < 70 % 18 / 17 (avant égalisation : 0,396 / 0,267 /
+  87).
 
-  | Région | avant | après | après / avant | / scène avant | / scène après |
-  |---|---|---|---|---|---|
-  | façade, de part et d'autre | 0,00153 | 0,00105 | 0,69 | 0,55 | 0,52 |
-  | murs de salle | 0,00124 | 0,00129 | 1,03 | 0,45 | 0,64 |
-  | face avant de la scène | 0,00717 | 0,00253 | 0,35 | 2,58 | 1,26 |
-  | linteau | 0,00015 | 0,00014 | 0,94 | 0,06 | 0,07 |
-  | scène dans la fenêtre (sol) | 0,00277 | 0,00201 | 0,72 | 1 | 1 |
+  Luminance linéaire moyenne des régions de `Cam_Face` (PC de face seuls ; `ancien` = implantation
+  A, `nouveau` = B ; `avant` = sans égalisation, `après` = égalisé ; entre parenthèses, rapport au
+  sol de la scène dans la fenêtre, entre `X = ±4,5` et `Y = 0,5 … 5,5`) :
 
-  La façade et la face avant baissent nettement ; les murs et le linteau ne bougent pas. Ces
-  surfaces sont sombres (rouge, albédo ≈ 0,1) : 5 % de l'éclairement moyen de la face y reste
-  visible à +1,5 EV.
+  | Région | ancien avant | ancien après | nouveau avant | nouveau après |
+  |---|---|---|---|---|
+  | façade, de part et d'autre | 0,00153 (0,55) | 0,00105 (0,52) | 0,00065 (0,21) | 0,00134 (0,53) |
+  | murs de salle | 0,00124 (0,45) | 0,00129 (0,64) | 0,00031 (0,10) | **0,00029 (0,11)** |
+  | face avant de la scène | 0,00717 (2,58) | 0,00253 (1,26) | 0,01005 (3,33) | 0,00315 (1,25) |
+  | linteau | 0,00015 (0,06) | 0,00014 (0,07) | 0,00013 (0,04) | 0,00019 (0,07) |
+  | scène dans la fenêtre (sol) | 0,00277 | 0,00201 | 0,00301 | 0,00253 |
 
-  Sur `Cam_Face`, trois comédiens de la scène de l'utilisateur, valeur linéaire au torse avant
-  → après : jardin (`X = −0,24`) 0,0272 → 0,0376, centre (`X = 1,44`) 0,0477 → 0,0509, cour
-  (`X = 3,11`, `Y = 0,77`) 0,0431 → 0,0273. Le rapport max/min passe de 1,75 à 1,86 : pas plus
-  proche. Le comédien de cour se tient dans le point chaud de l'avancée que l'égalisation et les
-  volets rabotent.
+  Les murs sont 5 fois moins éclairés (0,11 contre 0,64 de la scène) ; la façade, la face avant et
+  le linteau gardent le même rapport à la scène (ancien après et nouveau après) : c'est la
+  pénombre des volets, qu'aucune implantation n'a réduite. La scène est 26 % plus claire.
 
-- **Lumière sur les murs de salle** (avant la fenêtre ; PC de face seuls, un appareil à la
-  fois) : elle vient des deux PC les plus extérieurs du rang 0, `FrontPC_L_01` et
-  `FrontPC_R_04`, accrochés à `X = ±6,65` à moins de 1 m des murs ; leur volet extérieur la
-  réduisait de 40 %, le reste est la pénombre de la feuille et la queue de l'IES si près d'un mur.
-  Les sondes de débord mesurent maintenant les murs.
+  Trois comédiens de la scène de l'utilisateur, valeur linéaire au torse (gauche `X = −0,24`,
+  centre `X = 1,44`, cour `X = 3,11`, `Y = 0,77`) :
+
+  | | gauche | centre | cour | max/min |
+  |---|---|---|---|---|
+  | ancien avant | 0,0272 | 0,0477 | 0,0431 | 1,75 |
+  | ancien après | 0,0376 | 0,0509 | 0,0273 | 1,87 |
+  | nouveau avant | 0,0416 | 0,0582 | 0,0757 | 1,82 |
+  | nouveau après | 0,0553 | 0,0558 | 0,0554 | **1,01** |
+
+  Le sol de salle devant le nez reste éclairé (lumière sous la coupe basse) : il n'a pas de sonde.
 
 ## 14. Appareils dans Blender
 
