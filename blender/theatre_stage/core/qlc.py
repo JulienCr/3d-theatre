@@ -282,7 +282,8 @@ def _write_physical(x: _Xml, fixture: Fixture) -> None:
     o, d = fixture.optics, fixture.physical.dimensions
     angles = []
     if o is not None:
-        angles = [o.field_angle.min, o.field_angle.max] if o.field_angle else list(o.lens_tubes)
+        angles = ([o.field_angle.min, o.field_angle.max] if o.field_angle
+                  else [tube.field_angle for tube in o.lens_tubes])
     pan_max, tilt_max = _travel(fixture)
     led = fixture.colour.systems and fixture.family != "hazer"
     x.open("Physical")
