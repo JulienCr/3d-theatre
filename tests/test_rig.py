@@ -10,7 +10,11 @@ from core.fixture_models import fixture_model
 from core.fixtures import EMPTY_LIBRARY, Range, cct_to_rgb, discover
 from core.layout import _make_context, compute_layout
 from core.presets import read_preset, shipped_presets
-from core.rig import FOOTPRINT_MARGIN, _Boxes, aim_angles, compute_rig, default_library, head_frame, posed_points, spread
+from core.rig import (
+    BEAM_MARGIN, FOOTPRINT_MARGIN, HEIGHT_STEP, _Boxes, _cloud, _gaps, _make_beam, aim_angles, compute_rig,
+    default_library, head_frame, posed_points, spread,
+)
+from core.params import default_params
 from helpers import bounds, make
 
 DATA = Path(__file__).parent / "data" / "rig"
@@ -584,19 +588,19 @@ def test_default_preset_has_no_crowding_alert_and_pcs_keep_their_x():
 
 
 def test_crowded_fixtures_move_to_the_nearest_free_x():
-    lay = rig_layout(front_movers={"fixture": "rig_wash_wide"})
-    on_pipe = [f for f in lay.rig.fixtures if f.support == "FrontPipe"]
+    lay = rig_layout(front_movers={"fixture": "rig_wash_wide", "count": 8})
+    on_pipe = [f for f in lay.rig.fixtures if f.support == "FrontPipe_02"]
     movers = [f for f in on_pipe if f.family == "front_movers"]
-    moved = [f for f in movers if abs(f.hang[0] - spread(int(f.name[-2:]) - 1, 4, 10.0)) > 1e-9]
+    moved = [f for f in movers if abs(f.hang[0] - spread(int(f.name[-2:]) - 1, 8, 10.0)) > 1e-9]
     assert moved
+    reach = math.hypot(0.8, 0.15)
 
     def clear(x, me):
-        return all(abs(x - o.hang[0]) >= (me.width + o.width) / 2 + 2 * FOOTPRINT_MARGIN - 1e-9
-                   for o in on_pipe if o is not me)
+        return all(abs(x - o.hang[0]) >= 2 * reach + 2 * FOOTPRINT_MARGIN - 1e-9 for o in on_pipe if o is not me)
 
-    limit = lay.find("FrontPipe").end[0]
+    limit = lay.find("FrontPipe_02").end[0]
     for f in moved:
-        ideal = spread(int(f.name[-2:]) - 1, 4, 10.0)
+        ideal = spread(int(f.name[-2:]) - 1, 8, 10.0)
         assert clear(f.hang[0], f) and abs(f.hang[0]) <= limit
         steps = round(abs(f.hang[0] - ideal) / 0.05)
         assert steps >= 1
@@ -610,8 +614,8 @@ def test_crowded_fixtures_move_to_the_nearest_free_x():
 
 
 def test_full_tube_raises_a_crowding_alert():
-    lay = rig_layout(front_movers={"fixture": "rig_wash_huge"})
-    assert has(lay.warnings, "Appareils qui se touchent sur la perche")
+    lay = rig_layout(front_movers={"fixture": "rig_wash_huge", "count": 16})
+    assert has(lay.warnings, "Appareils qui se touchent sur la seconde perche de face")
 
 
 # --------------------------------------------------------------------- patch
@@ -716,9 +720,10 @@ def test_loads_sum_the_weights_per_support():
     loads = {l.name: l for l in rig.loads}
     on_pipe = [f for f in rig.fixtures if f.support == "FrontPipe"]
     assert loads["FrontPipe"].weight == pytest.approx(sum(f.weight for f in on_pipe))
-    assert loads["FrontPipe"].weight == pytest.approx(8 * 10 + 4 * 12 + 3 * 8)
+    assert loads["FrontPipe"].weight == pytest.approx(8 * 10 + 3 * 8)
+    assert loads["FrontPipe_02"].weight == pytest.approx(4 * 12)
     assert loads["Tower_L_01"].weight == pytest.approx(24.0) and loads["Tower_L_01"].count == 2
-    assert [l.name for l in rig.loads][0] == "FrontPipe"
+    assert [l.name for l in rig.loads][:2] == ["FrontPipe", "FrontPipe_02"]
 
 
 # -------------------------------------------------------------------- library
@@ -849,3 +854,141 @@ def test_top_cut_is_the_actor_head_unless_the_lintel_is_lower():
     low = rig_layout(profiles={"top_height": 2.20})
     top = lambda lay: next(b for b in lay.rig.find("Profile_C").blades.blades if b.cut == "top")
     assert top(tall).edge != pytest.approx(top(low).edge)
+
+
+# --------------------------------------------------- second pipe for the movers
+
+def movers_of(rig):
+    return rig.by_family("front_movers")
+
+
+def beam_alerts(lay):
+    return has(lay.warnings, "Faisceau de") + has(lay.warnings, "Faisceaux :") + has(lay.warnings, "Débattement")
+
+
+def manual_movers(z, **front):
+    return compute_layout(make(rig_front={"movers_height_mode": "manual", "movers_z": z, **front}))
+
+
+def test_front_movers_hang_on_a_second_pipe_behind_the_first():
+    lay = compute_layout(make())
+    rig, dims = lay.rig, lay.rig.dims
+    first, second = lay.find("FrontPipe"), lay.find("FrontPipe_02")
+    assert dims.movers_pipe_y == pytest.approx(dims.pipe_y - 1.50)
+    assert second.start[1] == pytest.approx(dims.movers_pipe_y) and second.start[2] == pytest.approx(dims.movers_pipe_z)
+    assert second.end[0] == pytest.approx(first.end[0]) and second.start[0] == pytest.approx(first.start[0])
+    assert (second.material, second.collection) == ("TS_Batten", "Theatre_Rig")
+    movers = movers_of(rig)
+    assert len(movers) == 4
+    for i, f in enumerate(movers):
+        assert f.support == "FrontPipe_02" and f.universe == 2
+        assert f.hang == pytest.approx((spread(i, 4, 10.0), dims.movers_pipe_y, dims.movers_pipe_z))
+        assert f.aim == pytest.approx((spread(i, 4, 10.0), rig.zones.ys[0], 2.90))
+    assert {f.family for f in rig.fixtures if f.support == "FrontPipe"} == {"front_pc", "profiles"}
+    assert rig.warnings == ()
+
+
+def test_second_pipe_is_absent_without_front_movers():
+    lay = compute_layout(make(front_movers={"enabled": False}))
+    assert "FrontPipe_02" not in lay.names() and lay.rig.dims.movers_pipe_y is None
+    assert lay.rig.dims.mover_radius is None and "FrontPipe" in lay.names()
+
+
+def test_second_pipe_offset_and_house_alert():
+    near = compute_layout(make(rig_front={"movers_offset": 3.0}))
+    assert near.rig.dims.movers_pipe_y == pytest.approx(near.rig.dims.pipe_y - 3.0)
+    assert not has(near.warnings, "Perche des mobiles hors de la salle")
+    far = compute_layout(make(rig_front={"auto_position": False, "y": -4.0, "movers_offset": 10.0}))
+    assert far.rig.dims.movers_pipe_y == pytest.approx(-14.0)
+    assert has(far.warnings, "Perche des mobiles hors de la salle")
+
+
+def test_auto_height_is_the_highest_step_that_clears_every_beam():
+    dims = compute_layout(make()).rig.dims
+    steps = (dims.pipe_z - dims.movers_pipe_z) / HEIGHT_STEP
+    assert steps >= 1 and steps == pytest.approx(round(steps))
+    assert not beam_alerts(manual_movers(dims.movers_pipe_z))
+    blocked = manual_movers(dims.movers_pipe_z + HEIGHT_STEP)
+    assert has(blocked.warnings, "Faisceau de FrontMover_", "gêné par FrontPC_")
+    assert default_params()["rig_front"]["movers_z"] == pytest.approx(dims.movers_pipe_z)
+
+
+def test_auto_height_keeps_the_height_of_the_first_pipe_when_nothing_blocks():
+    lay = compute_layout(make(front_pc={"enabled": False}, profiles={"enabled": False}))
+    assert lay.rig.dims.movers_pipe_z == pytest.approx(lay.rig.dims.pipe_z) and lay.rig.warnings == ()
+
+
+def test_manual_height_is_taken_as_given_and_blocked_beams_are_named():
+    lay = manual_movers(7.0)
+    assert lay.rig.dims.movers_pipe_z == 7.0
+    assert has(lay.warnings, "Faisceau de FrontMover_01 vers (5,00 ; 6,00 ; 2,90) gêné par FrontPC_")
+    assert not has(lay.warnings, "aucune hauteur")
+    assert manual_movers(6.75).rig.warnings == ()
+
+
+def test_no_clear_height_keeps_the_best_one_and_reports_the_blocked_targets():
+    lay = compute_layout(make(rig_front={"movers_offset": 0.5}))
+    ctx, _ = _make_context(make())
+    assert has(lay.warnings, "aucune hauteur")
+    assert has(lay.warnings, "Faisceau de FrontMover_01 vers", "gêné par FrontMover_02")
+    assert ctx.Hp + ctx.Hc - 1e-9 <= lay.rig.dims.movers_pipe_z <= lay.rig.dims.pipe_z
+    assert lay.rig.dims.beam_clearance < BEAM_MARGIN
+
+
+def test_swept_envelope_bounds_the_vertices_over_the_whole_tilt_range():
+    library = default_library()
+    for fixture_id in ("robe_robin_esprite", "martin_mac_aura"):
+        fx = library.get(fixture_id)
+        model = fixture_model(fx)
+        pivot, tilt = model.tilt_pivot, fx.pan_tilt[1]
+        reach = max(math.hypot(v[0], v[1]) for v in (*model.base.vertices, *model.pan.vertices))
+        for k in range(int((tilt.max - tilt.min) / 0.5) + 1):
+            rx = rot_x(-(tilt.min + 0.5 * k))
+            for v in model.tilt.vertices:
+                x, y, _ = matvec(rx, v)
+                reach = max(reach, math.hypot(x, y + pivot[1]))
+        rig = compute_layout(make(front_movers={"fixture": fixture_id}, backlight={"fixture": fixture_id})).rig
+        assert reach - 1e-9 <= rig.dims.mover_radius <= 1.25 * reach
+
+
+def test_movers_pack_by_their_swept_envelope_not_their_rest_pose():
+    rig = compute_layout(make(front_movers={"count": 14})).rig
+    radius = rig.dims.mover_radius
+    xs = sorted(f.hang[0] for f in movers_of(rig))
+    assert len(xs) == 14
+    assert all(b - a >= 2 * (radius + FOOTPRINT_MARGIN) - 1e-9 for a, b in zip(xs, xs[1:]))
+    assert any(abs(f.hang[0] - spread(int(f.name[-2:]) - 1, 14, 10.0)) > 1e-6 for f in movers_of(rig))
+    library = default_library()
+    for f in movers_of(rig):
+        low, high = posed_interval(library, f)
+        assert f.hang[0] - radius <= low and high <= f.hang[0] + radius
+
+
+def test_swept_envelope_touching_a_fixture_on_another_support_is_an_alert():
+    wide = {"front_movers": {"fixture": "rig_wash_wide"}}
+    lay = rig_layout(**wide, rig_front={"movers_offset": 0.5, "movers_height_mode": "manual", "movers_z": 7.0})
+    assert has(lay.warnings, "Débattement de pan et tilt", "FrontMover_01", "FrontPC_")
+    lower = rig_layout(**wide, rig_front={"movers_offset": 0.5, "movers_height_mode": "manual", "movers_z": 5.0})
+    assert not has(lower.warnings, "Débattement")
+
+
+def test_beam_gap_is_a_signed_distance_to_the_cone_between_lens_and_target():
+    beam = _make_beam("A", (0.0, 0.0, -4.0), (0.0, 0.0, 0.0), (0.0, 0.0, -1.0), 30.0, 0.2)
+    half = math.radians(15)
+
+    def gap(point):
+        found = _gaps([beam], [_cloud("B", "S", [point])])
+        return found[0][2] if found else None
+
+    assert gap((0.5, 0.0, -2.0)) == pytest.approx(0.5 * math.cos(half) - 2.0 * math.sin(half))
+    assert gap((0.5, 0.0, -2.0)) < 0 < gap((0.6, 0.0, -2.0))
+    assert gap((0.0, 0.0, -0.1)) is None and gap((0.0, 0.0, -4.5)) is None
+    assert gap((0.0, 0.0, 1.0)) is None
+    assert _gaps([beam], [_cloud("A", "S", [(0.0, 0.0, -2.0)])]) == []
+
+
+def test_default_and_shipped_presets_keep_every_beam_clear():
+    for name, lay in shipped_rigs().items():
+        dims = lay.rig.dims
+        assert lay.rig.warnings == () and dims.beam_clearance >= BEAM_MARGIN, name
+        assert dims.movers_pipe_z == pytest.approx(6.75) and dims.movers_pipe_y == pytest.approx(dims.pipe_y - 1.5)

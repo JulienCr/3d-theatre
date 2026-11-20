@@ -35,7 +35,7 @@ def _dmx_value(data: tuple[int, ...] | None) -> int | None:
 
 
 def dimension_lines(rig: Rig) -> list[str]:
-    """Front pipe, play area, zones, crossing azimuths, profile tubes, loads and patch ranges (13.10)."""
+    """Front pipes, play area, zones, azimuths, mover reach, beam gap, profile tubes, loads, patch (13.10)."""
     if not rig.enabled or rig.dims is None or rig.zones is None:
         return []
     dims, zones = rig.dims, rig.zones
@@ -43,6 +43,13 @@ def dimension_lines(rig: Rig) -> list[str]:
              f"Retombée des rangs de PC : {_metres(dims.pipe_drop)}",
              f"Zone de jeu Ya : {_metres(dims.area_depth)}",
              f"Zones : {zones.nx} × {zones.nr}, {_metres(zones.width)} × {_metres(zones.depth)}"]
+    if dims.movers_pipe_y is not None and dims.movers_pipe_z is not None:
+        lines.insert(1, f"Perche des mobiles de face : Y = {_metres(dims.movers_pipe_y)}, "
+                        f"Z = {_metres(dims.movers_pipe_z)}")
+    if dims.mover_radius is not None:
+        lines.append(f"Débattement des mobiles de face : rayon {_metres(dims.mover_radius)}")
+    if dims.beam_clearance is not None:
+        lines.append(f"Jeu minimal des faisceaux : {_metres(dims.beam_clearance)}")
     lines += [f"Azimut du rang {j + 1} : {_number(a)}°" for j, a in enumerate(dims.pc_azimuths)]
     lines += [f"Découpe {name} : tube {tube or '-'}, champ {_number(field)}°" for name, tube, field in dims.profiles]
     lines += [f"Charge {load.name} : {_kilograms(load.weight)} ({load.count} appareils)" for load in rig.loads]
