@@ -1,0 +1,31 @@
+version: 1
+id: generic_hazer
+manufacturer: Generic
+model: Machine à brume
+family: hazer
+
+# Weight taken from the Antari HZ-500 (touring haze machine). Its own DMX channel is on/off only
+# (0-250 off, 251-255 on), so the channel below is the generic haze output level.
+sources:
+  - kind: datasheet
+    url: https://antari.com/products/hz-500
+    note: "Reference product: Antari HZ-500, 31.5 kg, 515 x 375 x 355 mm, 1 DMX channel, 400-480 W."
+  - kind: datasheet
+    url: https://www.antari.com/usermanual/HZ/HZ-500/HZ-500.pdf
+    note: "HZ-500 manual Rev.06, section 11 specifications, section 9.2 DMX."
+  - kind: datasheet
+    url: source/antari_hz500_user_manual.pdf
+    note: "Local copy of the manual above."
+
+physical:
+  weight: 31.5             # kg, Antari HZ-500
+
+modes:
+  - name: 1 Ch
+    footprint: 1
+    channels:
+      - {offset: 1, attribute: haze_density, bits: 8, default: 0}
+default_mode: 1 Ch
+
+model3d:
+  kind: none
