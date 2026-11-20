@@ -139,7 +139,8 @@ def test_attribute_mapping_keeps_unknown_names_and_renames_duplicates(converted)
 def test_physical_ranges_and_optics_come_from_the_functions(converted):
     _, out = converted
     document = yaml.safe_load((out / "fixture.yaml").read_text(encoding="utf-8"))
-    assert document["motion"] == {"type": "moving", "pan": {"min": -270, "max": 270}, "tilt": None}
+    assert document["motion"] == {"type": "moving", "pan": {"min": -270, "max": 270, "invert": True},
+                                  "tilt": None}
     assert document["optics"]["beam_angle"] == {"min": 8, "max": 40}
     assert document["optics"]["zoom_invert"] is True
     assert document["optics"]["beam_type"] == "profile"
@@ -242,6 +243,15 @@ def test_ctc_functions_with_several_physical_values_become_a_linear_curve(conver
     assert cct["curve"] == [[0, 6500], [round(19 / 255, 6), 6500], [round(20 / 255, 6), 10000], [1, 2500]]
     assert "curve_mode" not in cct
     assert all("curve" not in c for c in full if c["attribute"] != "cct")
+
+
+@pytest.mark.parametrize(("low", "high", "expected"), [
+    ("270", "-270", {"min": -270, "max": 270, "invert": True}),
+    ("-270", "270", {"min": -270, "max": 270}),
+])
+def test_invert_is_set_only_when_the_function_runs_downwards(low, high, expected):
+    element = ElementTree.fromstring(channel("1", "Head", "Tilt", function("Tilt", "Tilt", "0/1", "0/1", low, high)))
+    assert tool._span([tool._read_channel(element)], "Tilt", True) == expected
 
 
 def test_discrete_channel_sets_with_physical_values_become_a_step_curve():

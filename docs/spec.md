@@ -1192,7 +1192,8 @@ blender/theatre_stage/library/fixtures/<id>/` (Python système, `zipfile` et
   multiples du canal GDTF, valeur par défaut), `default_mode` = premier mode ;
 - attributs, d'après la table ci-dessous ; tout nom inconnu est conservé ;
 - `motion.pan` / `motion.tilt` d'après `PhysicalFrom` / `PhysicalTo` des
-  fonctions de canal ;
+  fonctions de canal, avec `invert: true` quand la première fonction descend
+  (`PhysicalFrom` > `PhysicalTo`) ; même règle pour `blades.rotation` ;
 - `optics.beam_angle` d'après les bornes physiques de `Zoom` (le GDTF donne
   l'angle de faisceau), `optics.flux` et `optics.lens_diameter` d'après la
   géométrie de faisceau (`LuminousFlux`, `BeamRadius`), `optics.beam_type` ;

@@ -432,12 +432,21 @@ def _function(channels, attribute):
     return next((f for f in channel.functions if f.attribute == attribute), None)
 
 
-def _span(channels, attribute) -> dict | None:
-    """Physical min and max over every function of a channel that carries `attribute`."""
+def _span(channels, attribute, invertible: bool = False) -> dict | None:
+    """Physical min and max over every function of a channel that carries `attribute`.
+
+    With `invertible`, `invert: true` is added when the first function runs downwards (spec 12.2).
+    """
     channel = _first(channels, attribute)
-    values = [v for f in (channel.functions if channel else []) if f.attribute == attribute
-              for v in (f.phys_from, f.phys_to) if v is not None]
-    return {"min": min(values), "max": max(values)} if values else None
+    functions = [f for f in (channel.functions if channel else []) if f.attribute == attribute]
+    values = [v for f in functions for v in (f.phys_from, f.phys_to) if v is not None]
+    if not values:
+        return None
+    span: dict = {"min": min(values), "max": max(values)}
+    first = functions[0]
+    if invertible and first.phys_from is not None and first.phys_to is not None and first.phys_from > first.phys_to:
+        span["invert"] = True
+    return span
 
 
 def _gobos(gdtf: _Gdtf, channels: list[_Channel], out: Path, report: Report) -> list[dict]:
@@ -529,7 +538,7 @@ def _blades(channels) -> dict | None:
         return None
     return {"count": 4, "mode": "motorised", "gate_from_lens": None, "span": None,
             "travel": {"open": None, "closed": None}, "sides": None, "angle_limit": None,
-            "rotation": _span(channels, "BladeRot") or _span(channels, "ShaperRot")}
+            "rotation": _span(channels, "BladeRot", True) or _span(channels, "ShaperRot", True)}
 
 
 def convert(gdtf_path, out, fixture_id: str | None = None, modes: list[str] | None = None) -> Report:
@@ -579,7 +588,7 @@ def convert(gdtf_path, out, fixture_id: str | None = None, modes: list[str] | No
     if colour:
         document["colour"] = colour
     document["motion"] = {"type": "moving" if moving else "static",
-                          "pan": _span(channels, "Pan"), "tilt": _span(channels, "Tilt")}
+                          "pan": _span(channels, "Pan", True), "tilt": _span(channels, "Tilt", True)}
     if not moving:
         document["motion"] = {"type": "static"}
     blades = _blades(channels)
