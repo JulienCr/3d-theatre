@@ -78,12 +78,12 @@ class _Expr:
         return cv is not None and cv.channel <= MAX_CHANNEL
 
     def dmx(self, attribute: str) -> str:
-        """Normalized value of a channel (spec 12.4)."""
+        """Normalized value of a channel (spec 12.4); variables are named by channel to stay short."""
         cv, universe = self.ctx.channels[attribute], self.ctx.f.universe
-        coarse = self.scene_var(f"d_{attribute}", f'["dmx_{universe}_{cv.channel}"]')
+        coarse = self.scene_var(f"d{cv.channel}", f'["dmx_{universe}_{cv.channel}"]')
         if cv.bits == 8 or cv.fine_channel is None:
             return coarse
-        fine = self.scene_var(f"d_{attribute}_f", f'["dmx_{universe}_{cv.fine_channel}"]')
+        fine = self.scene_var(f"d{cv.fine_channel}", f'["dmx_{universe}_{cv.fine_channel}"]')
         return f"((256*{coarse}+{fine})/257)"
 
     def cfg(self, key: str) -> str:
