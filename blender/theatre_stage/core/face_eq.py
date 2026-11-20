@@ -20,6 +20,8 @@ AUDIENCE: Vec3 = (0.0, -1.0, 0.0)
 DIRECTIONS = ("L", "R")
 STEP_SCALE_MIN = 1.0 / 16
 PERCENTILE = 0.10
+HOLE_LEVEL = 0.7
+HOLE_WEIGHT = 1.0
 FLOOR_PENALTY = 1000.0
 
 
@@ -101,6 +103,8 @@ class Bounds:
     level_max: float = 1.0
     min_mean_ratio: float = 0.85
     mean_weight: float = 0.5
+    hole_level: float = HOLE_LEVEL
+    hole_weight: float = HOLE_WEIGHT
     max_evaluations: int = 3000
 
     @classmethod
@@ -270,8 +274,8 @@ def illuminance(emitter: Emitter, probe: Probe, *, field: float | None = None, l
 
 @dataclass(frozen=True)
 class Stats:
-    """`p10_ratio` is the 10th percentile over the mean (the objective), `uniformity` `minimum / mean` (U, for
-    information), `cv` the coefficient of variation (standard deviation / mean)."""
+    """`cv`: standard deviation over the mean; `uniformity`: `minimum / mean`; `p10_ratio`: 10th percentile over
+    the mean; `below`: probes under `HOLE_LEVEL` of the mean."""
 
     mean: float
     minimum: float
@@ -279,6 +283,7 @@ class Stats:
     uniformity: float
     cv: float
     p10_ratio: float = 0.0
+    below: int = 0
 
 
 def statistics(values: Sequence[float]) -> Stats:
@@ -291,7 +296,8 @@ def statistics(values: Sequence[float]) -> Stats:
     rank = PERCENTILE * (n - 1)
     below = int(rank)
     p10 = ordered[below] + (ordered[min(below + 1, n - 1)] - ordered[below]) * (rank - below)
-    return Stats(mean, ordered[0], ordered[-1], ordered[0] / mean, math.sqrt(variance) / mean, p10 / mean)
+    holes = sum(1 for v in values if v < HOLE_LEVEL * mean)
+    return Stats(mean, ordered[0], ordered[-1], ordered[0] / mean, math.sqrt(variance) / mean, p10 / mean, holes)
 
 
 @dataclass(frozen=True)
@@ -380,12 +386,15 @@ class _Search:
         return _groups(sums)
 
     def loss(self, groups: Mapping[str, Sequence[float]]) -> float:
-        """Sum over groups of `(1 - P10/mean) + CV - mean_weight * mean_ratio`, plus a steep ramp under the mean floor."""
+        """Sum over groups of `CV + hole_weight * sum(shortfall^2) - mean_weight * mean_ratio`, plus a steep ramp
+        under the mean floor. A shortfall is how far a probe falls under `hole_level` of the mean, in means."""
         total = 0.0
+        floor = self.bounds.hole_level
         for name, vec in groups.items():
             s = statistics(vec)
             ratio = s.mean / self.base_mean[name] if self.base_mean[name] > 0.0 else 1.0
-            total += (1.0 - s.p10_ratio) + s.cv - self.bounds.mean_weight * ratio
+            holes = sum((floor - v / s.mean) ** 2 for v in vec if v < floor * s.mean) if s.mean > 0.0 else 0.0
+            total += s.cv + self.bounds.hole_weight * holes - self.bounds.mean_weight * ratio
             total += FLOOR_PENALTY * max(0.0, self.bounds.min_mean_ratio - ratio)
         return total
 

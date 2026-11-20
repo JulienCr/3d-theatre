@@ -176,8 +176,8 @@ class THEATRE_OT_equalize_face(bpy.types.Operator):
         scene[build.FACE_EQ_KEY] = result.to_json()
         props.rebuild_scene(scene)
         total = result.after["sum"]
-        self.report({"INFO"}, f"Face égalisée : P10/moy somme {result.before['sum'].p10_ratio:.2f} → "
-                              f"{total.p10_ratio:.2f}, CV {result.before['sum'].cv:.2f} → {total.cv:.2f}.")
+        self.report({"INFO"}, f"Face égalisée : Emin/Emoy somme {result.before['sum'].uniformity:.2f} → "
+                              f"{total.uniformity:.2f}, CV {result.before['sum'].cv:.2f} → {total.cv:.2f}.")
         return {"FINISHED"}
 
 

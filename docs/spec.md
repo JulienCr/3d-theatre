@@ -1955,7 +1955,8 @@ rig et range le résultat dans la scène (13.14).
   Derrière la façade, `|X| ≤ Wc/2 − 0,30` ; sur l'avancée, `|X| ≤ L/2 − 0,30` et
   `Y ≥ 0,30` (nez + marge), `L` valant `W` (ligne de coupe du bord de l'avancée) ou `Wc`
   quand un PC du rang 0 est accroché hors du cadre (sa coupe passe sur le bord du montant :
-  `FaceSetup.nose_width`) ; jusqu'au fond de la zone. Défauts : 209 sondes. Les coins
+  `FaceSetup.nose_width`) ; jusqu'au fond de la zone. **Deux hauteurs**, mêmes `X`, `Y` : la tête (`Za`) et le torse
+  (`Hp + 1,20` *(choix)*, `FaceSetup.z_torso`), comptées à égalité : 2 × 209 = 418 sondes par défaut. Les coins
   du nez hors cadre, que les volets coupent exprès, n'y sont plus : ils fixaient seuls `U`.
 - Éclairement vertical `E = niveau · I(θ, φ) · max(0, s·n) / d²` (lux), `s`
   unitaire vers la source. Ni ombre, ni réflexion, ni brume.
@@ -1975,13 +1976,14 @@ rig et range le résultat dans la scène (13.14).
   Sans ce modèle, la corrélation avec Cycles tombait à 0,91 et l'uniformité
   calculée s'écartait de 0,18 de la mesurée (13.14).
 
-**Critère.** Pour chaque direction seule (jardin, cour) et pour leur somme,
-`P10 / Emoy` (10ᵉ centile sur la moyenne, interpolation linéaire, à maximiser) et
-`CV = σ / Emoy` (à minimiser). `U = Emin / Emoy` reste calculé, **pour information**
-(un seul point sombre le fixe). Les deux
+**Critère.** Aucune sonde n'est abandonnée. Pour chaque direction seule (jardin, cour) et
+pour leur somme, sur toute la grille utile : `CV = σ / Emoy` (à minimiser) et une pénalité
+sur chaque sonde sous 70 % de la moyenne *(choix)*, `Σ (0,7 − E/Emoy)²` : un trou profond
+coûte plus qu'une petite perte uniforme. `P10 / Emoy`, `Emin / Emoy` et le nombre de sondes
+sous 70 % sont calculés et affichés, sans entrer dans la perte. Les deux
 directions d'une zone ne sont jamais couplées (ADEC) : elles pèsent chacune
 autant que la somme. Perte minimisée :
-`Σ_g (1 − P10_g/Emoy_g) + CV_g − 0,5 · Emoy_g / Emoy_g(plein)`, `g ∈ {L, R, somme}`.
+`Σ_g CV_g + Σ_i (0,7 − E_i/Emoy_g)²₊ − 0,5 · Emoy_g / Emoy_g(plein)`, `g ∈ {L, R, somme}`.
 
 **Leviers et bornes.**
 
@@ -2027,7 +2029,8 @@ Les sondes les plus sombres avant sont les coins du nez (`X = ±5,55 ; Y = 0,25`
   Fresnel (9 plans de 45°, identiques à 1 % près) sont de révolution.
 - Avec la grille complète, les coins du nez hors cadre (0,3 lx pour 220 lx de moyenne par
   direction, à cause des volets) faisaient `U ≈ 0,02` par direction et le minimum ne
-  bougeait pas (0,19 → 0,17 en somme) ; d'où la grille utile et le 10ᵉ centile.
+  bougeait pas (0,19 → 0,17 en somme) ; d'où la grille utile. Un objectif sur le 10ᵉ centile
+  (essayé ensuite) laissait des trous : le comédien de cour y perdait la moitié de sa lumière.
 - Égaliser aplatit les points chauds : un comédien debout dans un point chaud est
   assombri (13.14).
 
@@ -2064,31 +2067,45 @@ la scène, propriété `theatre_face_eq` (JSON : `signature`, `date`, par PC la 
   rien (état vide). `Layout.face_eq_state` et `Layout.face_eq` les portent.
 - **Niveaux** : le niveau de repos du PC est `rest.pc_level × level` (15.2).
 - **Panneau** (groupe « Implantation lumière », sous les boutons) : date, puis par
-  direction et en somme `P10/Emoy` et `CV` avant → après (plus `Emin/Emoy` en somme, indicatif), éclairement moyen et niveau moyen ;
+  direction et en somme `P10/Emoy` et `CV` avant → après, éclairement moyen et niveau moyen, puis en somme `Emin/Emoy` et
+  le nombre de sondes sous 70 % de la moyenne ;
   une ligne « périmée » quand l'état est `stale`.
 - **Vérification dans Cycles** (2026-11-20, copie de la scène de l'utilisateur, PC de
   face seuls à `pc_level` 0,7, blanc neutre 6 500 K, sans brume ni architecture,
-  rebonds 0, vue Standard) : 209 cartes diffuses verticales de 0,20 × 0,30 m
-  (albédo 0,8) aux sondes de la grille utile, caméra orthographique inclinée de 40°, 512 échantillons
-  sans débruitage (bruit médian 0,15 %), valeur moyenne du cœur de chaque carte. Mesuré
+  rebonds 0, vue Standard) : 418 cartes diffuses verticales de 0,20 × 0,30 m
+  (albédo 0,8) aux sondes de la grille utile, rendues par hauteur (elles se masqueraient), caméra orthographique inclinée de 40°, 512 échantillons
+  sans débruitage (bruit médian 0,14 %), valeur moyenne du cœur de chaque carte. Mesuré
   contre calculé (`pixel = ρ·niveau·E/683` attendu) :
 
-  | Série | Corrélation | Pente | `P10/Emoy` mesuré / calculé | `CV` mesuré / calculé | `Emin/Emoy` mesuré / calculé |
+  | Série | Corrélation | Pente | `CV` mesuré / calculé | `Emin/Emoy` mesuré / calculé | sondes < 70 % mesuré / calculé |
   |---|---|---|---|---|---|
-  | avant, jardin (cour : identique) | 0,9992 | 0,95 | 0,456 / 0,475 | 0,498 / 0,477 | 0,195 / 0,205 |
-  | avant, somme | | | 0,503 / 0,522 | 0,466 / 0,448 | 0,273 / 0,278 |
-  | après, jardin | 0,9971 | 0,95 | 0,727 / 0,732 | 0,266 / 0,255 | 0,291 / 0,297 |
-  | après, cour | 0,9949 | 0,95 | 0,743 / 0,755 | 0,236 / 0,224 | 0,328 / 0,333 |
-  | après, somme | | | 0,762 / 0,759 | 0,235 / 0,226 | 0,499 / 0,497 |
-
-  Sur `Cam_Face`, les trois comédiens de la scène de l'utilisateur, valeur linéaire au torse
-  avant → après : jardin (`X = −0,24`) 0,036 → 0,049 (+38 %), centre (`X = 1,44`)
-  0,067 → 0,068, cour (`X = 3,11`, `Y = 0,77`) 0,052 → 0,027 (**−48 %**) : il se tenait
-  dans le point chaud de l'avancée (1,8 fois la moyenne avant, 1,0 après).
+  | avant, jardin (cour : identique) | 0,9991 | 0,95 | 0,455 / 0,437 | 0,197 / 0,206 | 116 / 114 |
+  | avant, somme | | | 0,429 / 0,414 | 0,275 / 0,281 | 108 / 104 |
+  | après, jardin | 0,988 | 0,94 | 0,272 / 0,245 | 0,487 / 0,483 | 31 / 22 |
+  | après, cour | 0,988 | 0,94 | 0,271 / 0,243 | 0,477 / 0,472 | 33 / 20 |
+  | après, somme | | | 0,254 / 0,228 | 0,599 / 0,585 | 27 / 16 |
 
   La pente vaut 0,95 et non 1 : le demi-plan d'une feuille surestime d'environ 5 %
   la lumière que les feuilles laissent passer. Un PC seul, volets retirés : pente
   1,000 et corrélation 1,000 sur toute la plage d'angles (0 à 50° de l'axe).
+
+  Il reste 27 sondes sur 418 sous 70 % de la moyenne en somme (19 à hauteur de tête, 8 au
+  torse ; 19 au fond, `Y = 5,75`, 6 au nez, `Y = 0,75`, 2 à `Y = 3,75`) : le plancher de moyenne
+  (0,85) et les volets ne laissent pas tout combler. Le niveau moyen tombe à 0,86.
+
+  Sur `Cam_Face`, trois comédiens de la scène de l'utilisateur, valeur linéaire au torse avant
+  → après : jardin (`X = −0,24`) 0,0355 → 0,0344, centre (`X = 1,44`) 0,0674 → 0,0506, cour
+  (`X = 3,11`, `Y = 0,77`) 0,0522 → 0,0280. Le rapport max/min passe de 1,90 à 1,81 : à
+  peine plus proche. Le comédien de cour reste dans un point chaud de l'avancée (1,4 fois la
+  moyenne à hauteur de tête), et la lumière moyenne baisse de 19 % (plancher de 0,85).
+
+- **Lumière sur les murs de salle** (rendus `Cam_Face`, PC de face seuls, un appareil à la
+  fois) : elle vient des deux PC les plus extérieurs du rang 0, `FrontPC_L_01` et
+  `FrontPC_R_04`, accrochés à `X = ±6,65` à moins de 1 m des murs. Leur volet extérieur
+  (coupe sur le bord du montant) la réduit de 40 % (0,00021 → 0,00013, ambiant 0,00005) ; le
+  reste est la pénombre de la feuille et la queue de l'IES si près d'un mur. L'égalisation
+  la double (0,00013 → 0,00021) en décalant la visée de 0,37 m vers l'extérieur : le moteur
+  ne mesure pas les murs.
 
 ## 14. Appareils dans Blender
 

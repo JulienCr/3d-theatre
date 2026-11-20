@@ -80,7 +80,8 @@ def test_equalisation_is_stored_as_json_and_read_back(eq):
 
 def test_equalisation_improves_each_direction_and_the_sum(eq):
     assert set(eq.before) == {"L", "R", "sum"}
-    assert all(eq.after[k].cv < eq.before[k].cv and eq.after[k].p10_ratio > eq.before[k].p10_ratio for k in eq.before)
+    assert all(eq.after[k].cv < eq.before[k].cv and eq.after[k].uniformity > eq.before[k].uniformity for k in eq.before)
+    assert all(eq.after[k].below < eq.before[k].below for k in eq.before)
     assert eq.mean_ratio["sum"] >= RATIO - 0.01 and all(0.0 <= a.level <= 1.0 for a in eq.adjustments)
 
 
@@ -150,6 +151,7 @@ def test_panel_lines_per_state(plain, eq):
 
 def test_useful_grid_stays_inside_the_intended_cuts(plain):
     face, probes = plain.rig.face, probes_of(plain.rig)
+    assert {p.position[2] for p in probes} == {face.z, face.z_torso} and face.z_torso == face.z - 0.5
     assert probes and min(p.position[1] for p in probes) >= USEFUL_MARGIN
     for p in probes:
         half = (face.nose_width if p.position[1] < face.forestage_depth else face.frame_width) / 2

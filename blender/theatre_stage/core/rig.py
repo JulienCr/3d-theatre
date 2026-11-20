@@ -55,6 +55,7 @@ MAX_CHANNEL = 512
 AZIMUTH_STEP = 0.5
 AZIMUTH_SEARCH = 30.0
 FOOTPRINT_MARGIN = 0.02
+TORSO_HEIGHT = 1.20
 PIPE2_NAME = "FrontPipe_02"
 HEIGHT_STEP = 0.05
 TILT_STEP = 1.0
@@ -251,13 +252,14 @@ class RigDims:
 class FaceSetup:
     """Measuring plane of the face equalisation (spec 13.13): width wanted lit on the forestage (the nose
     width, or the frame opening when a row 0 PC hangs outside the frame and cuts on the post), frame
-    width, forestage and area depths, height of the probes."""
+    width, forestage and area depths, height of the head and of the torso probes."""
 
     nose_width: float
     frame_width: float
     forestage_depth: float
     area_depth: float
     z: float
+    z_torso: float
 
 
 @dataclass(frozen=True)
@@ -2100,5 +2102,5 @@ def compute_rig(c: Ctx, library: Library, adjust: Mapping[str, Adjustment] | Non
                    tuple(w.row_supports), masking_clearance, tuple(w.nez_reach))
     rig = Rig(True, zones, tuple(fixtures), tuple(entries), _rest_map(fixtures), _loads(fixtures),
               tuple((k, tuple(v)) for k, v in circuits.items()), _haze_link(w, fixtures), dims,
-              tuple(w.warnings), FaceSetup(_forestage_width(w), c.Wc, c.Ys, ya, za), bool(w.adjust))
+              tuple(w.warnings), FaceSetup(_forestage_width(w), c.Wc, c.Ys, ya, za, c.Hp + TORSO_HEIGHT), bool(w.adjust))
     return rig, Part(tuple(w.objects), warnings=tuple(w.warnings))

@@ -108,6 +108,7 @@ def face_eq_lines(layout: Layout) -> list[str]:
     if total is not None:
         lines.append(f"Éclairement moyen (somme) : {_number(eq.before['sum'].mean, 0)} → "
                      f"{_number(total.mean, 0)} lx, niveau moyen {_number(eq.mean_level, 2)}")
-        lines.append(f"Emin/Emoy (somme, indicatif) : {_number(eq.before['sum'].uniformity, 2)} → "
-                     f"{_number(total.uniformity, 2)}")
+        lines.append(f"Emin/Emoy (somme) : {_number(eq.before['sum'].uniformity, 2)} → "
+                     f"{_number(total.uniformity, 2)} ; sondes sous 70 % de la moyenne : "
+                     f"{eq.before['sum'].below} → {total.below}")
     return lines

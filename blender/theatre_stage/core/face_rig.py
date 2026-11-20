@@ -22,7 +22,7 @@ from .rig import Rig, RigFixture, aim_angles, head_frame
 from .vecmath import cross as _cross
 
 FAMILY = "front_pc"
-VERSION = 2
+VERSION = 3
 USEFUL_MARGIN = 0.30
 DIGITS = 4
 _ROW = re.compile(r"Row(\d+)")
@@ -158,7 +158,7 @@ def signature(rig: Rig, min_mean_ratio: float) -> str:
     parts = [VERSION, _r(min_mean_ratio), pcs,
              None if zones is None else [zones.nx, zones.nr, _r(zones.width), _r(zones.depth)],
              None if face is None else [_r(face.nose_width), _r(face.frame_width), _r(face.forestage_depth),
-                                        _r(face.area_depth), _r(face.z)]]
+                                        _r(face.area_depth), _r(face.z), _r(face.z_torso)]]
     return hashlib.sha1(json.dumps(parts, separators=(",", ":")).encode()).hexdigest()[:16]
 
 
@@ -221,12 +221,13 @@ class FaceEq:
 
 
 def probes_of(rig: Rig) -> tuple[Probe, ...]:
-    """The useful grid: probes `USEFUL_MARGIN` inside the intended cuts of the rig's measuring plane (spec 13.13)."""
+    """The useful grid at head and torso height: probes `USEFUL_MARGIN` inside the intended cuts (spec 13.13)."""
     face = rig.face
     if face is None:
         return ()
-    return face_grid(nose_width=face.nose_width, frame_width=face.frame_width, forestage_depth=face.forestage_depth,
-                     area_depth=face.area_depth, z=face.z, margin=USEFUL_MARGIN)
+    return tuple(p for z in (face.z, face.z_torso) for p in face_grid(
+        nose_width=face.nose_width, frame_width=face.frame_width, forestage_depth=face.forestage_depth,
+        area_depth=face.area_depth, z=z, margin=USEFUL_MARGIN))
 
 
 def equalise_rig(rig: Rig, library: Library, min_mean_ratio: float, now: datetime | None = None) -> FaceEq:

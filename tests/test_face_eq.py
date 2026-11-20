@@ -6,7 +6,7 @@ from dataclasses import replace
 import pytest
 
 from core.face_eq import (
-    AUDIENCE, Bounds, CutEdge, Emitter, Probe, equalise, evaluate, face_grid, illuminance, statistics,
+    AUDIENCE, Bounds, CutEdge, Emitter, Probe, _Search, equalise, evaluate, face_grid, illuminance, statistics,
 )
 from core.fixtures import SHIPPED_DIR
 from core.ies import Photometry, ZoomSet, fallback_profile, load_ies, parse_ies
@@ -121,6 +121,7 @@ def test_optimiser_improves_each_direction_and_the_sum():
     for name in ("L", "R", "sum"):
         assert result.after[name].p10_ratio > result.before[name].p10_ratio + 0.1, name
         assert result.after[name].cv < result.before[name].cv, name
+        assert result.after[name].below <= result.before[name].below, name
     assert result.before["sum"].p10_ratio == pytest.approx(evaluate(emitters, probes)["sum"].p10_ratio)
 
 
@@ -206,7 +207,7 @@ def test_leaf_edge_penumbra_widens_with_the_lens_and_vanishes_for_a_point():
 
 def test_percentile_ignores_one_dark_probe_in_twenty_that_the_minimum_sees():
     stats = statistics([100.0] * 19 + [0.0])
-    assert stats.uniformity == 0.0 and stats.p10_ratio == pytest.approx(100.0 / 95.0)
+    assert stats.uniformity == 0.0 and stats.p10_ratio == pytest.approx(100.0 / 95.0) and stats.below == 1
     assert statistics([0.0] * 3 + [100.0] * 7).p10_ratio == 0.0
 
 
@@ -216,3 +217,13 @@ def test_face_grid_margin_drops_the_nose_rows_and_narrows_every_row():
     assert min(p.position[1] for p in inner) >= 0.3 > min(p.position[1] for p in plain)
     assert max(abs(p.position[0]) for p in inner) <= 5.8 - 0.3 and max(p.position[1] for p in inner) == max(p.position[1] for p in plain)
     assert len(inner) < len(plain)
+
+
+def test_only_probes_under_the_hole_level_add_to_the_loss():
+    probes = [Probe((0.0, 0.0, GRID_Z))] * 20
+    base, hole = Bounds(hole_weight=0.0), Bounds()
+    values = {"L": [100.0] * 19 + [20.0]}
+    deep = _Search([emitter()], probes, hole).loss(values) - _Search([emitter()], probes, base).loss(values)
+    assert deep == pytest.approx((0.7 - 20.0 / 96.0) ** 2)
+    shallow = {"L": [100.0] * 19 + [80.0]}
+    assert _Search([emitter()], probes, hole).loss(shallow) == _Search([emitter()], probes, base).loss(shallow)
