@@ -14,6 +14,7 @@ from pathlib import Path
 from xml.sax.saxutils import escape
 
 from .fixtures import Channel, Fixture, Library, Mode
+from .rig import Rig
 
 WORKSPACE_NAME = "theatre_rig.qxw"
 QLC_VERSION = "4.14.3"
@@ -130,6 +131,7 @@ _PRESETS = {
     "tilt": ("PositionTilt", "PositionTiltFine", "Tilt", "Tilt"),
     "iris": ("ShutterIrisMaxToMin", "ShutterIrisFine", "Iris", "Shutter"),
     "gobo1_rot": ("GoboIndex", "GoboIndexFine", "Rotation gobo 1", "Gobo"),
+    "gobo2_rot": ("GoboIndex", "GoboIndexFine", "Rotation gobo 2", "Gobo"),
     "cto": ("ColorCTOMixer", None, "CTO", "Colour"),
 }
 # attribute -> (group, French label) for channels written without preset
@@ -150,6 +152,9 @@ def _custom_label(attribute: str) -> tuple[str, str]:
     blade = re.fullmatch(r"blade_(\d)([ab])", attribute)
     if blade:
         return "Beam", f"Lame {blade[1]}{blade[2].upper()}"
+    swivel = re.fullmatch(r"blade_(\d)_rot", attribute)
+    if swivel:
+        return "Beam", f"Pivotement lame {swivel[1]}"
     emitter = re.fullmatch(r"emitter_(\d)", attribute)
     if emitter:
         return "Colour", f"Émetteur {emitter[1]}"
@@ -646,3 +651,25 @@ def export_workspace(patched: Sequence[PatchedFixture], library: Library, out_di
     workspace = out_dir / WORKSPACE_NAME
     workspace.write_bytes(export.workspace.encode("utf-8"))
     return ExportResult(workspace, tuple(written), export.reused, export.warnings)
+
+
+def patched_from_rig(rig: Rig) -> tuple[PatchedFixture, ...]:
+    """One `PatchedFixture` per computed fixture, in patch order (spec 16.1).
+
+    Rest bytes are offsets relative to the fixture address; pan and tilt travel in `pan_tilt`.
+    """
+    out = []
+    for f in rig.fixtures:
+        pan_tilt = None
+        if f.pan_dmx is not None and f.tilt_dmx is not None:
+            pan_tilt = (f.pan_dmx[0], f.pan_dmx[-1] if len(f.pan_dmx) > 1 else 0,
+                        f.tilt_dmx[0], f.tilt_dmx[-1] if len(f.tilt_dmx) > 1 else 0)
+        rest = []
+        for cv in f.channels:
+            if pan_tilt is not None and cv.attribute in ("pan", "tilt"):
+                continue
+            offsets = (cv.channel,) if cv.fine_channel is None else (cv.channel, cv.fine_channel)
+            rest.extend((channel - f.address + 1, byte) for channel, byte in zip(offsets, cv.data))
+        out.append(PatchedFixture(f.name, f.fixture_id, f.mode, f.universe, f.address, f.circuit,
+                                  pan_tilt, tuple(rest)))
+    return tuple(out)

@@ -5,6 +5,9 @@ from pathlib import Path
 import pytest
 
 from core.fixtures import SHIPPED_DIR, Library, discover, validate_fixture
+from core.layout import compute_layout
+from core.params import default_params
+from core.rig import default_library
 from core.qlc import (
     FULL_SCENE,
     POSITIONS_SCENE,
@@ -13,6 +16,7 @@ from core.qlc import (
     definition_filename,
     export_workspace,
     fixture_definition_xml,
+    patched_from_rig,
     workspace_xml,
 )
 
@@ -299,3 +303,65 @@ def test_shipped_fiches_export_to_valid_xml(tmp_path):
         for mode in root.findall("{*}Mode"):
             channel_names = [c.text for c in mode]
             assert len(channel_names) == len(set(channel_names)) and set(channel_names) <= set(names)
+
+
+# ---------------------------------------------------------- rig to QLC+
+
+def test_blade_swivel_and_second_gobo_rotation_have_their_own_channels():
+    root = _root(fixture_definition_xml(default_library().get("robe_robin_esprite")))
+    channels = {c.get("Name"): c for c in root.findall("{*}Channel")}
+    for k in range(1, 5):
+        assert channels[f"Pivotement lame {k}"].find("{*}Group").text == "Beam"
+    assert channels["Rotation gobo 2"].get("Preset") == "GoboIndex"
+    assert channels["Rotation gobo 2 fin"].get("Preset") == "GoboIndexFine"
+    assert channels["Rotation des lames"].find("{*}Group").text == "Beam"
+
+
+def test_patched_from_rig_follows_the_computed_patch():
+    rig = compute_layout(default_params()).rig
+    patched = patched_from_rig(rig)
+    assert len(patched) == len(rig.fixtures) == 33
+    for item, entry in zip(patched, rig.patch):
+        assert (item.name, item.universe, item.address) == (entry.name, entry.universe, entry.address)
+    by_name = {p.name: p for p in patched}
+    assert by_name["FrontPC_L_01"].group == "FrontPC_Row1_L"
+    assert by_name["Backlight_01"].group == "Backlight" and by_name["Profile_C"].pan_tilt is None
+    assert by_name["Backlight_01"].pan_tilt is not None
+
+
+def test_patched_from_rig_rest_bytes_are_offsets_from_the_address():
+    rig = compute_layout(default_params()).rig
+    for item, f in zip(patched_from_rig(rig), rig.fixtures):
+        expected = {}
+        for cv in f.channels:
+            if f.moving and cv.attribute in ("pan", "tilt"):
+                continue
+            channels = (cv.channel,) if cv.fine_channel is None else (cv.channel, cv.fine_channel)
+            expected.update({c - f.address + 1: b for c, b in zip(channels, cv.data)})
+        assert dict(item.rest_bytes) == expected
+        assert all(1 <= o <= f.footprint and 0 <= b <= 255 for o, b in item.rest_bytes)
+    dimmer = next(c for c in rig.find("Profile_C").channels if c.attribute == "dimmer")
+    item = {p.name: p for p in patched_from_rig(rig)}["Profile_C"]
+    assert (dimmer.channel - rig.find("Profile_C").address + 1, round(255 * 0.7)) in item.rest_bytes
+
+
+def test_inverted_pan_tilt_palette_reproduces_the_rest_bytes_in_qlc():
+    rig = compute_layout(default_params()).rig
+    library = default_library()
+    assert library.get("martin_mac_aura").motion.pan.invert
+    root = _root(workspace_xml(patched_from_rig(rig), library))
+    palettes = {p.get("Name"): [int(v) for v in p.get("Value").split(",")] for p in root.iterfind(".//{*}Palette")}
+    item = {p.name: p for p in patched_from_rig(rig)}["Backlight_01"]
+    pan_c, pan_f, tilt_c, tilt_f = item.pan_tilt
+    motion = library.get("martin_mac_aura").motion
+    for degrees, (coarse, fine), rng in ((palettes["Repos_Backlight_01"][0], (pan_c, pan_f), motion.pan),
+                                         (palettes["Repos_Backlight_01"][1], (tilt_c, tilt_f), motion.tilt)):
+        # QLC+ sends degrees * 65535 / travel as DMX, with no notion of inverted axes.
+        sent = degrees * 65535 / (rng.max - rng.min)
+        assert abs(sent - (coarse * 256 + fine)) <= 65535 / (rng.max - rng.min)
+
+
+def test_full_rig_exports_without_warning(tmp_path):
+    rig = compute_layout(default_params()).rig
+    result = export_workspace(patched_from_rig(rig), default_library(), tmp_path)
+    assert result.warnings == ()
