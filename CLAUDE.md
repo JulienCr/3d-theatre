@@ -19,7 +19,9 @@ every dimension rule, default value and object name.
   update callbacks do not fire during timeline playback.
 - A fixture is a fiche (`library/fixtures/<id>/fixture.yaml`, spec §12), never
   code. DMX reaches fixtures only through scene props `dmx_<u>_<c>` written by
-  DMX Visualizer (`D:\dev\blender-tools`); `D:\dev\blender-dmx` is out of scope.
+  DMX Visualizer (`JulienCr/blender-dmx-visualizer`, local
+  `D:\dev\blender-dmx-visualizer`); `D:\dev\blender-dmx` is out of scope.
+- Backlog and known gaps are GitHub issues, not a file.
 
 ## Commands
 
