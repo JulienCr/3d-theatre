@@ -2,7 +2,7 @@ import math
 
 import pytest
 
-from core.layout import compute_layout
+from core.layout import HAZE_CEILING_CLEARANCE, compute_layout
 from core.meshes import build_mesh
 from helpers import approx_bounds, bounds, layout, make, modules_off
 
@@ -296,7 +296,7 @@ def test_house_haze_box_ends_on_walls_floor_and_ceiling(stairs, stage):
     assert x1 == pytest.approx(max(floor[0][1], wall_r[0][0]))
     assert y0 == pytest.approx(floor[1][0]) and y1 == pytest.approx(bounds(lay, "Cage_Back")[1][0])
     assert z0 == pytest.approx(floor[2][1])
-    assert z1 == pytest.approx(max(ceiling[2][0], lay.find("Grid_Deck").z_min))
+    assert z1 == pytest.approx(max(ceiling[2][0], lay.find("Grid_Deck").z_min) - HAZE_CEILING_CLEARANCE)
 
 
 def test_stage_haze_fades_toward_the_house_and_keeps_every_side_on_a_wall():

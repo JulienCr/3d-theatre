@@ -892,6 +892,10 @@ Pour voir les faisceaux, sans alourdir le rendu.
   `D`, entre les murs (salle et cage), du sol de salle au plus haut du
   plafond de salle et du gril ; le plateau et ses volumes sont dedans. La
   brume reste homogène.
+  Quand le plafond de salle est le plus haut, le dessus de la boîte reste
+  **1 cm en dessous** (`HAZE_CEILING_CLEARANCE`) : coplanaire avec le plafond,
+  il fait que Cycles saute la face opaque et rend le plafond transparent
+  (mesuré : décaler le dessus de ±1 cm suffit à le corriger).
 - Étendue « plateau » : même largeur et même hauteur que la boîte « plateau
   et salle » (une boîte limitée à la cage aurait ses côtés, son dessus et
   son dessous en plein vide dans la zone de fondu), de `D` jusqu'à

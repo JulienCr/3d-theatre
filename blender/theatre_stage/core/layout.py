@@ -100,6 +100,7 @@ MODULE_WALL = 0.10
 BATTEN_RADIUS = 0.024
 BAY_MARGIN = 0.05
 ROOF_THICKNESS = 0.10
+HAZE_CEILING_CLEARANCE = 0.01  # Cycles skips a ceiling coplanar with the haze top face
 SLAT = 0.05
 SLAT_PITCH = 0.15
 PLEAT_PITCH = 0.30
@@ -962,6 +963,8 @@ def _haze(c: Ctx) -> Part:
         return Part()
     half = max(c.Wk, c.Wt) / 2
     top = max(c.Hf, c.Hp + c.Hg)
+    if c.p["house"]["ceiling"] and top < c.Hf + HAZE_CEILING_CLEARANCE:
+        top = c.Hf - HAZE_CEILING_CLEARANCE
     y0 = -c.Yh if hz["extent"] == "stage_and_house" else c.Ys - hz["falloff"]
     return Part((_box("Haze_Volume", "TS_Haze", ARCHITECTURE, (-half, y0, 0.0), (half, c.D, top)),))
 
