@@ -68,7 +68,8 @@ presets, and rebuilds without losing your materials.
   pipe and on side towers, and three profiles with auto-framed shutters.
 - **Checks.** Collisions between fixture bodies, beams against masking and
   borders, loads per support, DMX patch overlaps.
-- **Live DMX.** QLC+ sends sACN; DMX Visualizer writes scene props
+- **Live DMX.** QLC+ sends sACN;
+  [DMX Visualizer](https://github.com/JulienCr/blender-dmx-visualizer) writes scene props
   `dmx_<universe>_<channel>`; drivers move pan, tilt, shutters, colour, gobos,
   zoom and dimmer on the fixtures.
 - **QLC+ export.** One channel table for Blender and the console: a `.qxw`
@@ -88,8 +89,10 @@ presets, and rebuilds without losing your materials.
 
 - Blender 5.3 on Windows x64 (the manifest ships a PyYAML wheel for CPython
   3.13).
-- For the rig: [QLC+](https://qlcplus.org/) 4.14 and the DMX Visualizer add-on
-  from [`JulienCr/blender-tools`](https://github.com/JulienCr/blender-tools).
+- For the rig: [QLC+](https://qlcplus.org/) 4.14 and the DMX Visualizer
+  extension from
+  [`JulienCr/blender-dmx-visualizer`](https://github.com/JulienCr/blender-dmx-visualizer)
+  (it bundles the `sacn` package).
 - To run the tests: Python 3 with `pytest` and `PyYAML`.
 
 ## Installation
@@ -134,7 +137,8 @@ and object name.
    QLC+.
 2. In QLC+ Inputs/Outputs, give each universe an **E1.31 output, unicast to
    127.0.0.1, multicast off**, one line per universe.
-3. In Blender, enable DMX Visualizer and make it listen on the same universe
+3. In Blender, install and enable the DMX Visualizer extension (see its
+   README), bind it to `127.0.0.1` and make it listen on the same universe
    range. It writes the `dmx_<universe>_<channel>` scene props and the fixtures
    follow through drivers.
 
