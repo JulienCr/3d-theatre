@@ -1016,7 +1016,7 @@ Calculées dans `core`, rédigées en français, affichées dans le panneau :
   absent) :
   - fiches : chargement et rejet des clés manquantes, attribut inconnu
     conservé, canaux 16 bits (`encode` puis `decode` rend `v` à 1/65535 près,
-    `v = 1` donne `255, 255`), empreinte et offsets, les six fiches livrées
+    `v = 1` donne `255, 255`), empreinte et offsets, les sept fiches livrées
     valides, outil GDTF sur un petit GDTF construit dans le test (offsets
     multiples → 16 bits, attributs inconnus gardés) ;
   - implantation : `Yp = −1,40` avec les défauts ; 16 PC et 4 circuits, aucune alerte avec
@@ -1216,7 +1216,7 @@ Une propriété de scène `dmx_<u>_<c>` vaut `octet / 255` (contrat du pont).
   de propriétés (`octet / 255`) et `decode(c, f, bits)` → `v` (`c` et `f` étant
   des propriétés) ; l'aller-retour est testé.
 
-### 12.5 Les six fiches livrées
+### 12.5 Les sept fiches livrées
 
 Identifiants fixes. Les valeurs non citées ici sont « à relever dans la
 fiche constructeur » et saisies dans le YAML avec leur source.
@@ -1226,6 +1226,7 @@ fiche constructeur » et saisies dans le YAML avec leur source.
 | `martin_mac_aura` | `moving_wash` | MAC Aura (pas la XB). GDTF `Martin_Professional@MAC_Aura@20230201NoMeas.gdtf` (dossier du module Open Stage Blender DMX de l'utilisateur), copié dans `source/`. Anneau « Aura » : canaux conservés comme attributs inconnus (`aura_*`), non rendus |
 | `robe_robin_esprite` | `moving_profile` | GDTF « Robin Esprite » `Robe_Lighting@Robin_Esprite@2024-02-15…gdtf`. Lames motorisées `blade_1a` … `blade_4b`, `blade_1_rot` … `blade_4_rot`, `blade_rot` ; gobos et iris ; couleur CMY + CTO |
 | `generic_pc_led` | `pc` | PC LED générique, blanc variable (`cct`), **étalonné sur la photométrie d'un vrai PC LED** dont les sources sont citées dans `sources`. Pas de GDTF |
+| `generic_fresnel_led` | `pc` | Fresnel LED large, blanc variable (`cct`), **étalonné sur le Chauvet Professional Ovation F-915VW** : champ 30–85° (83,8° mesuré sur l'IES), faisceau 17–54°, 6 792 lm, 2800–8000 K, 8,5 kg ; trois profils IES (spot, mi-zoom, flood). Sert les PC de face au manteau qui demandent plus de 54° (`generic_pc_led` s'arrête à 54,4°). Lentille, pivot et étrier estimés. Pas de GDTF |
 | `etc_s4led_s3_lustr_x8` | `profile` | ETC Source Four LED Series 3 Lustr X8 : 10 889 lm, huit émetteurs (rouge profond à indigo, `colour.emitters`), fenêtre de 80 mm, 8,9 kg avec le barillet à lames (6,8 kg sans), lames manuelles, tubes de lentille 5, 10, 14, 19, 26, 36, 50 et 70° (ceux qui ont un plan ETC) ; dix modes DMX de 1 à 21 canaux (manuel v1.4.0 : cinq modes 8 bits de 1 à 12 canaux plus HSIC et quatre modes 16 bits ; la fiche technique n'en annonce que cinq). Pas de GDTF |
 | `etc_s4led_s3_daylight_hdr` | `profile` | Idem avec le module Daylight HDR : 14 214 lm, `cct` de 1900 à 10450 K. Pas de GDTF |
 | `generic_hazer` | `hazer` | Machine à brume à un canal `haze_density` |
