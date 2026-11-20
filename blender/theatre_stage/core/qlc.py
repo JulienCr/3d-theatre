@@ -22,6 +22,7 @@ AUTHOR = "theatre_stage"
 MAX_CHANNELS = 512
 POSITIONS_SCENE = "Repos - positions"
 FULL_SCENE = "Repos - plein feu"
+FACE_SCENE = "Face égalisée"
 _WORKSPACE_NS = "http://www.qlcplus.org/Workspace"
 _DEFINITION_NS = "http://www.qlcplus.org/FixtureDefinition"
 _ILLEGAL_FILE_CHARS = re.compile(r'[<>:"/\\|?*]')
@@ -37,6 +38,7 @@ class PatchedFixture:
 
     `pan_tilt` is (pan coarse, pan fine, tilt coarse, tilt fine), the rest bytes of spec 13.9.
     `rest_bytes` lists (offset, byte) of every other channel at rest (spec 15.2), offsets 1-based.
+    `face` marks a face PC of an equalised rig: its rest bytes also feed the face scene (spec 16.2).
     """
 
     name: str
@@ -47,6 +49,7 @@ class PatchedFixture:
     group: str | None
     pan_tilt: tuple[int, int, int, int] | None = None
     rest_bytes: tuple[tuple[int, int], ...] = ()
+    face: bool = False
 
 
 @dataclass(frozen=True)
@@ -595,7 +598,9 @@ def _write_engine(x: _Xml, placed: list[_Placed]) -> None:
     full = [(p.id, {**{o - 1: b for o, b in p.item.rest_bytes if 0 < o <= p.mode.footprint},
                     **(_position_values(p) or {})}) for p in placed]
     full = [(i, v) for i, v in full if v]
-    scenes = [(POSITIONS_SCENE, positions), (FULL_SCENE, full)]
+    face = [(p.id, {o - 1: b for o, b in p.item.rest_bytes if 0 < o <= p.mode.footprint})
+            for p in placed if p.item.face]
+    scenes = [(POSITIONS_SCENE, positions), (FULL_SCENE, full), (FACE_SCENE, [(i, v) for i, v in face if v])]
     for function_id, (name, content) in enumerate(s for s in scenes if s[1]):
         _scene(x, function_id, name, content)
 
@@ -682,5 +687,5 @@ def patched_from_rig(rig: Rig) -> tuple[PatchedFixture, ...]:
             offsets = (cv.channel,) if cv.fine_channel is None else (cv.channel, cv.fine_channel)
             rest.extend((channel - f.address + 1, byte) for channel, byte in zip(offsets, cv.data))
         out.append(PatchedFixture(f.name, f.fixture_id, f.mode, f.universe, f.address, f.circuit,
-                                  pan_tilt, tuple(rest)))
+                                  pan_tilt, tuple(rest), rig.equalised and f.family == "front_pc"))
     return tuple(out)

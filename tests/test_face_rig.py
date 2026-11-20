@@ -130,6 +130,13 @@ def test_stored_result_is_ignored_silently_when_the_rig_is_off(eq):
     assert layout.face_eq_state == "" and STALE_FACE_EQ not in layout.warnings
 
 
+def test_qlc_marks_the_face_pcs_of_an_equalised_rig_only(plain, eq):
+    assert not any(p.face for p in patched_from_rig(plain.rig))
+    applied = compute_layout(make(), LIB, eq).rig
+    flagged = [p.name for p in patched_from_rig(applied) if p.face]
+    assert flagged == [f.name for f in faces(applied)]
+
+
 def test_panel_lines_per_state(plain, eq):
     assert face_eq_lines(plain) == []
     applied = "\n".join(face_eq_lines(compute_layout(make(), LIB, eq)))

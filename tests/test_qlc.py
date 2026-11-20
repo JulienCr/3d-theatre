@@ -9,6 +9,7 @@ from core.layout import compute_layout
 from core.params import default_params
 from core.rig import default_library
 from core.qlc import (
+    FACE_SCENE,
     FULL_SCENE,
     POSITIONS_SCENE,
     WORKSPACE_NAME,
@@ -390,3 +391,13 @@ def test_existing_fixture_dirs_keeps_only_folders_that_exist(tmp_path):
     assert existing_fixture_dirs(program, home) == (program / "Fixtures",)
     (home / "QLC+" / "Fixtures").mkdir(parents=True)
     assert existing_fixture_dirs(program, home) == (program / "Fixtures", home / "QLC+" / "Fixtures")
+
+
+def test_face_scene_carries_the_rest_bytes_of_the_face_pcs_only(library):
+    patch = tuple(PatchedFixture(*(p.name, p.fixture_id, p.mode, p.universe, p.address, p.group, p.pan_tilt,
+                                   p.rest_bytes), face=p.name == "PC_01") for p in PATCH)
+    root = _root(workspace_xml(patch, library))
+    assert _scene_pairs(root, FACE_SCENE) == {"2": [0, 255, 1, 64]}
+    names = [f.get("Name") for f in root.iterfind(".//{*}Function")]
+    assert names == [POSITIONS_SCENE, FULL_SCENE, FACE_SCENE]
+    assert FACE_SCENE not in [f.get("Name") for f in _root(workspace_xml(PATCH, library)).iterfind(".//{*}Function")]

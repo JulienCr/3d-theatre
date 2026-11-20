@@ -2551,6 +2551,10 @@ canal à base 0, univers `ID = u − 1`), vérifiés dans les sources de QLC+
   (tous les canaux de `rest_bytes`, pan et tilt compris). Une scène sans
   contenu n'est pas écrite. Format `FixtureVal ID="f"` : paires
   `indice,valeur`, indices triés.
+- **Scène « Face égalisée »** (`Face égalisée`) : écrite seulement quand le rig
+  porte une égalisation appliquée (13.14). Les octets de repos de chaque PC de face
+  (niveau égalisé, zoom, température de couleur), sans les autres appareils ;
+  `PatchedFixture.face` marque ces appareils. Les scènes précédentes restent.
 - **Palettes de position** : un élément `<Palette ID="p" Type="PanTilt"
   Name="Repos_<racine>" Value="pan,tilt"/>` par mobile, enfant de `Engine`
   après les groupes (`qlcpalette.cpp`, `Doc::saveXML`). **`Value` est en degrés
