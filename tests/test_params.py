@@ -144,6 +144,9 @@ def test_lighting_defaults_match_the_spec_tables():
     assert d["front_pc"]["fixture"] == "generic_pc_led" and d["front_pc"]["azimuth"] == 45.0
     assert (d["front_pc"]["zone_mode"], d["front_pc"]["columns"], d["front_pc"]["rows"]) == ("auto", 3, 2)
     assert d["profiles"]["fixture"] == "etc_s4led_s3_lustr_x8" and d["profiles"]["blades_mode"] == "auto"
+    pc = d["front_pc"]
+    assert pc["barn_doors"] == "auto" and len([k for k in pc if k.startswith("row") and k != "rows"]) == 4 * 2 * 5
+    assert pc["row3_r_leaf_4"] == 0.0 and pc["row4_l_rotation"] == 0.0
     assert d["rest"] == {"pc_level": 0.7, "profile_level": 0.7, "mover_level": 0.5, "haze_level": 1.0,
                          "cct_left": 3200, "cct_right": 5600, "cct_profile": 4000}
     assert d["haze"]["dmx_driven"] is False and d["haze"]["fixture"] == "generic_hazer"

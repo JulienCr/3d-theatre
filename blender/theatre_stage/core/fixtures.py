@@ -189,6 +189,22 @@ class Blades:
 
 
 @dataclass(frozen=True)
+class BarnDoors:
+    """Four-leaf barn doors (spec 12.2, 13.12). `hinge_radius` is the distance of the hinge line from
+    the beam axis, `hinge_offset` its distance ahead of the lens front; `sides` are the head-frame
+    directions of the hinge sides for a zero `rotation`."""
+
+    count: int
+    leaf_length: float
+    leaf_width: float
+    hinge_radius: float
+    hinge_offset: float
+    sides: tuple[float, ...]
+    max_angle: float
+    rotation: Range
+
+
+@dataclass(frozen=True)
 class GoboSlot:
     name: str
     image: str | None
@@ -348,6 +364,7 @@ class Fixture:
     model3d: Model3D
     qlc: QlcLink | None
     root: Path | None = None
+    barn_doors: BarnDoors | None = None
 
     @property
     def label(self) -> str:
@@ -743,6 +760,48 @@ def _parse_blades(p: _Parser, data) -> Blades | None:
     return Blades(count, mode, gate, span, travel, clean_sides, limit, rotation)
 
 
+DEFAULT_LEAF_SIDES = (0.0, 90.0, 180.0, 270.0)
+DEFAULT_LEAF_MAX_ANGLE = 80.0
+
+
+def _parse_barn_doors(p: _Parser, data, family: str | None, optics: Optics | None) -> BarnDoors | None:
+    node = p.mapping(data, "barn_doors", "", required=False)
+    if node is None:
+        return None
+    pre = "barn_doors."
+    if family is not None and family != "pc":
+        p.fail("barn_doors", "réservé à la famille pc.")
+    count = p.integer(node, "count", pre, required=False, lo=4, hi=4) or 4
+    length = p.number(node, "leaf_length", pre, lo=0, strict_lo=True)
+    width = p.number(node, "leaf_width", pre, lo=0, strict_lo=True)
+    ring = p.number(node, "hinge_diameter", pre, required=False, lo=0, strict_lo=True)
+    offset = p.number(node, "hinge_offset", pre, required=False, lo=0) or 0.0
+    limit = p.number(node, "max_angle", pre, required=False, lo=0, hi=90, strict_lo=True)
+    sides = DEFAULT_LEAF_SIDES
+    raw = p.sequence(node, "sides", pre, required=False)
+    if raw is not None:
+        if len(raw) != 4 or not all(_is_number(v) for v in raw):
+            p.fail("barn_doors.sides", "quatre angles sont attendus.")
+        elif len({float(v) % 360 for v in raw}) != 4:
+            p.fail("barn_doors.sides", "les quatre angles doivent être distincts.")
+        else:
+            sides = tuple(float(v) for v in raw)
+    rotation = p.range(node, "rotation", pre, required=False, lo=-180) or Range(0.0, 0.0)
+    if rotation.max > 180:
+        p.fail("barn_doors.rotation", f"max ({rotation.max:g}) trop grand (maximum 180).")
+    if length is None or width is None or optics is None:
+        return None
+    radius = optics.lens_diameter / 2 if ring is None else ring / 2
+    if ring is not None and ring < optics.lens_diameter:
+        p.fail("barn_doors.hinge_diameter",
+               f"{ring:g} inférieur au diamètre de la lentille ({optics.lens_diameter:g}).")
+    half = math.radians(optics.widest_field / 2)
+    if math.atan2(radius, offset + length) < half:
+        p.fail("barn_doors.leaf_length", f"volets ouverts : ils rogneraient le champ le plus large "
+               f"({optics.widest_field:g}°), longueur maximale {radius / math.tan(half) - offset:.3f} m.")
+    return BarnDoors(count, length, width, radius, offset, sides, limit or DEFAULT_LEAF_MAX_ANGLE, rotation)
+
+
 def _parse_gobos(p: _Parser, data) -> tuple[GoboWheel, ...]:
     node = p.mapping(data, "gobos", "", required=False)
     if node is None:
@@ -1001,6 +1060,7 @@ def validate_fixture(data: Any, folder: Path | None = None) -> Fixture | list[st
     colour = _parse_colour(p, data)
     motion = _parse_motion(p, data, hazer)
     blades = _parse_blades(p, data)
+    barn_doors = _parse_barn_doors(p, data, family, optics)
     gobos = _parse_gobos(p, data)
     iris = _parse_iris(p, data)
     strobe = _parse_strobe(p, data)
@@ -1010,7 +1070,7 @@ def validate_fixture(data: Any, folder: Path | None = None) -> Fixture | list[st
     if p.errors or version is None or fid is None or manufacturer is None or model is None             or family is None or physical is None or default_mode is None or model3d is None:
         return p.errors
     return Fixture(version, fid, manufacturer, model, family, sources, physical, optics, colour,
-                   motion, blades, gobos, iris, strobe, modes, default_mode, model3d, qlc, folder)
+                   motion, blades, gobos, iris, strobe, modes, default_mode, model3d, qlc, folder, barn_doors)
 
 
 def load_fixture(folder: Path) -> Fixture | list[str]:

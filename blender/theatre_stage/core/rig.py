@@ -13,8 +13,9 @@ from dataclasses import dataclass, field, replace
 from functools import lru_cache
 from collections.abc import Mapping
 
+from .barndoors import BarnDoorSet, auto_set, cut_normal, envelope_points, manual_set
 from .fixtures import (
-    SHIPPED_DIR, Blades, Channel, Dimensions, Fixture, Library, Mode, Mount, Optics, Range,
+    SHIPPED_DIR, Blades, Channel, Dimensions, Fixture, Library, LensTube, Mode, Mount, Optics, Range,
     cct_to_rgb, discover, encode,
 )
 from .fixture_models import fixture_model
@@ -25,6 +26,8 @@ from .layout import (
 from .meshes import MAX_DEPTH_FACTOR
 from .params import FIXTURE, GROUPS, PATCH_FAMILIES, side_sets
 from .primitives import PleatedSurface, Truss, Tube
+from .vecmath import add as _add, angle_between as _angle_between, cross as _cross, dot as _dot
+from .vecmath import mul as _mul, sub as _sub, unit as _unit
 
 RIG_COLLECTION = "Theatre_Rig"
 FIXTURES_COLLECTION = "Theatre_Fixtures"
@@ -66,7 +69,8 @@ LEG_GRAZE = 0.30
 MASK_CONE = 0.5
 GOLDEN = 0.6180339887498949
 GOLDEN_STEPS = 24
-TILT_SEARCH_STEPS = 40
+FOCUS_STEP = 0.2
+NEZ_REACH = (1.0, 0.75, 0.5, 0.25, 0.0)
 _MODEL_ERRORS = (OSError, ValueError, KeyError, IndexError, struct.error)
 
 FAMILY_LABELS = {
@@ -175,6 +179,7 @@ class RigFixture:
     channels: tuple[ChannelValue, ...]
     weight: float
     width: float
+    barn_doors: BarnDoorSet | None = None
 
 
 @dataclass(frozen=True)
@@ -221,7 +226,8 @@ class RigDims:
 
     `pc_azimuths` is the crossing azimuth used by each hung PC row, `pc_supports` its (tube, site).
     The `movers_*` fields are None without a second pipe; `beam_clearance` and `masking_clearance`
-    are the smallest beam gaps to a fixture and to a border or leg (spec 13.11).
+    are the smallest beam gaps to a fixture and to a border or leg (spec 13.11). `nez_reach` gives,
+    per row 0 PC, the share of its half of the nez inside its beam (spec 13.7).
     """
 
     pipe_y: float
@@ -237,6 +243,7 @@ class RigDims:
     beam_clearance: float | None = None
     pc_supports: tuple[tuple[str, float], ...] = ()
     masking_clearance: float | None = None
+    nez_reach: tuple[tuple[str, float], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -265,35 +272,6 @@ class Rig:
 
 
 # --------------------------------------------------------------- vector math
-
-def _sub(a, b):
-    return (a[0] - b[0], a[1] - b[1], a[2] - b[2])
-
-
-def _add(a, b):
-    return (a[0] + b[0], a[1] + b[1], a[2] + b[2])
-
-
-def _mul(a, k):
-    return (a[0] * k, a[1] * k, a[2] * k)
-
-
-def _dot(a, b) -> float:
-    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
-
-
-def _cross(a, b):
-    return (a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0])
-
-
-def _unit(a):
-    n = math.sqrt(_dot(a, a))
-    return (a[0] / n, a[1] / n, a[2] / n)
-
-
-def _angle_between(a, b) -> float:
-    return math.degrees(math.acos(min(max(_dot(_unit(a), _unit(b)), -1.0), 1.0)))
-
 
 def head_frame(pan: float, tilt: float) -> tuple[Vec3, Vec3, Vec3]:
     """World images `(x_h, y_h, a)` of the head axes for pan and tilt in degrees (spec 13.9)."""
@@ -378,6 +356,11 @@ class _Work:
         self.walls: tuple[_Wall, ...] = ()
         self.uncovered: list[tuple[str, float, float]] = []
         self.too_wide: list[tuple[str, float, float]] = []
+        self.focus: dict = {}
+        self.nez_reach: list[tuple[str, float]] = []
+        self.nez_missed: list[str] = []
+        self.doors_short: list[str] = []
+        self.doors_misfit: list[str] = []
 
     def warn(self, message: str) -> None:
         if message not in self.warnings:
@@ -490,12 +473,14 @@ def _front_pipe(w: _Work, zones: Zones, za: float) -> tuple[_Support, float]:
 
 @dataclass(frozen=True)
 class _Boxes:
-    """Bounding-box corners of the base, pan and tilt parts of a model, each in its own frame (14.2)."""
+    """Bounding-box corners of the base, pan and tilt parts of a model, each in its own frame (14.2),
+    and the points of the barn doors, in the tilt frame, that only the footprint counts (13.10)."""
 
     base: tuple[Vec3, ...]
     pan: tuple[Vec3, ...]
     tilt: tuple[Vec3, ...]
     pivot: Vec3
+    accessory: tuple[Vec3, ...] = ()
 
 
 def _corners(mesh) -> tuple[Vec3, ...]:
@@ -512,8 +497,9 @@ def _boxes(w: _Work, sheet: _Sheet) -> _Boxes | None:
     if key not in w.boxes:
         try:
             model = fixture_model(sheet.fixture, None, w.models)
+            doors = sheet.fixture.barn_doors if w.c.p["front_pc"]["barn_doors"] != "none" else None
             w.boxes[key] = _Boxes(_corners(model.base), _corners(model.pan), _corners(model.tilt),
-                                  model.tilt_pivot)
+                                  model.tilt_pivot, envelope_points(doors, model.lens_offset) if doors else ())
         except _MODEL_ERRORS:
             w.boxes[key] = None
     return w.boxes[key]
@@ -526,9 +512,10 @@ def posed_points(boxes: _Boxes, root: Vec3, pan: float, tilt: float) -> list[Vec
     ct, st = math.cos(math.radians(tilt)), math.sin(math.radians(tilt))
     px, py, pz = boxes.pivot
     out: list[Vec3] = []
-    for part, corners in (("base", boxes.base), ("pan", boxes.pan), ("tilt", boxes.tilt)):
+    for part, corners in (("base", boxes.base), ("pan", boxes.pan), ("tilt", boxes.tilt),
+                          ("accessory", boxes.accessory)):
         for x, y, z in corners:
-            if part == "tilt":
+            if part in ("tilt", "accessory"):
                 x, y, z = x + px, y * ct + z * st + py, -y * st + z * ct + pz
             if part != "base":
                 x, y = cp * x - sp * y, sp * x + cp * y
@@ -670,13 +657,13 @@ def _row_azimuth(w: _Work, tube: _Support, yr: float, nominal: float, sheet: _Sh
             clear = all(abs(x) <= tube.limit + EPS for _, _, x in row)
             if clear:
                 spans = [_span_at(w, sheet, (x, tube.y, tube.z),
-                                  _wash_target(w, (zones.xs[i], yr), za, (x, tube.y, z)))
-                         for _, i, x in row] + taken
+                                  _wash_target(w, (zones.xs[i], yr), za, (x, tube.y, z), sheet, tag))
+                         for tag, i, x in row] + taken
                 clear = not any(_overlaps(a, b) for n, a in enumerate(spans) for b in spans[n + 1:])
             if clear and all(
                     _wash_required(w, (zones.xs[i], yr), za, (x, tube.y, z),
-                                   _wash_axis(w, (zones.xs[i], yr), za, (x, tube.y, z))) <= widest + EPS
-                    for _, i, x in row) and (not strict or _row_clear(w, sheet, tube, yr, nominal + delta)):
+                                   _wash_axis(w, (zones.xs[i], yr), za, (x, tube.y, z), sheet, tag)) <= widest + EPS
+                    for tag, i, x in row) and (not strict or _row_clear(w, sheet, tube, yr, nominal + delta)):
                 return nominal + delta
     return None
 
@@ -695,13 +682,17 @@ def _site(w: _Work, tube: _Support, yr: float, azimuth: float) -> float:
     return math.degrees(math.atan2(tube.z - w.za, (yr - tube.y) / math.cos(math.radians(azimuth))))
 
 
-def _pc_beam(w: _Work, sheet: _Sheet, name: str, tube: _Support, x: float, zone: tuple[float, float]) -> _Beam:
+def _pc_beam(w: _Work, sheet: _Sheet, name: str, tube: _Support, x: float, zone: tuple[float, float],
+             side: str) -> _Beam:
     """Beam of a face PC hung at `x` on `tube` and aimed at `zone`, as `_build_fixture` will make it."""
     optics, mount = sheet.optics, sheet.mount
     pivot = (x, tube.y, tube.z - mount.hook_height - mount.tilt_axis_height)
-    axis = _wash_axis(w, zone, w.za, pivot)
-    target = _wash_target(w, zone, w.za, pivot)
+    axis = _wash_axis(w, zone, w.za, pivot, sheet, side)
+    target = _wash_target(w, zone, w.za, pivot, sheet, side)
     lens, field_angle, _ = _fit_field(optics, _wash_required(w, zone, w.za, pivot, axis), 1.0)
+    if _front_row(w, zone):
+        focus = _focus(w, sheet, zone, side, pivot)
+        lens, field_angle = focus.tube, focus.field
     source_z = _source(optics, lens, field_angle)[1]
     return _make_beam(name, target, _add(pivot, _mul(axis, source_z)), axis, field_angle,
                       optics.lens_offset - source_z)
@@ -711,7 +702,7 @@ def _row_beams(w: _Work, sheet: _Sheet, tube: _Support, yr: float, azimuth: floa
     zones, beams = w.zones, []
     for tag, i, x in _row_x(zones, yr - tube.y, azimuth):
         x = math.copysign(min(abs(x), tube.limit), x)
-        beams.append(_pc_beam(w, sheet, f"{tag}{i}", tube, x, (zones.xs[i], yr)))
+        beams.append(_pc_beam(w, sheet, f"{tag}{i}", tube, x, (zones.xs[i], yr), tag))
     return beams
 
 
@@ -770,12 +761,12 @@ def _plan_front_pc(w: _Work, zones: Zones, za: float, pipe: _Support, drop_auto:
             name = f"FrontPC_{tag}_{_nn(j * zones.nx + i + 1)}"
             x = _clamp_x(w, name, x, tube)
             pivot = (x, tube.y, tube.z - sheet.mount.hook_height - sheet.mount.tilt_axis_height)
-            target = _wash_target(w, (zones.xs[i], yr), za, pivot)
+            target = _wash_target(w, (zones.xs[i], yr), za, pivot, sheet, tag)
             taken.append(_span_at(w, sheet, (x, tube.y, tube.z), target))
             w.add(_Slot(name, "front_pc", sheet, x, tube.y, tube.z, target,
                         tube.name, tube.name, tube.limit, movable=False,
                         circuit=f"FrontPC_Row{j + 1}_{tag}",
-                        meta={"zone": (zones.xs[i], yr), "side": tag}))
+                        meta={"zone": (zones.xs[i], yr), "side": tag, "row": j}))
 
 
 def _bisector_y(head: Vec3, low: Vec3, high: Vec3, za: float) -> float:
@@ -1007,6 +998,16 @@ def _front_row(w: _Work, zone: tuple[float, float]) -> bool:
     return abs(zone[1] - w.zones.ys[0]) < EPS
 
 
+def _nez_end(w: _Work, xc: float, nominal: float, sign: int, grow: float = 0.0) -> float:
+    """X of the nez corner of a row 0 zone on one side (`sign` -1 jardin, +1 cour): the nez width for
+    the outermost zone when it is wider than the zone, else the zone edge pushed out by `grow`."""
+    ends = w.zones.xs
+    wide = sign * w.c.W / 2
+    if xc == (ends[0] if sign < 0 else ends[-1]) and (wide - nominal) * sign > 0:
+        return wide
+    return nominal + sign * grow
+
+
 def _coverage(w: _Work, zone: tuple[float, float], za: float) -> tuple[Vec3, ...]:
     """Corners of the area a face PC lights (spec 13.7): the zone at `za` plus the overlap. Row 0
     also lights the forestage: its downstage corners are on the floor at the nez, the outer zones
@@ -1019,37 +1020,112 @@ def _coverage(w: _Work, zone: tuple[float, float], za: float) -> tuple[Vec3, ...
         hx = zones.width / 2 * (1 + overlap)
         return tuple((xc + sx * hx, yr + sy * hy, za) for sx in (-1, 1) for sy in (-1, 1))
     grow = (x1 - x0) / 2 * overlap
-    x0 = -w.c.W / 2 if xc == zones.xs[0] and -w.c.W / 2 < x0 else x0 - grow
-    x1 = w.c.W / 2 if xc == zones.xs[-1] and w.c.W / 2 > x1 else x1 + grow
+    x0, x1 = _nez_end(w, xc, x0, -1, grow), _nez_end(w, xc, x1, 1, grow)
     return tuple((x, y, z) for x in (x0, x1) for y, z in ((0.0, w.c.Hp), (yr + hy, za)))
 
 
-def _wash_axis(w: _Work, zone: tuple[float, float], za: float, pivot: Vec3) -> Vec3:
+@dataclass(frozen=True)
+class _Focus:
+    """Aim of a row 0 PC: axis, field and tube, and how much of the nez its beam holds. `reach` is
+    the share of the PC's own half of the nez (zone centre to its edge) inside the 50 % angle;
+    `in_beam` is False when not even the zone centre point is."""
+
+    axis: Vec3
+    field: float
+    tube: LensTube | None
+    in_beam: bool
+    reach: float
+
+
+def _beam_of(optics: Optics, tube: LensTube | None, field: float) -> float:
+    beam = _beam_for(optics, tube, field)
+    return field if beam is None else beam
+
+
+def _fit_beam(optics: Optics, need_field: float, need_beam: float) -> tuple[LensTube | None, float] | None:
+    """Smallest `(tube, field)` whose field is at least `need_field` and beam at least `need_beam`,
+    interpolating the beam linearly with the zoom; None when the fiche cannot."""
+    if optics.lens_tubes:
+        return next(((t, t.field_angle) for t in optics.lens_tubes
+                     if t.field_angle >= need_field - EPS and t.beam_angle >= need_beam - EPS), None)
+    zoom = optics.field_angle
+    if zoom is None or need_field > zoom.max + EPS or _beam_of(optics, None, zoom.max) < need_beam - EPS:
+        return None
+    lo = hi = max(zoom.min, need_field)
+    if _beam_of(optics, None, lo) < need_beam - EPS:
+        hi = zoom.max
+        for _ in range(GOLDEN_STEPS * 2):
+            mid = (lo + hi) / 2
+            lo, hi = (mid, hi) if _beam_of(optics, None, mid) < need_beam - EPS else (lo, mid)
+    return None, hi
+
+
+def _focus(w: _Work, sheet: _Sheet, zone: tuple[float, float], side: str, pivot: Vec3) -> _Focus:
+    """Axis and zoom of a row 0 PC (spec 13.7). The heading is the zone centre's. Among the
+    (field, elevation) pairs with the corners of the covered area in the field and the nez points
+    in the beam, take the smallest field, then the steepest axis. The nez points are the zone centre
+    and a point `reach` of the way to the PC's own edge of the zone; `reach` drops until a pair exists."""
+    key = (sheet.fixture.id, zone, side, pivot)
+    if key in w.focus:
+        return w.focus[key]
+    optics, hp = sheet.optics, w.c.Hp
+    heading = _unit(_sub((zone[0], zone[1], w.za), pivot))
+    flat = math.hypot(heading[0], heading[1])
+    dirs = [_sub(c, pivot) for c in _coverage(w, zone, w.za)]
+    table = []
+    for k in range(1, int(90 / FOCUS_STEP)):
+        t = math.radians(k * FOCUS_STEP)
+        axis = (heading[0] / flat * math.cos(t), heading[1] / flat * math.cos(t), -math.sin(t))
+        table.append((k, axis, 2 * max(_angle_between(axis, d) for d in dirs)))
+    xc = zone[0]
+    sign = -1 if side == "L" else 1
+    edge = _nez_end(w, xc, xc + sign * w.zones.width / 2, sign)
+    result = None
+    for reach in NEZ_REACH:
+        nez = [_sub((xc + reach * (edge - xc), 0.0, hp), pivot), _sub((xc, 0.0, hp), pivot)]
+        best = None
+        for _, axis, need_field in table:
+            fit = _fit_beam(optics, need_field, 2 * max(_angle_between(axis, d) for d in nez))
+            if fit is None:
+                continue
+            if best is None or fit[1] < best[0] - EPS:
+                best = (fit[1], fit[0], axis)
+            elif fit[1] <= best[0] + EPS:
+                best = (best[0], fit[0], axis)  # same field: the steeper axis, scanned later
+        if best is not None:
+            result = _Focus(best[2], best[0], best[1], True, reach)
+            break
+    if result is None:
+        result = _focus_fallback(optics, table, _sub((xc, 0.0, hp), pivot))
+    w.focus[key] = result
+    return result
+
+
+def _focus_fallback(optics: Optics, table, centre: Vec3) -> _Focus:
+    """No feasible pair: the widest zoom and the elevation that misses the field or the beam the least."""
+    widest = optics.lens_tubes[-1] if optics.lens_tubes else None
+    top = optics.widest_field
+
+    def miss(item) -> tuple[float, int]:
+        _, axis, need_field = item
+        return max(need_field - top, 2 * _angle_between(axis, centre) - _beam_of(optics, widest, top)), -item[0]
+
+    return _Focus(min(table, key=miss)[1], top, widest, False, 0.0)
+
+
+def _wash_axis(w: _Work, zone: tuple[float, float], za: float, pivot: Vec3,
+               sheet: _Sheet | None = None, side: str = "") -> Vec3:
     """Unit axis of a face PC at `pivot`: toward the zone centre. Row 0 keeps that heading and
-    takes the elevation that narrows the field the most, which lowers it onto the forestage."""
-    axis = _unit(_sub((zone[0], zone[1], za), pivot))
-    if not _front_row(w, zone):
-        return axis
-    flat = math.hypot(axis[0], axis[1])
-    dirs = [_unit(_sub(c, pivot)) for c in _coverage(w, zone, za)]
-
-    def tilted(t: float) -> Vec3:
-        return (axis[0] / flat * math.cos(t), axis[1] / flat * math.cos(t), -math.sin(t))
-
-    def widest(t: float) -> float:
-        a = tilted(t)
-        return max(_angle_between(a, d) for d in dirs)
-
-    lo, hi = 0.0, math.pi / 2
-    for _ in range(TILT_SEARCH_STEPS):
-        m1, m2 = lo + (hi - lo) / 3, hi - (hi - lo) / 3
-        lo, hi = (lo, m2) if widest(m1) < widest(m2) else (m1, hi)
-    return tilted((lo + hi) / 2)
+    lowers the elevation onto the forestage (`_focus`); it needs its `sheet` and `side`."""
+    if _front_row(w, zone) and sheet is not None:
+        return _focus(w, sheet, zone, side, pivot).axis
+    return _unit(_sub((zone[0], zone[1], za), pivot))
 
 
-def _wash_target(w: _Work, zone: tuple[float, float], za: float, pivot: Vec3) -> Vec3:
+def _wash_target(w: _Work, zone: tuple[float, float], za: float, pivot: Vec3,
+                 sheet: _Sheet | None = None, side: str = "") -> Vec3:
     """Where the axis of a face PC at `pivot` crosses the aim plane `za`."""
-    axis = _wash_axis(w, zone, za, pivot)
+    axis = _wash_axis(w, zone, za, pivot, sheet, side)
     return _add(pivot, _mul(axis, (pivot[2] - za) / -axis[2]))
 
 
@@ -1059,7 +1135,7 @@ def _wash_required(w: _Work, zone: tuple[float, float], za: float, pivot: Vec3, 
 
 
 def _wash_field(w: _Work, s: _Slot, pivot: Vec3, axis: Vec3):
-    """Field of a face PC covering its zone plus overlap (spec 13.7)."""
+    """Field of a face PC covering its zone plus overlap (spec 13.7); row 0 takes the zoom of its focus."""
     optics = s.sheet.fixture.optics
     f_req = _wash_required(w, s.meta["zone"], s.target[2], pivot, axis)
     tube, value, status = _fit_field(optics, f_req, 1.0)
@@ -1067,6 +1143,13 @@ def _wash_field(w: _Work, s: _Slot, pivot: Vec3, axis: Vec3):
         w.uncovered.append((s.name, f_req, value))
     elif status == "wide":
         w.too_wide.append((s.name, f_req, value))
+    if s.meta["row"] == 0:
+        focus = _focus(w, s.sheet, s.meta["zone"], s.meta["side"], pivot)
+        w.nez_reach.append((s.name, focus.reach))
+        if not focus.in_beam:
+            w.nez_missed.append(s.name)
+        if status != "uncovered":
+            tube, value = focus.tube, focus.field
     return tube, value
 
 
@@ -1094,14 +1177,7 @@ def _cut_planes(w: _Work, third: int, source: Vec3, axis: Vec3) -> dict[str, Vec
         "left": ((b0, 0.0, za), (0.0, 1.0, 0.0)),
         "right": ((b0 + c.Wc / 3, 0.0, za), (0.0, 1.0, 0.0)),
     }
-    planes = {}
-    for name, (q, u) in lines.items():
-        cross = _cross(_sub(q, source), u)
-        if _dot(cross, cross) < EPS:
-            continue
-        n = _unit(cross)
-        planes[name] = _mul(n, -1.0) if _dot(n, axis) > 0 else n
-    return planes
+    return {name: n for name, line in lines.items() if (n := cut_normal(source, line, axis)) is not None}
 
 
 def _required_field(planes: Mapping[str, Vec3], axis: Vec3) -> float:
@@ -1287,6 +1363,49 @@ def _channel_values(s: _Slot, overrides: Mapping[str, float]) -> tuple[ChannelVa
     return tuple(out)
 
 
+def _pc_cut_lines(w: _Work, s: _Slot) -> dict[str, tuple[Vec3, Vec3]]:
+    """Target lines of the barn door cuts of a face PC (spec 13.12): row 0 keeps the light off the
+    stage front, the lintel, and the sides of the forestage (a PC hung beside the frame cuts on the
+    inner edge of the post instead); the other rows stay within the masking opening and below the
+    first border upstage of their zone."""
+    c, zone = w.c, s.meta["zone"]
+    if s.meta["row"] == 0:
+        lines = {"bottom": ((0.0, 0.0, c.Hp), (1.0, 0.0, 0.0)),
+                 "top": ((0.0, c.Ys + PROSCENIUM_RECESS, c.Hp + c.Hc), (1.0, 0.0, 0.0))}
+        for name, sign in (("left", -1), ("right", 1)):
+            outside = s.x * sign > c.Wc / 2
+            lines[name] = (((sign * c.Wc / 2, c.Ys + PROSCENIUM_RECESS, 0.0), (0.0, 0.0, 1.0)) if outside
+                           else ((sign * c.W / 2, 0.0, c.Hp), (0.0, 1.0, 0.0)))
+        return lines
+    half = min(c.p["masking"]["opening"], c.Wk) / 2
+    lines = {"left": ((-half, zone[1], 0.0), (0.0, 0.0, 1.0)), "right": ((half, zone[1], 0.0), (0.0, 0.0, 1.0))}
+    far = zone[1] + w.zones.depth / 2 * (1 + c.p["front_pc"]["overlap"])
+    borders = [b for b in w.walls if not b.is_leg and b.a[1] >= far - EPS]
+    if borders:
+        border = min(borders, key=lambda b: b.a[1])
+        lines["top"] = ((0.0, border.a[1] - border.half, border.z0 - BEAM_MARGIN), (1.0, 0.0, 0.0))
+    return lines
+
+
+def _pc_doors(w: _Work, s: _Slot, pivot: Vec3, frame, field_angle: float) -> BarnDoorSet | None:
+    """Barn doors of a face PC: closed on the cut lines (auto) or as set in the params (manual)."""
+    node, doors = w.c.p["front_pc"], s.sheet.fixture.barn_doors
+    if doors is None or node["barn_doors"] == "none":
+        return None
+    offset = s.sheet.optics.lens_offset
+    if node["barn_doors"] == "manual":
+        prefix = f"row{s.meta['row'] + 1}_{s.meta['side'].lower()}_"
+        return manual_set(doors, offset, frame, [node[f"{prefix}leaf_{k}"] for k in range(1, 5)],
+                          node[f"{prefix}rotation"])
+    lens = _add(pivot, _mul(frame[2], offset))
+    result, dropped = auto_set(doors, offset, frame, lens, field_angle, _pc_cut_lines(w, s))
+    if dropped:
+        w.doors_misfit.append(s.name)
+    if not all(leaf.reached for leaf in result.leaves):
+        w.doors_short.append(s.name)
+    return result
+
+
 def _build_hazer(w: _Work, s: _Slot, levels) -> RigFixture:
     over = {"haze_density": levels["hazer"]}
     here = (s.x, s.y, s.z)
@@ -1315,13 +1434,14 @@ def _build_fixture(w: _Work, s: _Slot, levels, done: set) -> RigFixture:
         over.update({k: v for k, v in (("pan", pv), ("tilt", tv)) if v is not None})
     frame = head_frame(pan, tilt)
     axis = frame[2]
-    tube, field_angle, kind, source_z, blades = None, None, "", 0.0, None
+    tube, field_angle, kind, source_z, blades, doors = None, None, "", 0.0, None, None
     source = pivot
     kelvin = None
     if s.family == "front_pc":
         tube, field_angle = _wash_field(w, s, pivot, axis)
         kind, source_z, _ = _source(optics, tube, field_angle)
         source = _add(pivot, _mul(axis, source_z))
+        doors = _pc_doors(w, s, pivot, frame, field_angle)
         if mode.channel("zoom") is not None and optics.field_angle is not None:
             over["zoom"] = _zoom_fraction(optics, field_angle)
         kelvin = p["rest"]["cct_left" if s.meta["side"] == "L" else "cct_right"]
@@ -1345,7 +1465,7 @@ def _build_fixture(w: _Work, s: _Slot, levels, done: set) -> RigFixture:
         pivot, s.target, axis, moving, pan, tilt, pan_data, tilt_data, field_angle,
         _beam_for(optics, tube, field_angle), tube.name if tube else None, optics.aperture(tube),
         kind, source_z, source, blades, s.circuit, kelvin, s.universe, s.address, mode.footprint,
-        _channel_values(s, over), fx.physical.weight, s.width)
+        _channel_values(s, over), fx.physical.weight, s.width, doors)
 
 
 def _mover_source(optics: Optics) -> tuple[str, float, float]:
@@ -1403,7 +1523,8 @@ class _Body:
 @dataclass(frozen=True)
 class _Beam:
     """Cone of a fixture aimed at `target`: apex, unit axis, half angle (as cos and sin). Only the
-    part from `start` (the lens plane) to `length` (the target, 30 m at most) along the axis counts."""
+    part from `start` (the lens plane) to `length` (the target, 30 m at most) along the axis counts.
+    `cuts` are the normals of the barn door planes through the apex: nothing beyond them is lit."""
 
     owner: str
     target: Vec3
@@ -1413,12 +1534,14 @@ class _Beam:
     sin: float
     start: float
     length: float
+    cuts: tuple[Vec3, ...] = ()
 
 
-def _make_beam(owner: str, target: Vec3, apex: Vec3, axis: Vec3, field_angle: float, start: float) -> _Beam:
+def _make_beam(owner: str, target: Vec3, apex: Vec3, axis: Vec3, field_angle: float, start: float,
+               cuts: tuple[Vec3, ...] = ()) -> _Beam:
     half = math.radians(field_angle) / 2
     length = min(BEAM_RANGE, _dot(_sub(target, apex), axis))
-    return _Beam(owner, target, apex, axis, math.cos(half), math.sin(half), start, length)
+    return _Beam(owner, target, apex, axis, math.cos(half), math.sin(half), start, length, cuts)
 
 
 def _cloud(name: str, support: str, points, reach: _Cylinder | None = None) -> _Body:
@@ -1507,8 +1630,9 @@ def _scene(w: _Work, slots, built: Mapping[str, RigFixture]) -> tuple[list[_Beam
         f = built[s.name]
         bodies.append(_static_body(w, f, s.sheet))
         if f.field_angle is not None:
+            cuts = f.barn_doors.normals if f.barn_doors else ()
             beams.append(_make_beam(f.name, f.aim, f.source, f.axis, f.field_angle,
-                                    s.sheet.optics.lens_offset - f.source_z))
+                                    s.sheet.optics.lens_offset - f.source_z, cuts))
     return beams, bodies
 
 
@@ -1535,6 +1659,8 @@ def _min_gap(beam: _Beam, points) -> float | None:
         x, y, z = x - ox, y - oy, z - oz
         a = x * ax + y * ay + z * az
         if a <= beam.start or a > beam.length:
+            continue
+        if any(n[0] * x + n[1] * y + n[2] * z > EPS for n in beam.cuts):
             continue
         gap = math.sqrt(max(x * x + y * y + z * z - a * a, 0.0)) * cos - a * sin
         if best is None or gap < best:
@@ -1856,6 +1982,12 @@ def _field_alerts(w: _Work) -> None:
         names = w.listed(n for n, _, _ in w.too_wide)
         w.warn(f"Champ trop large : {len(w.too_wide)} PC de face ne peuvent pas se resserrer "
                f"autour de leur zone ({names}).")
+    if w.nez_missed:
+        w.warn(f"Face : le nez n'est pas dans le faisceau de {w.listed(w.nez_missed)}.")
+    if w.doors_short:
+        w.warn(f"Volets : coupe hors course (volets trop courts ou angle limité) pour {w.listed(w.doors_short)}.")
+    if w.doors_misfit:
+        w.warn(f"Volets : coupes non adaptées aux volets de la fiche pour {w.listed(w.doors_misfit)}.")
 
 
 def _pipe_part(w: _Work, pipe: _Support, index: int) -> None:
@@ -1918,7 +2050,7 @@ def compute_rig(c: Ctx, library: Library) -> tuple[Rig, Part]:
                      if f.family == "profiles" and f.field_angle is not None)
     dims = RigDims(pipe.y, pipe.z, ya, drop, profiles, ranges, tuple(w.azimuths),
                    pipe2.y if pipe2 else None, pipe2.z if pipe2 else None, w.mover_radius, clearance,
-                   tuple(w.row_supports), masking_clearance)
+                   tuple(w.row_supports), masking_clearance, tuple(w.nez_reach))
     rig = Rig(True, zones, tuple(fixtures), tuple(entries), _rest_map(fixtures), _loads(fixtures),
               tuple((k, tuple(v)) for k, v in circuits.items()), _haze_link(w, fixtures), dims,
               tuple(w.warnings))

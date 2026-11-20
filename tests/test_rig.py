@@ -301,7 +301,7 @@ def test_front_row_field_covers_its_zone_and_the_forestage_corners():
         far = z.ys[0] + z.depth / 2 * 1.2
         corners = [(x, y, zc) for x in (x0, x1) for y, zc in ((0.0, ctx.Hp), (far, 2.9))]
         spans = [angle(f.axis, sub(c, f.pivot)) for c in corners]
-        assert f.field_angle == pytest.approx(2 * max(spans), abs=0.05)
+        assert f.field_angle >= 2 * max(spans) - 0.05
         assert f.axis[2] < unit(sub((z.xs[col], z.ys[0], 2.9), f.pivot))[2]
 
 
@@ -311,7 +311,8 @@ def test_pc_field_alerts_when_out_of_the_zoom_range():
     assert all(f.field_angle == 70.0 for f in wide.rig.by_family("front_pc"))
     narrow = rig_layout(front_pc={"fixture": "rig_pc_tight", "fixture_far": "rig_pc_tight"})
     assert has(narrow.warnings, "Champ trop large")
-    assert all(f.field_angle == 66.0 for f in narrow.rig.by_family("front_pc"))
+    assert all(f.field_angle == 66.0 for f in pcs(narrow.rig) if f.support != "FrontPipe")
+    assert all(66.0 <= f.field_angle <= 70.0 for f in pcs(narrow.rig) if f.support == "FrontPipe")
     assert not has(rig_layout().warnings, "Zone non couverte") and not has(
         rig_layout().warnings, "Champ trop large")
 
@@ -881,7 +882,7 @@ def test_the_front_row_aim_is_lowered_onto_the_forestage_with_the_same_heading()
         heading = math.atan2(f.aim[0] - f.pivot[0], f.aim[1] - f.pivot[1])
         centre = (z.xs[int(f.name[-2:]) - 1], z.ys[0], 2.9)
         assert heading == pytest.approx(math.atan2(centre[0] - f.pivot[0], centre[1] - f.pivot[1]))
-        assert 0.3 < centre[1] - f.aim[1] < 0.8 and f.aim[2] == pytest.approx(2.9)
+        assert 0.5 < centre[1] - f.aim[1] < 1.1 and f.aim[2] == pytest.approx(2.9)
 
 
 def test_far_rows_use_their_own_fixture_and_mode_and_the_front_row_keeps_its_own():
@@ -1213,3 +1214,190 @@ def test_a_beam_crossing_a_leg_is_blocked_unless_it_grazes_the_edge_or_aims_behi
     graze = _wall_gaps([aimed((-3.9, 4.5, 2.9), (-5.0, 2.9, 6.8))], [leg])
     assert not graze or graze[0][2] >= BEAM_MARGIN
     assert _wall_gaps([aimed((-4.6, 4.5, 2.9), (-9.0, 2.9, 6.8))], [leg]) == []
+
+
+# ------------------------------------------------------- row 0 focus, barn doors
+
+def row0(rig):
+    return [f for f in pcs(rig) if f.support == "FrontPipe"]
+
+
+def beam_miss(rig, points):
+    """Points of the floor outside the 50 % cone of every row 0 PC."""
+    return [p for p in points
+            if not any(angle(f.axis, sub(p, f.pivot)) <= f.beam_angle / 2 + 1e-6 for f in row0(rig))]
+
+
+def nez_points(params, step=0.25):
+    ctx, _ = _make_context(params)
+    return ctx, [(-ctx.W / 2 + i * step, 0.0, ctx.Hp) for i in range(round(ctx.W / step) + 1)]
+
+
+@pytest.mark.parametrize("name", list(CASES))
+def test_the_nez_at_floor_level_sits_in_the_beam_of_both_pc_of_every_zone(name):
+    params = CASES[name]()
+    rig = shipped_layout(params).rig
+    ctx, _ = _make_context(params)
+    zones = rig.zones
+    for f in row0(rig):
+        centre = (zones.xs[int(f.name[-2:]) - 1], 0.0, ctx.Hp)
+        assert angle(f.axis, sub(centre, f.pivot)) <= f.beam_angle / 2 + 1e-6, f.name
+        assert f.beam_angle < f.field_angle
+
+
+@pytest.mark.parametrize("name", list(CASES))
+def test_the_nez_row_is_in_a_beam_except_the_last_metre_the_outer_pc_cannot_reach(name):
+    params = CASES[name]()
+    ctx, points = nez_points(params)
+    missed = beam_miss(shipped_layout(params).rig, points)
+    assert all(abs(p[0]) > ctx.W / 2 - 1.3 for p in missed), [round(p[0], 2) for p in missed]
+    if name == "user_2":
+        assert missed == []
+
+
+def test_the_row_zero_aim_is_the_smallest_field_that_holds_the_nez_in_the_beam():
+    params = make()
+    ctx, _ = _make_context(params)
+    rig = shipped_layout(params).rig
+    pc = rig.find("FrontPC_L_03")
+    zones = rig.zones
+    xc = zones.xs[int(pc.name[-2:]) - 1]
+    edge = (xc - zones.width / 2, 0.0, ctx.Hp)
+    grow = zones.width / 2 * 0.2
+    corners = [(x, y, z) for x in (xc - zones.width / 2 - grow, xc + zones.width / 2 + grow)
+               for y, z in ((0.0, ctx.Hp), (zones.ys[0] + zones.depth / 2 * 1.2, 2.9))]
+    assert angle(pc.axis, sub(edge, pc.pivot)) == pytest.approx(pc.beam_angle / 2, abs=0.1)
+    assert max(angle(pc.axis, sub(c, pc.pivot)) for c in corners) == pytest.approx(pc.field_angle / 2, abs=0.1)
+    assert pc.field_angle == pytest.approx(51.0, abs=0.2) and pc.aim[1] == pytest.approx(0.54, abs=0.03)
+    reach = dict(rig.dims.nez_reach)
+    assert reach["FrontPC_L_03"] == 1.0 and 0.0 <= reach["FrontPC_L_01"] < 1.0 and reach["FrontPC_R_04"] < 1.0
+
+
+def test_an_unreachable_nez_keeps_the_best_aim_and_names_the_pc():
+    rig = rig_layout(front_pc={"zone_width": 10.0}).rig
+    assert has(rig.warnings, "Face : le nez n'est pas dans le faisceau de FrontPC_")
+    assert all(f.field_angle == 70.0 for f in row0(rig))
+    assert not has(rig_layout().warnings, "le nez n'est pas")
+
+
+def lit(f, p):
+    """Whether the cut beam of `f` reaches `p`: inside the field cone and not beyond a closed leaf."""
+    from core.barndoors import beyond
+    if angle(f.axis, sub(p, f.source)) > f.field_angle / 2:
+        return False
+    return not (f.barn_doors and beyond(f.barn_doors.normals, f.source, p))
+
+
+def spill_points(ctx):
+    front = [(-ctx.W / 2 + 0.2 * i, 0.0, ctx.Hp - 0.02 - 0.2 * k)
+             for i in range(round(ctx.W / 0.2) + 1) for k in range(int((ctx.Hp - 0.02) / 0.2) + 1)]
+    walls = [(sx * ctx.Wt / 2, -ctx.Yh + 0.25 * i, 0.25 * k) for sx in (-1, 1)
+             for i in range(int((ctx.Yh + ctx.Ys) / 0.25) + 1) for k in range(int(ctx.Hf / 0.25) + 1)]
+    lintel = [(-ctx.W / 2 + 0.25 * i, ctx.Ys + 0.05, ctx.Hp + ctx.Hc + 0.1 * k)
+              for i in range(round(ctx.W / 0.25) + 1) for k in range(1, 8)]
+    return front, walls, lintel
+
+
+@pytest.mark.parametrize("name", list(CASES))
+def test_closed_leaves_keep_row_zero_off_the_stage_front_the_house_walls_and_the_lintel(name):
+    params = CASES[name]()
+    ctx, _ = _make_context(params)
+    front, walls, lintel = spill_points(ctx)
+    rig = shipped_layout(params).rig
+    for f in row0(rig):
+        assert f.barn_doors is not None, f.name
+        for points in (front, walls, lintel):
+            assert [p for p in points if lit(f, p)] == [], f.name
+    params["front_pc"]["barn_doors"] = "none"
+    bare = shipped_layout(params).rig
+    assert all(f.barn_doors is None for f in pcs(bare))
+    assert any(lit(f, p) for f in row0(bare) for p in front)
+
+
+def test_row_zero_leaf_angles_of_a_central_and_an_outer_pc():
+    rig = shipped_layout(make()).rig
+    inner, outer = rig.find("FrontPC_L_03").barn_doors, rig.find("FrontPC_L_01").barn_doors
+    cuts = lambda d: {leaf.cut: leaf for leaf in d.leaves if leaf.cut}
+    assert set(cuts(inner)) == {"bottom", "right"} and set(cuts(outer)) == {"bottom", "left"}
+    assert cuts(inner)["bottom"].angle == pytest.approx(28.3, abs=0.5)
+    assert cuts(outer)["bottom"].angle == pytest.approx(24.0, abs=0.5)
+    assert all(leaf.reached and leaf.active for d in (inner, outer) for leaf in cuts(d).values())
+    assert [leaf.angle for leaf in inner.leaves if not leaf.cut] == [0.0, 0.0]
+
+
+def shipped_rig(params):
+    """Rig with the shipped fiches only: the far rows take the Fresnel of the defaults."""
+    return compute_layout(params, SHIPPED).rig
+
+
+@pytest.mark.parametrize("name", list(CASES))
+def test_every_scene_closes_leaves_on_every_pc_without_an_alert(name):
+    rig = shipped_rig(CASES[name]())
+    assert rig.warnings == ()
+    assert all(f.barn_doors is not None for f in pcs(rig))
+    assert all(leaf.reached for f in pcs(rig) for leaf in f.barn_doors.leaves)
+
+
+def test_far_rows_close_their_side_leaves_on_the_masking_opening():
+    rig = shipped_rig(make())
+    far = [f for f in pcs(rig) if f.support != "FrontPipe"]
+    assert far and all(f.barn_doors is not None for f in far) and not has(rig.warnings, "Volets")
+    assert all({leaf.cut for leaf in f.barn_doors.leaves} - {""} <= {"left", "right", "top"} for f in far)
+    assert any(leaf.cut == "left" for f in far for leaf in f.barn_doors.leaves)
+
+
+def test_a_fiche_without_barn_doors_or_with_the_option_off_gets_none():
+    assert all(f.barn_doors is None for f in pcs(rig_of()))
+    assert all(f.barn_doors is None for f in pcs(shipped_rig(make(front_pc={"barn_doors": "none"}))))
+
+
+def test_manual_leaves_follow_the_params_per_row_and_direction():
+    params = make(front_pc={"barn_doors": "manual", "row1_l_leaf_2": 30.0, "row1_l_rotation": 12.0,
+                            "row2_r_leaf_4": 95.0, "row2_r_rotation": -20.0})
+    rig = shipped_rig(params)
+    first, far = rig.find("FrontPC_L_02").barn_doors, rig.find("FrontPC_R_06").barn_doors
+    assert [leaf.angle for leaf in first.leaves] == [0.0, 30.0, 0.0, 0.0] and first.rotation == 12.0
+    assert [leaf.angle for leaf in far.leaves] == [0.0, 0.0, 0.0, 80.0] and far.rotation == -20.0
+    assert {leaf.cut for leaf in first.leaves} == {""} and rig.find("FrontPC_R_02").barn_doors.rotation == 0.0
+
+
+def test_barn_doors_widen_the_posed_footprint_of_a_pc():
+    from core.barndoors import envelope_points
+    from core.rig import _Sheet, _Work, _boxes
+    params = make()
+    ctx, _ = _make_context(params)
+    fx = SHIPPED.get("generic_pc_led")
+    zones = compute_layout(params, SHIPPED).rig.zones
+    sheet = _Sheet(fx, fx.mode(), fx.physical.dimensions, fx.physical.mount, fx.optics)
+    boxes = _boxes(_Work(ctx, SHIPPED, zones, 2.9, 7.0), sheet)
+    assert len(boxes.accessory) == len(envelope_points(fx.barn_doors, fx.optics.lens_offset))
+    params["front_pc"]["barn_doors"] = "none"
+    assert _boxes(_Work(_make_context(params)[0], SHIPPED, zones, 2.9, 7.0), sheet).accessory == ()
+    wide = posed_points(boxes, (0.0, 0.0, 7.0), 40.0, 40.0)
+    narrow = posed_points(_Boxes(boxes.base, boxes.pan, boxes.tilt, boxes.pivot), (0.0, 0.0, 7.0), 40.0, 40.0)
+    extent = lambda points, i: max(p[i] for p in points) - min(p[i] for p in points)
+    assert all(extent(wide, i) >= extent(narrow, i) - 1e-9 for i in range(3))
+    assert any(extent(wide, i) > extent(narrow, i) + 0.02 for i in range(3))
+    assert len(wide) == len(narrow) + len(boxes.accessory)
+
+
+def test_a_beam_is_not_blocked_by_what_lies_beyond_its_closed_leaf():
+    apex = (0.0, 0.0, 6.0)
+    border = {w.name: w for w in _walls(_make_context(make())[0])}["Border_00"]
+    open_beam = aimed((0.0, 4.0, 4.89), apex, 80.0)
+    assert _wall_gaps([open_beam], [border])[0][2] < BEAM_MARGIN
+    closed = _make_beam("B", open_beam.target, apex, open_beam.axis, 80.0, 0.0, cuts=((0.0, 0.6, 0.8),))
+    assert _wall_gaps([closed], [border]) == []
+    body = _cloud("Other", "FrontPipe", [(0.0, 2.0, 5.5)])
+    assert _gaps([open_beam], [body])[0][2] < 0 and _gaps([closed], [body]) == []
+
+
+def test_unreachable_cuts_raise_a_volets_alert():
+    from dataclasses import replace as dc_replace
+    from core.fixtures import Library
+    fx = SHIPPED.get("generic_pc_led")
+    short = dc_replace(fx, barn_doors=dc_replace(fx.barn_doors, leaf_length=0.01, max_angle=5.0))
+    library = Library({**SHIPPED.fixtures, fx.id: short}, ())
+    rig = compute_layout(make(), library).rig
+    assert has(rig.warnings, "Volets : coupe hors course", "FrontPC_")
+    assert not has(shipped_rig(make()).warnings, "Volets")

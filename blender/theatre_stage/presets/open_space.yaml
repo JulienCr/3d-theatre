@@ -154,6 +154,47 @@ front_pc:
   rows: 2
   azimuth: 45.0
   overlap: 0.2
+  barn_doors: auto
+  row1_l_leaf_1: 0.0
+  row1_l_leaf_2: 0.0
+  row1_l_leaf_3: 0.0
+  row1_l_leaf_4: 0.0
+  row1_l_rotation: 0.0
+  row1_r_leaf_1: 0.0
+  row1_r_leaf_2: 0.0
+  row1_r_leaf_3: 0.0
+  row1_r_leaf_4: 0.0
+  row1_r_rotation: 0.0
+  row2_l_leaf_1: 0.0
+  row2_l_leaf_2: 0.0
+  row2_l_leaf_3: 0.0
+  row2_l_leaf_4: 0.0
+  row2_l_rotation: 0.0
+  row2_r_leaf_1: 0.0
+  row2_r_leaf_2: 0.0
+  row2_r_leaf_3: 0.0
+  row2_r_leaf_4: 0.0
+  row2_r_rotation: 0.0
+  row3_l_leaf_1: 0.0
+  row3_l_leaf_2: 0.0
+  row3_l_leaf_3: 0.0
+  row3_l_leaf_4: 0.0
+  row3_l_rotation: 0.0
+  row3_r_leaf_1: 0.0
+  row3_r_leaf_2: 0.0
+  row3_r_leaf_3: 0.0
+  row3_r_leaf_4: 0.0
+  row3_r_rotation: 0.0
+  row4_l_leaf_1: 0.0
+  row4_l_leaf_2: 0.0
+  row4_l_leaf_3: 0.0
+  row4_l_leaf_4: 0.0
+  row4_l_rotation: 0.0
+  row4_r_leaf_1: 0.0
+  row4_r_leaf_2: 0.0
+  row4_r_leaf_3: 0.0
+  row4_r_leaf_4: 0.0
+  row4_r_rotation: 0.0
 profiles:
   enabled: true
   fixture: etc_s4led_s3_lustr_x8

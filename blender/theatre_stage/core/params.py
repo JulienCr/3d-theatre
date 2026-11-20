@@ -184,6 +184,23 @@ def _profile_manual_params() -> tuple[Param, ...]:
     return tuple(out)
 
 
+def _barn_door_manual_params() -> tuple[Param, ...]:
+    """Manual leaf setting of every PC row and direction, read only when `barn_doors` is `manual`."""
+    shown = ("barn_doors", "manual")
+    out = []
+    for row in range(1, 5):
+        for tag, name in (("l", "jardin"), ("r", "cour")):
+            for leaf in range(1, 5):
+                out.append(_angle(f"row{row}_{tag}_leaf_{leaf}", 0.0, 0.0, 80.0,
+                                  f"Volet {leaf} (rang {row}, {name})",
+                                  "Fermeture du volet : 0 dégagé, parallèle au faisceau.", shown_when=shown))
+            out.append(_angle(f"row{row}_{tag}_rotation", 0.0, -90.0, 90.0,
+                              f"Rotation des volets (rang {row}, {name})",
+                              "Rotation de l'ensemble des volets autour de l'axe du faisceau, "
+                              "dans les limites de la fiche.", shown_when=shown))
+    return tuple(out)
+
+
 def _patch_params() -> tuple[Param, ...]:
     out = []
     for key, label, universe in PATCH_FAMILIES:
@@ -386,6 +403,12 @@ SCHEMA: tuple[Group, ...] = (
                "Angle en plan entre l'axe de la salle et chaque faisceau (45° : fiche ADEC 6-3)."),
         _float("overlap", 0.20, 0.0, 1.0, "Recouvrement",
                "Fraction de la taille d'une zone ajoutée au champ couvert, pour les zones voisines."),
+        _enum("barn_doors", "auto", "Volets", "Volets (coupe-flux) des PC dont la fiche en porte.", (
+            ("none", "Aucun", "Pas de volets."),
+            ("auto", "Automatique", "Volets fermés sur la limite à ne pas éclairer."),
+            ("manual", "Manuel", "Fermeture et rotation réglées à la main, par rang et par direction."),
+        )),
+        *_barn_door_manual_params(),
     )),
     Group("profiles", "Découpes", (
         _flag("enabled", True, "Découpes", "Trois découpes de face : jardin, centre, cour."),

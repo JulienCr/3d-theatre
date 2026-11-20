@@ -32,6 +32,9 @@ sources:
   - kind: other
     url: source/chauvet_ovation_f915vw_dmx_chart.pdf
     note: "Local copy of the DMX chart above."
+  - kind: datasheet
+    url: https://chauvetprofessional.com/wp-content/uploads/pdf/en/OF75BARNDOORV2.pdf
+    note: "Accessory named by the F-915VW datasheet: Ovation F 7.5 in Barndoor V2, 8 leaves, 7.5 in (191 mm) slot, open 323 x 308 x 52 mm, closed 256 x 202 x 52 mm, 0.9 kg (an older sheet gives open 464 x 451 mm). No leaf length is published."
   - kind: ies
     url: https://chauvetprofessional.com/wp-content/uploads/2015/01/OvationF-915VW-IES.zip
     note: "Chauvet IES zip (27 files: 3 zoom positions x 9 colour settings); the Full Power files are copied below."
@@ -87,6 +90,16 @@ modes:
     channels:
       - {offset: 1, attribute: dimmer, bits: 8, default: 0}
 default_mode: Dimmer 16 bit + CCT
+
+# Chauvet Ovation F 7.5 in Barndoor V2 (8 leaves, modelled as 4). Overall open and closed sizes only: leaf values are estimated.
+barn_doors:
+  count: 4
+  leaf_length: 0.10          # estimated; must stay under r / tan(field max / 2) = 0.104 m so open leaves do not clip the 85 deg field
+  leaf_width: 0.19           # estimated: about the 191 mm slot
+  hinge_offset: 0.0          # estimated: hinge on the lens front plane
+  sides: [0, 90, 180, 270]   # head frame, zero rotation
+  max_angle: 80              # estimated
+  rotation: {min: -90, max: 90}   # estimated
 
 model3d:
   kind: procedural

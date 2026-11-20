@@ -22,6 +22,9 @@ sources:
   - kind: other
     url: source/robe_t15_pc_dimensions.pdf
     note: "Local copy of the drawing above."
+  - kind: datasheet
+    url: source/robe_t15_pc_datasheet.pdf
+    note: "Accessories list: 4-leaf Barndoor module (Robe 10981010) and 8-leaf (10981011). Robe publishes no dimensions for them; barn_doors values below are estimated."
   - kind: other
     url: https://www.robe.cz/res/downloads/dmx_charts/Robin_T15_Fresnel_PC_DMX_charts.pdf
     note: "Robe DMX protocol v1.2 (mode 4: CRI, CTC, green, zoom 16 bit, dimmer 16 bit)."
@@ -95,6 +98,16 @@ modes:
     channels:
       - {offset: 1, attribute: dimmer, bits: 8, default: 0}
 default_mode: Dimmer 16 bit + CCT
+
+# Robe 4-leaf Barndoor module 10981010. No published dimensions: every value is estimated.
+barn_doors:
+  count: 4
+  leaf_length: 0.15          # estimated; must stay under r / tan(field max / 2) = 0.194 m so open leaves do not clip the field
+  leaf_width: 0.20           # estimated: about the lens diameter
+  hinge_offset: 0.0          # estimated: hinge on the lens front plane
+  sides: [0, 90, 180, 270]   # head frame, zero rotation
+  max_angle: 80              # estimated
+  rotation: {min: -90, max: 90}   # estimated: the whole accessory turns about the beam axis
 
 model3d:
   kind: procedural

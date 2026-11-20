@@ -19,6 +19,13 @@ Les clés que le GDTF ne donne pas restent à `null  # à compléter` : tant
 qu'elles y sont, la fiche est invalide et absente des listes du panneau
 (famille, accroche, décalage de lentille, champ, géométrie des lames…).
 
+## Volets (coupe-flux)
+
+Une fiche de famille `pc` peut porter une section `barn_doors` (longueur et largeur
+de feuille, anneau de charnières, rotation de l'ensemble) : voir `docs/spec.md`,
+sections 12.2 et 13.12. Les valeurs non publiées par le constructeur sont des
+estimations, notées comme telles dans la fiche.
+
 ## Contrôle
 
 Après avoir complété la fiche, cliquer sur « Recharger la bibliothèque » dans

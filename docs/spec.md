@@ -34,6 +34,8 @@ blender/theatre_stage/
     fixtures.py              fiches d'appareils, attributs DMX, 8/16 bits, photométrie
     meshio.py                lecture .obj et .glb (sommets, faces) sans bpy
     rig.py                   implantation (perche, pylônes, zones, visées, lames), patch
+    barndoors.py             volets des PC : angles de feuilles pour une coupe (13.12)
+    vecmath.py               vecteurs `(x, y, z)` partagés par rig.py et barndoors.py
     qlc.py                   génération texte des .qxw et .qxf (XML)
   props.py                   PropertyGroup généré depuis le schéma
   build.py                   cotes -> objets, matériaux, lumières, caméras
@@ -317,6 +319,9 @@ Chaque jeu :
 | `rows` | Rangs en profondeur (mode manuel) | 2 | 1 – 4 |
 | `azimuth` | Azimut de croisement | 45° | 10 – 80 |
 | `overlap` | Recouvrement des zones voisines *(choix)* | 0,20 | 0 – 1 |
+| `barn_doors` | Volets | automatique | aucun / automatique / manuel |
+| `row<j>_<d>_leaf_<k>` | Volet `k` (rang `j`, direction `d`) | 0° | 0 – 80° |
+| `row<j>_<d>_rotation` | Rotation des volets (rang `j`, direction `d`) | 0° | −90 – 90° |
 
 `fixture` et `mode` servent le rang 0, sur la perche de face ; `fixture_far`
 et `mode_far` servent tous les rangs accrochés à une porteuse de la scène
@@ -324,6 +329,13 @@ et `mode_far` servent tous les rangs accrochés à une porteuse de la scène
 un champ que le PC (54,4°) n'atteint pas, un Fresnel large (85°) oui. Fiche
 `fixture_far` absente, de la mauvaise famille ou incomplète : les rangs du fond
 prennent la fiche de `fixture`, avec une alerte (jamais d'arrêt).
+
+`barn_doors` règle les volets (13.12) des PC dont la fiche porte une section
+`barn_doors` : `aucun` n'en pose pas, `automatique` les ferme sur les limites
+à ne pas éclairer, `manuel` lit les clés `row<j>_<d>_…` (`j` de 1 à 4, `d` = `l`
+jardin ou `r` cour ; `leaf_1` à `leaf_4` dans l'ordre de `barn_doors.sides` de la
+fiche, rotation de l'ensemble en degrés), bornées par la fiche. Panneau :
+les clés `row…` ne s'affichent qu'en mode manuel.
 
 `overlap` : fraction de la taille d'une zone ajoutée au champ couvert (section
 13.7). Azimut 45° : fiche ADEC 6-3, nominal : 13.7 le règle rang par rang
@@ -999,7 +1011,8 @@ Calculées dans `core`, rédigées en français, affichées dans le panneau :
   frise ou par un pendrillon, débattement de pan et tilt qui touche un
   appareil d'un autre support (13.11) ;
 - photométrie : zone non couverte ou champ trop large, hors de la plage de
-  zoom (13.7) ; découpe sans tube assez large, lame hors course ou lames non
+  zoom, nez hors du faisceau d'un PC du rang 0 (13.7) ; volets hors course
+  ou coupes non adaptées aux volets de la fiche (13.12) ; découpe sans tube assez large, lame hors course ou lames non
   adaptées (13.8) ; pan/tilt hors course (13.9) ; température de couleur de
   repos hors de la plage de la fiche (15.2) ;
 - patch : recouvrement d'adresses, univers au-delà de 512 canaux (15.1) ;
@@ -1130,6 +1143,13 @@ obligatoire à `null` (laissée ainsi par l'outil GDTF) rend la fiche invalide.
 | `blades.sides` | 4 angles | si lames | direction « côté lame » de chaque lame, rotation du cadrage nulle, de +X vers +Y de la tête (13.8) |
 | `blades.angle_limit` | angle | si lames | inclinaison maximale du bord, ± |
 | `blades.rotation` | `{min, max, invert}` | si `motorised` | course de `blade_rot` ; `invert` comme pour `motion.pan` |
+| `barn_doors.count` | entier (4) | non | volets (coupe-flux) de la famille `pc` ; la section absente = pas de volets ; `count` vaut 4 |
+| `barn_doors.leaf_length`, `leaf_width` | m | si volets | longueur d'une feuille (de la charnière au bord libre) et largeur du bord |
+| `barn_doors.hinge_diameter` | m | non (`optics.lens_diameter`) | diamètre de l'anneau de charnières, au moins celui de la lentille |
+| `barn_doors.hinge_offset` | m | non (0) | distance de la ligne de charnières devant la face avant de la lentille |
+| `barn_doors.sides` | 4 angles | non (`[0, 90, 180, 270]`) | direction du côté charnière de chaque feuille, accessoire non tourné, de +X vers +Y de la tête (13.12) |
+| `barn_doors.max_angle` | angle | non (80) | fermeture maximale d'une feuille, entre 0 (exclu) et 90 |
+| `barn_doors.rotation` | `{min, max}` | non (0 et 0) | course de rotation de l'ensemble autour de l'axe du faisceau, en degrés, dans [−180, 180] |
 | `gobos.wheels` | liste de `{name, rotation_range, slots}` | non | `name` : `gobo1` ou `gobo2` ; `rotation_range` : degrés pour `gobo1_rot` (360 par défaut) ; `slots` : liste de `{name, image, dmx}`, `image` facultatif (absent ou `null` : fente ouverte), `dmx` : `[octet_min, octet_max]` |
 | `iris.min_ratio` | 0–1 | non | rapport du diamètre d'iris fermé au diamètre ouvert |
 | `strobe` | `{open, closed, strobe}` | non | `open`, `closed` : `[octet_min, octet_max]` ; `strobe` : `{from, to, hz_min, hz_max}` |
@@ -1320,7 +1340,11 @@ d'erreurs en français. `Fixture.ies_for(field_angle, tube)` donne le fichier IE
 du tube, sinon celui du profil de zoom le plus proche, sinon `None`. Contrôles : clés obligatoires (conditions du tableau
 12.2) ; `id` égal au nom du dossier ; offsets uniques et ≤ `footprint` ; canaux
 16 bits dont `fine` est libre ; `default_mode` existant ; `min` ≤ `max` ;
-`lens_tubes` triés par `field_angle`, noms uniques, `beam_angle` ≤ `field_angle` ; `curve` d'au moins deux points, `dmx` strictement croissant dans [0, 1] ; `ies` en liste : `field_angle` uniques ; `blades.sides` à quatre angles distincts ;
+`lens_tubes` triés par `field_angle`, noms uniques, `beam_angle` ≤ `field_angle` ; `curve` d'au moins deux points, `dmx` strictement croissant dans [0, 1] ; `ies` en liste : `field_angle` uniques ; `blades.sides` à quatre angles distincts ; `barn_doors` réservé à la
+famille `pc`, `count` 4, `sides` à quatre angles distincts, `hinge_diameter` ≥
+`optics.lens_diameter`, feuille ouverte qui ne rogne pas le champ le plus large
+(`atan(r / (hinge_offset + leaf_length)) ≥ champ max / 2`, `r` le rayon des
+charnières) ;
 un attribut du vocabulaire n'apparaît qu'une fois par mode (sauf attributs
 inconnus) ; exactement l'un de `field_angle` et `lens_tubes` ; au moins une
 source ; fichiers cités présents (images de gobos, maillages, IES, sources
@@ -1542,20 +1566,42 @@ Deux appareils par zone, un par direction `d` : `L` (accroché côté jardin,
   recul du front engendre.
 - **Visée, rang 0** : le cap (en plan) est celui qui vise le centre de la zone,
   donc le croisement et le parallélisme des faisceaux (azimut `az_0`) ne
-  changent pas ; **l'élévation** est celle qui minimise le champ requis pour
-  les quatre coins (recherche par tiers sur `[0°, 90°]`), ce qui abaisse la
-  visée de la profondeur de l'avancée : sur les défauts, le point où l'axe
-  coupe le plan `Za` passe de `Y = 1,50` à environ 1,06. Ce point devient la
-  cible `T_i0` des vérifications de 13.10 et 13.11.
+  changent pas. **L'élévation et le zoom se choisissent ensemble** *(choix)* :
+  parmi les couples (champ `F`, élévation) où les quatre coins de la zone
+  couverte sont dans le champ (`F ≥ F_req`) et où les **points du nez** sont
+  dans le **faisceau** (angle plein à 50 %, interpolé linéairement avec le
+  zoom entre `beam_angle` min et max de la fiche, celui du tube pour des
+  lentilles fixes), on prend le plus petit champ, puis l'axe le plus bas
+  (le plus proche du nez). Points du nez d'un appareil : le sol du nez au
+  centre de la zone, `(xc, 0, Hp)`, et un point à la fraction `reach` du
+  chemin vers le bord de **sa** moitié de zone (`L` : bord jardin, `R` : bord
+  cour, `±W/2` pour la zone extrême). `reach` vaut 1, puis 0,75 ; 0,5 ; 0,25 ;
+  0 : on retient la plus grande qui admet un couple. Aucun couple, même avec
+  le seul centre : élévation qui manque le moins, zoom maximal, et alerte
+  « Face : le nez n'est pas dans le faisceau de … » (liste des appareils).
+  Raison : à l'élévation qui minimise le champ, le nez au sol était au bord
+  du champ (10 %) et l'avancée restait sombre ; le cœur du faisceau tombait
+  plus loin vers le fond. Avec les défauts (T15 PC : champ 13°–54,4°,
+  faisceau 8,5°–31°) : les six PC intérieurs ont `reach` 1, champ 51,0°,
+  élévation 54,0° (la visée coupe `Za` à `Y = 0,54` au lieu de 1,07, champ
+  45,9° avant) ; les deux PC extrêmes (`FrontPC_L_01`, `FrontPC_R_04`) ont
+  `reach` 0, champ 54,1°, élévation 49,0° (`Y = 0,92`, champ 53,6° avant) :
+  un faisceau de 31° au plus ne tient pas à la fois les quatre coins de leur
+  zone et le bord extrême du nez, si bien que le dernier mètre du nez de
+  chaque côté (`|X| > 4,7`) reste dans le champ sans être dans le faisceau.
+  Le point où l'axe coupe `Za` devient la cible `T_i0` des vérifications de
+  13.10 et 13.11. `RigDims.nez_reach` donne `reach` de chaque PC du rang 0.
 - **Champ requis** `F_req = 2·max_k angle(a, (C_k − P)/|C_k − P|)` sur les
   quatre coins de la zone couverte.
   `F = clamp(F_req, field_angle.min, field_angle.max)`, puis le faisceau suit
-  (12.3). `F_req > max` : alerte « Zone non couverte » ; `F_req < min` :
+  (12.3) ; au rang 0, `F` est celui du couple retenu ci-dessus (au moins `F_req`). `F_req > max` : alerte « Zone non couverte » ; `F_req < min` :
   alerte « Champ trop large » (une alerte par nature, qui liste les appareils).
   Le champ est une valeur de construction, pas un canal DMX, sauf si le mode
   a `zoom` : la valeur de repos du canal reproduit alors `F` (15.2). Les tests
   vérifient que tout point du sol de l'avancée (grille de 0,25 m sur
-  `X ∈ [−W/2, W/2]`, `Y ∈ [0, Ys]`) est dans le cône d'au moins un PC du rang 0.
+  `X ∈ [−W/2, W/2]`, `Y ∈ [0, Ys]`) est dans le cône d'au moins un PC du rang 0, que le sol du nez
+  au centre de chaque zone est dans le faisceau de ses deux PC, et que les points
+  du nez à moins de `W/2 − 1,3` m de l'axe sont dans le faisceau d'au moins un PC.
 - **Circuits** : un par (rang, direction) : `FrontPC_Row1_L`, `FrontPC_Row1_R`,
   `FrontPC_Row2_L`, `FrontPC_Row2_R` (4 circuits pour 16 PC). Propriété
   `theatre_circuit` de la racine.
@@ -1693,7 +1739,11 @@ Récapitulatif des visées de repos :
   perche ou une porteuse, Z pour les mobiles empilés d'un pylône. Deux
   appareils d'un même support **se touchent** quand leurs intervalles se
   recouvrent. Pan et tilt sont ceux de la visée de repos, à la position
-  d'accroche essayée.
+  d'accroche essayée. **Les volets** (13.12) comptent dans l'empreinte, quelle
+  que soit leur fermeture : deux anneaux de 12 points de rayon
+  `√(r² + (leaf_width/2)²)` à la charnière et au bord libre d'une feuille
+  ouverte, placés dans le repère de la tête, ce qui majore toute rotation. Ils ne comptent
+  ni dans les corps rencontrés ni dans l'enveloppe des mobiles.
 - **Enveloppe d'un appareil à pan et tilt** (contre, mobiles de face, mobiles
   de pylône) : il ne reste pas à sa visée de repos, donc son empreinte est le
   volume balayé sur toute sa course, quel que soit le pan. Rayon
@@ -1781,9 +1831,85 @@ visé : un appareil derrière le point visé ne coupe pas la lumière qui y arri
   corps d'un PC de la perche de manteau), 0,14 m aux frises (mobile de face
   contre `Border_00`), 0,06 m aux pendrillons (ligne de visée de
   `FrontPC_L_05` contre `Leg_L_01`).
-- Limites : le cône est celui du champ de la fiche, sans les lames d'une
-  découpe ni le gobo ; les autres obstacles sont les appareils, les frises et
+- **Volets** : le faisceau d'un PC dont les volets sont fermés est coupé par les plans
+  de ces volets (13.12) : un point de frise, de pendrillon ou d'appareil situé
+  au-delà du plan d'une feuille fermée n'est pas touché. Les choix du rang
+  (porteuse, azimut) se font avant les volets, sur le faisceau entier ; seul le
+  contrôle final tient compte des volets.
+- Limites : le cône est celui du champ de la fiche, avec les volets des PC mais
+  sans les lames d'une découpe ni le gobo ; les autres obstacles sont les appareils, les frises et
   les pendrillons, pas les tubes, le cadre, le rideau de scène ni les pylônes.
+
+### 13.12 Volets des PC (« coupe-flux »)
+
+Accessoire à quatre feuilles des fiches `pc` (`barn_doors`, 12.2) ; calcul pur dans
+`core/barndoors.py`, résultat dans `RigFixture.barn_doors` (`BarnDoorSet`, `None`
+sans fiche ou avec `front_pc.barn_doors = none`). Même idée que les lames
+(13.8) : une coupe est un plan par le centre de la lentille `L`, convention du
+50 %. Repère de la tête `(x_h, y_h, a)` (13.9) ; `r` rayon des charnières,
+`m = hinge_offset`, `λ = leaf_length`, `ρ` rotation de l'ensemble.
+
+- **Feuille `k`** : rectangle `λ × leaf_width` articulé sur la charnière, tangente à
+  l'anneau de rayon `r` au côté `o_k = cos(side_k + ρ)·x_h + sin(side_k + ρ)·y_h`
+  (tangente `q_k = a × o_k`), à `m` devant la lentille. Ouverte (angle `θ = 0`)
+  elle est parallèle à l'axe ; fermée de `θ` elle bascule vers l'axe. Le bord
+  libre a pour centre `T = L + (r − λ sin θ)·o_k + (m + λ cos θ)·a`. Le plan
+  qu'elle ouvre sur le faisceau passe par `L` et le bord libre, de normale
+  `n_k = ((m + λ cos θ)·o_k − (r − λ sin θ)·a)` normée, tournée vers la
+  feuille (côté sombre) : c'est le plan que les contrôles 13.11 utilisent.
+- **Coupes visées** : chaque coupe est une droite cible `(Q, u)` du monde, de
+  plan `Π` par `L` (normale `n`, orientée côté sombre, `n·a < 0`, comme en 13.8).
+  Elle ne compte que si `Π` rencontre le cône du champ (`asin(−n·a) < F/2`) :
+  sinon la feuille qui lui reviendrait reste ouverte.
+- **Attribution et rotation** : les coupes retenues vont à des feuilles
+  distinctes qui leur font face (`o_k·n > 0`). Un bord de feuille a la direction
+  `q_k` : le plan réalisé ne contient la droite cible que si `n·q_k = 0`. La
+  rotation `ρ` de la course de la fiche (pas de 1° puis 0,1°, fenêtre d'une
+  période de `360 / count` degrés quand les côtés sont régulièrement espacés)
+  et l'attribution minimisent `Σ p_c·(n_c·q_k)²`, `p_c` valant 1000 pour la
+  coupe basse, 100 pour la haute et 1 pour les côtés *(choix : la face du nez
+  et le linteau passent avant les bords de l'avancée)*. À égalité, `|ρ|` le plus
+  petit. Aucune attribution possible : on abandonne la coupe la moins
+  restrictive (la plus loin de l'axe) et l'alerte « Volets : coupes non adaptées
+  aux volets de la fiche pour … » nomme l'appareil.
+- **Angle** : `θ` met le bord libre sur la coupe, au point `E` de la droite
+  cible le plus proche de l'axe : avec `v = E − L`, `s = v·a` et `c = v·o_k`, on
+  résout `r·s − m·c = λ (s sin θ + c cos θ)`, soit `θ = φ − acos(K)`,
+  `φ = atan2(s, c)`, `K = (r·s − m·c) / (λ·√(s² + c²))`. `θ` est borné à
+  `[0, max_angle]` (80° *(choix)*) ; `K > 1` (feuille trop courte) ou borne
+  atteinte : `reached = False` et l'alerte « Volets : coupe hors course (volets trop
+  courts ou angle limité) pour … ». Le plan réalisé est toujours celui du bord
+  libre : il coïncide avec `Π` quand `ρ` aligne la feuille, et passe sinon par
+  `E` en penchant autour de `L E`.
+- **Coupes automatiques** :
+  rang 0 : bas = ligne du nez au sol, `Q = (0, 0, Hp)`, `u = X` ; haut = bas du
+  linteau, `Q = (0, Ys + 0,05, Hp + Hc)`, `u = X` ; gauche et droite =
+  bords de l'avancée, `Q = (±W/2, 0, Hp)`, `u = Y` — sauf pour un PC accroché
+  à l'extérieur du cadre (`|X| > Wc/2`, côté de la coupe) *(choix)* : la droite
+  est alors la verticale du bord intérieur du montant,
+  `Q = (±Wc/2, Ys + 0,05, 0)`, `u = Z`, pour ne pas éclairer la face du montant.
+  Rangs du fond : gauche et droite = verticales de l'ouverture du
+  pendrillonnage `Q = (±min(opening, Wk)/2, yr_j, 0)`, `u = Z` ; haut = première
+  frise en amont du bord aval de la zone couverte, `Q = (0, Y_frise − épaisseur/2, bas
+  de la frise − 0,05)`, `u = X` ; pas de coupe basse. Une coupe hors du faisceau
+  ne ferme rien.
+- **Mode manuel** : `θ_k` et `ρ` viennent des paramètres (`front_pc.row<j>_<d>_…`),
+  bornés par la fiche ; `cut` vide ; une feuille est fermée dès `θ > 0`.
+- **Enregistrement pour Blender** : `BarnDoorSet(rotation, hinge_radius,
+  hinge_z, length, width, max_angle, leaves)` ; chaque `Leaf` donne `index` (1 à
+  4, ordre de `sides`), `cut`, `side` (direction de la charnière dans le plan
+  `x_h y_h`, rotation comprise), `angle` `θ`, `hinge` (milieu de la ligne de
+  charnières, repère de la tête : `r·(cos side, sin side)`, `z = lens_offset + m`),
+  `axes` = `(x, y, z)` du repère de la feuille en repère de la tête (`x` le long
+  de la charnière, `z` de la charnière au bord libre, `y = z × x`), `active`
+  (`θ > 0`), `reached`, `normal` (plan réalisé, monde, `None` ouverte). La
+  feuille se dessine de `hinge` sur `λ` selon `z` et `leaf_width` selon `x`.
+- Valeurs sourcées : le catalogue Robe cite un « 4-leaf Barndoor module »
+  (10981010) pour le T15 PC sans cotes ; Chauvet cite le « Ovation F 7.5" Barndoor
+  V2 » (8 feuilles, 323 × 308 × 52 mm ouvert) pour l'Ovation F-915VW sans
+  longueur de feuille. Les longueurs et largeurs des deux fiches sont des
+  estimations signalées dans les fiches ; elles respectent la règle des
+  feuilles ouvertes de 12.7.
 
 ## 14. Appareils dans Blender
 
