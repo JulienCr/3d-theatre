@@ -1,0 +1,322 @@
+version: 1
+id: robe_robin_esprite
+manufacturer: "Robe Lighting"
+model: "Robin Esprite"
+family: moving_profile
+sources:
+  - {kind: gdtf, url: "source/Robe_Lighting@Robin_Esprite@2024-02-15__Animation_wheels_channel_sets_revision.gdtf", note: "Geometry tree, meshes, DMX modes, channel sets, gobo images."}
+  - {kind: datasheet, url: "source/esprite_datasheet.pdf", note: "Robe ESPRITE datasheet (robe.cz, printed 2026-04-16): 28.2 kg, 443 x 264 x 733 mm, 150 mm output lens, 5.5-50 deg zoom, 27000 lm goniophotometer, CTO 3000-6700 K."}
+  - {kind: datasheet, url: "https://robe.cz/api/robe/pdfs/en/product/651", note: "Download URL of the datasheet above."}
+  - {kind: other, url: "https://www.robe.cz/res/downloads/user_manuals/User_manual_Robin_Esprite.pdf", note: "User manual v5.0 (19 MB, not copied): dimensions drawing p.45, framing shutter orientation p.19, DMX chart, photometric diagrams p.49."}
+  - {kind: other, url: "https://www.robe.cz/esprite", note: "Product page; its download section lists no IES file, none found elsewhere."}
+
+physical:
+  weight: 28.2             # kg, datasheet (same value in the GDTF)
+  dimensions:
+    width: 0.443           # manual p.45, base width
+    depth: 0.264           # manual p.45, head vertical
+    height: 0.7324         # manual p.45 side view, head vertical; the mesh gives 0.735
+  mount:
+    hook_height: 0.055     # estimated: 11 mm Omega plate (base mesh above its origin) plus half a 48.3 mm tube and clamp, no Robe figure
+    tilt_axis_height: 0.4131  # GDTF yoke + head offsets (75.6 + 337.5 mm); the manual p.45 drawing gives about 0.4215 from the base feet
+optics:
+  beam_type: profile
+  lens_diameter: 0.150     # datasheet, output lens 150 mm
+  lens_offset: 0.3106      # GDTF Beam offset in the head frame; the head mesh front face is at 0.3109
+  flux: 27000              # lm, datasheet goniophotometer value (34000 integrating sphere); GDTF 27000
+  field_angle: {min: 5.5, max: 50}  # datasheet zoom range; the beam is flat-field so field = beam, estimated: no 10% angle published
+  beam_angle: {min: 5.5, max: 50}   # datasheet and manual p.49; GDTF gives 5 at the narrow end
+  zoom_invert: true        # GDTF: DMX 0 = 50 deg, DMX max = narrow
+  # no IES: none published on robe.cz
+colour:
+  systems: [cmy, cto]
+  cto_kelvin: 3000         # datasheet and GDTF; white is 6500 K in the GDTF, 6700 K for the HP engine
+motion:
+  type: moving
+  pan:
+    min: -270.0
+    max: 270.0
+  tilt:
+    min: -131.8
+    max: 131.8   # GDTF 263.6 deg (DMX 0 = +131.8, inverted); manual and datasheet say 265; sign versus spec 13.9 unchecked
+blades:
+  count: 4
+  mode: motorised
+  gate_from_lens: 0.35     # estimated: head is 0.54 m long (0.229 behind, 0.311 ahead of the tilt axis), framing module in the rear half, no Robe figure
+  span: 0.035              # estimated: gate image diameter 23.5 mm (manual gobo image) plus margin for the +-30 deg swivel
+  travel: {open: 0.0125, closed: -0.005}  # estimated: gate radius 11.75 mm plus margin; blade covers 70% of the gate (GDTF Blade1A 0-0.7; the manual says 80%)
+  sides: [270, 0, 90, 180]  # estimated: manual p.19 Robin style (1 bottom, 2 right, 3 top, 4 left) mapped through GDTF channel order 1,4,3,2; image up = +y_h, right = -x_h assumed
+  angle_limit: 30          # manual and GDTF: swivel +-30 deg per blade
+  rotation:
+    min: -60.0
+    max: 60.0              # GDTF DMX 0 = +60 (inverted)
+gobos:
+  wheels:
+    - name: gobo1
+      rotation_range: 360
+      slots:
+        - {name: Open/hole, image: null, dmx: [0, 8]}
+        - {name: Gobo1, image: gobos/15020378.png, dmx: [9, 17]}
+        - {name: Gobo2, image: gobos/15020379.png, dmx: [18, 26]}
+        - {name: Gobo3, image: gobos/15020380.png, dmx: [27, 35]}
+        - {name: Gobo4, image: gobos/15020381.png, dmx: [36, 44]}
+        - {name: Gobo5, image: gobos/15020382.png, dmx: [45, 53]}
+        - {name: Gobo6, image: gobos/15020383.png, dmx: [54, 62]}
+        - {name: Gobo7, image: gobos/15020384.png, dmx: [63, 71]}
+        - {name: Gobo8, image: gobos/15020385.png, dmx: [72, 80]}
+        - {name: Gobo9, image: gobos/15020386.png, dmx: [81, 91]}
+    - name: gobo2
+      rotation_range: 360
+      slots:
+        - {name: Open, image: null, dmx: [0, 3]}
+        - {name: Gobo1, image: gobos/15020372.png, dmx: [4, 7]}
+        - {name: Gobo2, image: gobos/15020373.png, dmx: [8, 11]}
+        - {name: Gobo3, image: gobos/15020374.png, dmx: [12, 15]}
+        - {name: Gobo4, image: gobos/15020375.png, dmx: [16, 19]}
+        - {name: Gobo5, image: gobos/15020376.png, dmx: [20, 23]}
+        - {name: Gobo6, image: gobos/15020377.png, dmx: [24, 27]}
+        - {name: Gobo7, image: gobos/15040023.png, dmx: [28, 31]}
+iris:
+  min_ratio: 0.0
+strobe:
+  open: [32, 63]
+  closed: [0, 31]
+  strobe:
+    from: 64
+    to: 95
+    hz_min: 0.3
+    hz_max: 20.0
+# cto curve: GDTF channel sets (kelvin by DMX), interpolated; the iris closes at DMX 70.6 % of the range and 75 % up is pulse effects, not modelled
+modes:
+  - name: "Mode 1 - Standard 16 bit"
+    footprint: 49
+    channels:
+      - {offset: 1, attribute: pan, bits: 16, default: 32768, fine: 2}
+      - {offset: 3, attribute: tilt, bits: 16, default: 32768, fine: 4}
+      - {offset: 5, attribute: positionmspeed, bits: 8, default: 0}
+      - {offset: 6, attribute: control1, bits: 8, default: 0}
+      - {offset: 7, attribute: ledfrequency, bits: 8, default: 10}
+      - {offset: 8, attribute: ledfrequencyadjust, bits: 8, default: 128}
+      - {offset: 9, attribute: intensityindication, bits: 8, default: 0}
+      - {offset: 10, attribute: color1, bits: 16, default: 0, fine: 11}
+      - {offset: 12, attribute: color2, bits: 16, default: 0, fine: 13}
+      - {offset: 14, attribute: cyan, bits: 8, default: 0}
+      - {offset: 15, attribute: magenta, bits: 8, default: 0}
+      - {offset: 16, attribute: yellow, bits: 8, default: 0}
+      - {offset: 17, attribute: cto, bits: 8, default: 0, curve: [[0.000000, 6500.0], [0.160784, 6000.0], [0.211765, 5800.0], [0.403922, 5000.0], [0.450980, 4800.0], [0.513725, 4500.0], [0.713725, 3600.0], [0.835294, 3200.0], [1.000000, 3000.0]], curve_mode: linear}
+      - {offset: 18, attribute: colormacro1, bits: 8, default: 0}
+      - {offset: 19, attribute: colormixmspeed, bits: 8, default: 0}
+      - {offset: 20, attribute: colormixmtime, bits: 8, default: 0}
+      - {offset: 21, attribute: zoommspeed, bits: 8, default: 0}
+      - {offset: 22, attribute: animationwheel1, bits: 8, default: 0}
+      - {offset: 23, attribute: animationwheel1pos, bits: 8, default: 128}
+      - {offset: 24, attribute: animationwheel1macro, bits: 8, default: 0}
+      - {offset: 25, attribute: gobo1, bits: 8, default: 0}
+      - {offset: 26, attribute: gobo2, bits: 8, default: 0}
+      - {offset: 27, attribute: gobo2pos, bits: 16, default: 32767, fine: 28}
+      - {offset: 29, attribute: prism1, bits: 8, default: 0}
+      - {offset: 30, attribute: prism1pos, bits: 8, default: 128}
+      - {offset: 31, attribute: frost1, bits: 8, default: 0}
+      - {offset: 32, attribute: iris, bits: 16, default: 0, fine: 33}
+      - {offset: 34, attribute: zoom, bits: 16, default: 32768, fine: 35}
+      - {offset: 36, attribute: focus1, bits: 16, default: 32768, fine: 37}
+      - {offset: 38, attribute: blade_rot, bits: 8, default: 128}
+      - {offset: 39, attribute: blade_1a, bits: 8, default: 0}
+      - {offset: 40, attribute: blade1rot, bits: 8, default: 128}
+      - {offset: 41, attribute: blade_4a, bits: 8, default: 0}
+      - {offset: 42, attribute: blade4rot, bits: 8, default: 128}
+      - {offset: 43, attribute: blade_3a, bits: 8, default: 0}
+      - {offset: 44, attribute: blade3rot, bits: 8, default: 128}
+      - {offset: 45, attribute: blade_2a, bits: 8, default: 0}
+      - {offset: 46, attribute: blade2rot, bits: 8, default: 128}
+      - {offset: 47, attribute: strobe, bits: 8, default: 32}
+      - {offset: 48, attribute: dimmer, bits: 16, default: 0, fine: 49}
+  - name: "Mode 2 - Reduced 8 bit"
+    footprint: 42
+    channels:
+      - {offset: 1, attribute: pan, bits: 16, default: 32768, fine: 2}
+      - {offset: 3, attribute: tilt, bits: 16, default: 32768, fine: 4}
+      - {offset: 5, attribute: positionmspeed, bits: 8, default: 0}
+      - {offset: 6, attribute: control1, bits: 8, default: 0}
+      - {offset: 7, attribute: ledfrequency, bits: 8, default: 10}
+      - {offset: 8, attribute: ledfrequencyadjust, bits: 8, default: 128}
+      - {offset: 9, attribute: intensityindication, bits: 8, default: 0}
+      - {offset: 10, attribute: color1, bits: 8, default: 0}
+      - {offset: 11, attribute: color2, bits: 8, default: 0}
+      - {offset: 12, attribute: cyan, bits: 8, default: 0}
+      - {offset: 13, attribute: magenta, bits: 8, default: 0}
+      - {offset: 14, attribute: yellow, bits: 8, default: 0}
+      - {offset: 15, attribute: cto, bits: 8, default: 0, curve: [[0.000000, 6500.0], [0.160784, 6000.0], [0.211765, 5800.0], [0.403922, 5000.0], [0.450980, 4800.0], [0.513725, 4500.0], [0.713725, 3600.0], [0.835294, 3200.0], [1.000000, 3000.0]], curve_mode: linear}
+      - {offset: 16, attribute: colormacro1, bits: 8, default: 0}
+      - {offset: 17, attribute: colormixmspeed, bits: 8, default: 0}
+      - {offset: 18, attribute: colormixmtime, bits: 8, default: 0}
+      - {offset: 19, attribute: zoommspeed, bits: 8, default: 0}
+      - {offset: 20, attribute: animationwheel1, bits: 8, default: 0}
+      - {offset: 21, attribute: animationwheel1pos, bits: 8, default: 128}
+      - {offset: 22, attribute: animationwheel1macro, bits: 8, default: 0}
+      - {offset: 23, attribute: gobo1, bits: 8, default: 0}
+      - {offset: 24, attribute: gobo2, bits: 8, default: 0}
+      - {offset: 25, attribute: gobo2pos, bits: 8, default: 128}
+      - {offset: 26, attribute: prism1, bits: 8, default: 0}
+      - {offset: 27, attribute: prism1pos, bits: 8, default: 128}
+      - {offset: 28, attribute: frost1, bits: 8, default: 0}
+      - {offset: 29, attribute: iris, bits: 8, default: 0}
+      - {offset: 30, attribute: zoom, bits: 8, default: 128}
+      - {offset: 31, attribute: focus1, bits: 8, default: 128}
+      - {offset: 32, attribute: blade_rot, bits: 8, default: 128}
+      - {offset: 33, attribute: blade_1a, bits: 8, default: 0}
+      - {offset: 34, attribute: blade1rot, bits: 8, default: 128}
+      - {offset: 35, attribute: blade_4a, bits: 8, default: 0}
+      - {offset: 36, attribute: blade4rot, bits: 8, default: 128}
+      - {offset: 37, attribute: blade_3a, bits: 8, default: 0}
+      - {offset: 38, attribute: blade3rot, bits: 8, default: 128}
+      - {offset: 39, attribute: blade_2a, bits: 8, default: 0}
+      - {offset: 40, attribute: blade2rot, bits: 8, default: 128}
+      - {offset: 41, attribute: strobe, bits: 8, default: 32}
+      - {offset: 42, attribute: dimmer, bits: 8, default: 0}
+  - name: "Mode 3 - Standard 16 bit + green correction"
+    footprint: 50
+    channels:
+      - {offset: 1, attribute: pan, bits: 16, default: 32768, fine: 2}
+      - {offset: 3, attribute: tilt, bits: 16, default: 32768, fine: 4}
+      - {offset: 5, attribute: positionmspeed, bits: 8, default: 0}
+      - {offset: 6, attribute: control1, bits: 8, default: 0}
+      - {offset: 7, attribute: ledfrequency, bits: 8, default: 10}
+      - {offset: 8, attribute: ledfrequencyadjust, bits: 8, default: 128}
+      - {offset: 9, attribute: intensityindication, bits: 8, default: 0}
+      - {offset: 10, attribute: color1, bits: 16, default: 0, fine: 11}
+      - {offset: 12, attribute: color2, bits: 16, default: 0, fine: 13}
+      - {offset: 14, attribute: cyan, bits: 8, default: 0}
+      - {offset: 15, attribute: magenta, bits: 8, default: 0}
+      - {offset: 16, attribute: yellow, bits: 8, default: 0}
+      - {offset: 17, attribute: cto, bits: 8, default: 0, curve: [[0.000000, 6500.0], [0.160784, 6000.0], [0.211765, 5800.0], [0.403922, 5000.0], [0.450980, 4800.0], [0.513725, 4500.0], [0.713725, 3600.0], [0.835294, 3200.0], [1.000000, 3000.0]], curve_mode: linear}
+      - {offset: 18, attribute: tint, bits: 8, default: 128}
+      - {offset: 19, attribute: colormacro1, bits: 8, default: 0}
+      - {offset: 20, attribute: colormixmspeed, bits: 8, default: 0}
+      - {offset: 21, attribute: colormixmtime, bits: 8, default: 0}
+      - {offset: 22, attribute: zoommspeed, bits: 8, default: 0}
+      - {offset: 23, attribute: animationwheel1, bits: 8, default: 0}
+      - {offset: 24, attribute: animationwheel1pos, bits: 8, default: 128}
+      - {offset: 25, attribute: animationwheel1macro, bits: 8, default: 0}
+      - {offset: 26, attribute: gobo1, bits: 8, default: 0}
+      - {offset: 27, attribute: gobo2, bits: 8, default: 0}
+      - {offset: 28, attribute: gobo2pos, bits: 16, default: 32767, fine: 29}
+      - {offset: 30, attribute: prism1, bits: 8, default: 0}
+      - {offset: 31, attribute: prism1pos, bits: 8, default: 128}
+      - {offset: 32, attribute: frost1, bits: 8, default: 0}
+      - {offset: 33, attribute: iris, bits: 16, default: 0, fine: 34}
+      - {offset: 35, attribute: zoom, bits: 16, default: 32768, fine: 36}
+      - {offset: 37, attribute: focus1, bits: 16, default: 32768, fine: 38}
+      - {offset: 39, attribute: blade_rot, bits: 8, default: 128}
+      - {offset: 40, attribute: blade_1a, bits: 8, default: 0}
+      - {offset: 41, attribute: blade1rot, bits: 8, default: 128}
+      - {offset: 42, attribute: blade_4a, bits: 8, default: 0}
+      - {offset: 43, attribute: blade4rot, bits: 8, default: 128}
+      - {offset: 44, attribute: blade_3a, bits: 8, default: 0}
+      - {offset: 45, attribute: blade3rot, bits: 8, default: 128}
+      - {offset: 46, attribute: blade_2a, bits: 8, default: 0}
+      - {offset: 47, attribute: blade2rot, bits: 8, default: 128}
+      - {offset: 48, attribute: strobe, bits: 8, default: 32}
+      - {offset: 49, attribute: dimmer, bits: 16, default: 0, fine: 50}
+  - name: "Mode 4 - Reduced 8 bit + green correction"
+    footprint: 43
+    channels:
+      - {offset: 1, attribute: pan, bits: 16, default: 32768, fine: 2}
+      - {offset: 3, attribute: tilt, bits: 16, default: 32768, fine: 4}
+      - {offset: 5, attribute: positionmspeed, bits: 8, default: 0}
+      - {offset: 6, attribute: control1, bits: 8, default: 0}
+      - {offset: 7, attribute: ledfrequency, bits: 8, default: 10}
+      - {offset: 8, attribute: ledfrequencyadjust, bits: 8, default: 128}
+      - {offset: 9, attribute: intensityindication, bits: 8, default: 0}
+      - {offset: 10, attribute: color1, bits: 8, default: 0}
+      - {offset: 11, attribute: color2, bits: 8, default: 0}
+      - {offset: 12, attribute: cyan, bits: 8, default: 0}
+      - {offset: 13, attribute: magenta, bits: 8, default: 0}
+      - {offset: 14, attribute: yellow, bits: 8, default: 0}
+      - {offset: 15, attribute: cto, bits: 8, default: 0, curve: [[0.000000, 6500.0], [0.160784, 6000.0], [0.211765, 5800.0], [0.403922, 5000.0], [0.450980, 4800.0], [0.513725, 4500.0], [0.713725, 3600.0], [0.835294, 3200.0], [1.000000, 3000.0]], curve_mode: linear}
+      - {offset: 16, attribute: tint, bits: 8, default: 128}
+      - {offset: 17, attribute: colormacro1, bits: 8, default: 0}
+      - {offset: 18, attribute: colormixmspeed, bits: 8, default: 0}
+      - {offset: 19, attribute: colormixmtime, bits: 8, default: 0}
+      - {offset: 20, attribute: zoommspeed, bits: 8, default: 0}
+      - {offset: 21, attribute: animationwheel1, bits: 8, default: 0}
+      - {offset: 22, attribute: animationwheel1pos, bits: 8, default: 128}
+      - {offset: 23, attribute: animationwheel1macro, bits: 8, default: 0}
+      - {offset: 24, attribute: gobo1, bits: 8, default: 0}
+      - {offset: 25, attribute: gobo2, bits: 8, default: 0}
+      - {offset: 26, attribute: gobo2pos, bits: 8, default: 128}
+      - {offset: 27, attribute: prism1, bits: 8, default: 0}
+      - {offset: 28, attribute: prism1pos, bits: 8, default: 128}
+      - {offset: 29, attribute: frost1, bits: 8, default: 0}
+      - {offset: 30, attribute: iris, bits: 8, default: 0}
+      - {offset: 31, attribute: zoom, bits: 8, default: 128}
+      - {offset: 32, attribute: focus1, bits: 8, default: 128}
+      - {offset: 33, attribute: blade_rot, bits: 8, default: 128}
+      - {offset: 34, attribute: blade_1a, bits: 8, default: 0}
+      - {offset: 35, attribute: blade1rot, bits: 8, default: 128}
+      - {offset: 36, attribute: blade_4a, bits: 8, default: 0}
+      - {offset: 37, attribute: blade4rot, bits: 8, default: 128}
+      - {offset: 38, attribute: blade_3a, bits: 8, default: 0}
+      - {offset: 39, attribute: blade3rot, bits: 8, default: 128}
+      - {offset: 40, attribute: blade_2a, bits: 8, default: 0}
+      - {offset: 41, attribute: blade2rot, bits: 8, default: 128}
+      - {offset: 42, attribute: strobe, bits: 8, default: 32}
+      - {offset: 43, attribute: dimmer, bits: 8, default: 0}
+  - name: "Mode 5 - Enhanced gobo control"
+    footprint: 51
+    channels:
+      - {offset: 1, attribute: pan, bits: 16, default: 32768, fine: 2}
+      - {offset: 3, attribute: tilt, bits: 16, default: 32768, fine: 4}
+      - {offset: 5, attribute: positionmspeed, bits: 8, default: 0}
+      - {offset: 6, attribute: control1, bits: 8, default: 0}
+      - {offset: 7, attribute: ledfrequency, bits: 8, default: 10}
+      - {offset: 8, attribute: ledfrequencyadjust, bits: 8, default: 128}
+      - {offset: 9, attribute: intensityindication, bits: 8, default: 0}
+      - {offset: 10, attribute: color1, bits: 16, default: 0, fine: 11}
+      - {offset: 12, attribute: color2, bits: 16, default: 0, fine: 13}
+      - {offset: 14, attribute: cyan, bits: 8, default: 0}
+      - {offset: 15, attribute: magenta, bits: 8, default: 0}
+      - {offset: 16, attribute: yellow, bits: 8, default: 0}
+      - {offset: 17, attribute: cto, bits: 8, default: 0, curve: [[0.000000, 6500.0], [0.160784, 6000.0], [0.211765, 5800.0], [0.403922, 5000.0], [0.450980, 4800.0], [0.513725, 4500.0], [0.713725, 3600.0], [0.835294, 3200.0], [1.000000, 3000.0]], curve_mode: linear}
+      - {offset: 18, attribute: tint, bits: 8, default: 128}
+      - {offset: 19, attribute: colormacro1, bits: 8, default: 0}
+      - {offset: 20, attribute: colormixmspeed, bits: 8, default: 0}
+      - {offset: 21, attribute: colormixmtime, bits: 8, default: 0}
+      - {offset: 22, attribute: zoommspeed, bits: 8, default: 0}
+      - {offset: 23, attribute: animationwheel1, bits: 8, default: 0}
+      - {offset: 24, attribute: animationwheel1pos, bits: 8, default: 128}
+      - {offset: 25, attribute: animationwheel1macro, bits: 8, default: 0}
+      - {offset: 26, attribute: gobo1, bits: 8, default: 0}
+      - {offset: 27, attribute: gobo2, bits: 16, default: 0, fine: 28}
+      - {offset: 29, attribute: gobo2pos, bits: 16, default: 32768, fine: 30}
+      - {offset: 31, attribute: prism1, bits: 8, default: 0}
+      - {offset: 32, attribute: prism1pos, bits: 8, default: 128}
+      - {offset: 33, attribute: frost1, bits: 8, default: 0}
+      - {offset: 34, attribute: iris, bits: 16, default: 0, fine: 35}
+      - {offset: 36, attribute: zoom, bits: 16, default: 32768, fine: 37}
+      - {offset: 38, attribute: focus1, bits: 16, default: 32768, fine: 39}
+      - {offset: 40, attribute: blade_rot, bits: 8, default: 128}
+      - {offset: 41, attribute: blade_1a, bits: 8, default: 0}
+      - {offset: 42, attribute: blade1rot, bits: 8, default: 128}
+      - {offset: 43, attribute: blade_4a, bits: 8, default: 0}
+      - {offset: 44, attribute: blade4rot, bits: 8, default: 128}
+      - {offset: 45, attribute: blade_3a, bits: 8, default: 0}
+      - {offset: 46, attribute: blade3rot, bits: 8, default: 128}
+      - {offset: 47, attribute: blade_2a, bits: 8, default: 0}
+      - {offset: 48, attribute: blade2rot, bits: 8, default: 128}
+      - {offset: 49, attribute: strobe, bits: 8, default: 32}
+      - {offset: 50, attribute: dimmer, bits: 16, default: 0, fine: 51}
+default_mode: "Mode 1 - Standard 16 bit"
+model3d:
+  # meshes and offsets are in the GDTF frame (head hangs towards -Z), not flipped to the body frame of 13.9
+  kind: mesh
+  parts:
+    base:
+      file: meshes/base.glb
+      offset: [0.0, 0.0, 0.0]
+    yoke:
+      file: meshes/yoke.glb
+      offset: [0.0, 0.0, -0.0756]
+    head:
+      file: meshes/head.glb
+      offset: [0.0, 0.0, -0.3375]
