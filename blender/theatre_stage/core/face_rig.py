@@ -6,23 +6,27 @@ Pure Python. A stored result holds only while its signature matches the plain ri
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 import math
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from functools import lru_cache
 
-from .face_eq import Adjustment, Bounds, CutEdge, Emitter, Probe, Result, Stats, Vec3, equalise, face_grid
+from .face_eq import (
+    Adjustment, Bounds, CutEdge, Emitter, Probe, Result, Spill, Stats, Vec3, equalise, face_grid, illuminance,
+    spill_stats, statistics,
+)
 from .fixtures import Fixture, Library, Optics
 from .ies import IesTable, Photometry, ZoomSet, load_ies
 from .rig import Rig, RigFixture, aim_angles, head_frame
 from .vecmath import cross as _cross
 
 FAMILY = "front_pc"
-VERSION = 3
+VERSION = 4
 USEFUL_MARGIN = 0.30
 DIGITS = 4
 _ROW = re.compile(r"Row(\d+)")
@@ -108,7 +112,7 @@ def _cut_edges(f: RigFixture, lens: Vec3) -> tuple[CutEdge, ...]:
     return tuple(out)
 
 
-def emitter_of(f: RigFixture, fx: Fixture) -> Emitter:
+def emitter_of(f: RigFixture, fx: Fixture, spill: bool = True) -> Emitter:
     """The face PC `f` as the equaliser sees it; barn door leaves become cut edges."""
     optics = _optics(fx)
     tube = next((t for t in optics.lens_tubes if t.name == f.tube), None)
@@ -119,7 +123,7 @@ def emitter_of(f: RigFixture, fx: Fixture) -> Emitter:
         source=f.source, axis=f.axis, up=head_frame(*aim_angles(f.axis))[0],
         zoom_field=_field(f), zoom_range=_zoom_range(fx, f), beam_of_field=_beam_table(optics, f),
         photometry=photometry_of(fx, f), aim_z=f.aim[2], cut_edges=_cut_edges(f, lens),
-        lens_radius=optics.aperture(tube) / 2)
+        lens_radius=optics.aperture(tube) / 2, spill=spill)
 
 
 def emitters_of(rig: Rig, library: Library) -> tuple[Emitter, ...]:
@@ -127,7 +131,8 @@ def emitters_of(rig: Rig, library: Library) -> tuple[Emitter, ...]:
     for f in rig.by_family(FAMILY):
         fx = library.get(f.fixture_id)
         if fx is not None and fx.optics is not None and f.field_angle is not None:
-            out.append(emitter_of(f, fx))
+            behind = rig.face is not None and f.source[1] > rig.face.forestage_depth
+            out.append(emitter_of(f, fx, not behind))
     return tuple(out)
 
 
@@ -158,7 +163,8 @@ def signature(rig: Rig, min_mean_ratio: float) -> str:
     parts = [VERSION, _r(min_mean_ratio), pcs,
              None if zones is None else [zones.nx, zones.nr, _r(zones.width), _r(zones.depth)],
              None if face is None else [_r(face.nose_width), _r(face.frame_width), _r(face.forestage_depth),
-                                        _r(face.area_depth), _r(face.z), _r(face.z_torso)]]
+                                        _r(face.area_depth), _r(face.z), _r(face.z_torso), len(face.spill),
+                                        _r(sum(sum(p.position) for _, p in face.spill))]]
     return hashlib.sha1(json.dumps(parts, separators=(",", ":")).encode()).hexdigest()[:16]
 
 
@@ -169,6 +175,8 @@ class FaceEq:
     """A stored equalisation: its inputs' `signature`, `date` (ISO), the per-PC adjustments and the statistics.
 
     `before` and `after` map `L`, `R` and `sum` to `Stats`; `mean_ratio` is the mean after over the mean at full.
+    `spill_before`/`spill_after`: light outside the face window per group; `alerts`: French lines for each
+    surface still above the spill limit.
     """
 
     signature: str
@@ -181,6 +189,9 @@ class FaceEq:
     mean_level: float
     evaluations: int
     seconds: float
+    spill_before: Mapping[str, Spill] = field(default_factory=dict)
+    spill_after: Mapping[str, Spill] = field(default_factory=dict)
+    alerts: tuple[str, ...] = ()
 
     def by_name(self) -> dict[str, Adjustment]:
         return {a.name: a for a in self.adjustments}
@@ -195,6 +206,8 @@ class FaceEq:
             "after": {k: vars(v) for k, v in self.after.items()},
             "mean_ratio": dict(self.mean_ratio), "mean_level": self.mean_level,
             "evaluations": self.evaluations, "seconds": self.seconds,
+            "spill_before": {k: vars(v) for k, v in self.spill_before.items()},
+            "spill_after": {k: vars(v) for k, v in self.spill_after.items()}, "alerts": list(self.alerts),
         }
         return json.dumps(data, separators=(",", ":"))
 
@@ -211,7 +224,9 @@ class FaceEq:
                                            tuple(a["axis"]), tuple(a["aim"])) for a in d["adjustments"])
             return cls(d["signature"], d["date"], d["min_mean_ratio"], adjustments,
                        {k: Stats(**v) for k, v in d["before"].items()}, {k: Stats(**v) for k, v in d["after"].items()},
-                       d["mean_ratio"], d["mean_level"], d["evaluations"], d["seconds"])
+                       d["mean_ratio"], d["mean_level"], d["evaluations"], d["seconds"],
+                       {k: Spill(**v) for k, v in d["spill_before"].items()},
+                       {k: Spill(**v) for k, v in d["spill_after"].items()}, tuple(d["alerts"]))
         except (ValueError, KeyError, TypeError):
             return None
 
@@ -230,14 +245,99 @@ def probes_of(rig: Rig) -> tuple[Probe, ...]:
         area_depth=face.area_depth, z=z, margin=USEFUL_MARGIN))
 
 
+def spill_probes_of(rig: Rig) -> tuple[Probe, ...]:
+    return tuple(p for _, p in rig.face.spill) if rig.face else ()
+
+
+def _tuned(rig: Rig, library: Library, by_name: Mapping[str, Adjustment]) -> tuple[Emitter, ...]:
+    """The emitters of an equalised rig, each at its equalised level."""
+    return tuple(dataclasses.replace(e, level=by_name[e.name].level) for e in emitters_of(rig, library))
+
+
+def _lux(tuned: tuple[Emitter, ...], points: list[Probe], hidden_ok: bool) -> dict[str, list[float]]:
+    """Illuminance of every direction and of their sum on `points`; `hidden_ok` False skips the emitters
+    that walls hide from them."""
+    groups: dict[str, list[float]] = {}
+    for e in tuned:
+        if not hidden_ok and not e.spill:
+            continue
+        values = groups.setdefault(e.direction, [0.0] * len(points))
+        for i, p in enumerate(points):
+            values[i] += illuminance(e, p)
+    if len(groups) > 1:
+        groups["sum"] = [a + b for a, b in zip(*groups.values())]
+    else:
+        groups["sum"] = next(iter(groups.values()), [])
+    return groups
+
+
+def measure(rig: Rig, tuned: tuple[Emitter, ...], limit: float) -> tuple[dict[str, Stats], dict[str, Spill]]:
+    """Face statistics and spill of an equalised rig as built, per direction and for the sum."""
+    face = _lux(tuned, list(probes_of(rig)), True)
+    outside = _lux(tuned, list(spill_probes_of(rig)), False)
+    stats = {g: statistics(v) for g, v in face.items()}
+    return stats, {g: spill_stats(outside.get(g, []), stats[g].mean, limit) for g in stats}
+
+
+def _spill_alerts(rig: Rig, tuned: tuple[Emitter, ...], means: Mapping[str, float], limit: float) -> tuple[str, ...]:
+    """One French alert per surface whose spill stays above the limit after equalisation, naming the PC that
+    adds most light to its worst probe."""
+    if rig.face is None or not rig.face.spill:
+        return ()
+    names = {"L": "jardin", "R": "cour", "sum": "somme"}
+    alerts = []
+    for label in sorted({label for label, _ in rig.face.spill}):
+        probes = [p for lab, p in rig.face.spill if lab == label]
+        outside = _lux(tuned, probes, False)
+        worst = max(((max(outside[g]) / means[g], g) for g in means if g in outside), default=None)
+        if worst is None or worst[0] <= limit:
+            continue
+        ratio, group = worst
+        probe = probes[outside[group].index(max(outside[group]))]
+        members = [e for e in tuned if e.spill and (group == "sum" or e.direction == group)]
+        culprit = max(members, key=lambda e: illuminance(e, probe))
+        alerts.append(f"Débord de lumière sur {label} : jusqu'à {round(100 * ratio)} % de l'éclairement moyen "
+                      f"de la face ({names[group]}, limite {round(100 * limit)} %), surtout de {culprit.name}.")
+    return tuple(alerts)
+
+
 def equalise_rig(rig: Rig, library: Library, min_mean_ratio: float, now: datetime | None = None) -> FaceEq:
     """Run the engine on the face PCs of a plain (unadjusted) rig and package the result for storage."""
     emitters = emitters_of(rig, library)
     if not emitters or rig.face is None or rig.zones is None:
         raise ValueError("Égalisation impossible : aucun PC de face dans l'implantation.")
-    probes = probes_of(rig)
     bounds = Bounds.for_zone(rig.zones.width, rig.zones.depth, min_mean_ratio=min_mean_ratio)
-    result: Result = equalise(emitters, probes, bounds)
+    result: Result = equalise(emitters, probes_of(rig), bounds, spill_probes_of(rig))
+    tuned = tuple(dataclasses.replace(e, axis=a.axis, zoom_field=a.zoom_field, level=a.level)
+                  for e, a in zip(emitters, result.adjustments))
     stamp = (now or datetime.now()).isoformat(timespec="seconds")
+    means = {g: s.mean for g, s in result.after.items()}
     return FaceEq(signature(rig, min_mean_ratio), stamp, min_mean_ratio, result.adjustments, dict(result.before),
-                  dict(result.after), dict(result.mean_ratio), result.mean_level, result.evaluations, result.seconds)
+                  dict(result.after), dict(result.mean_ratio), result.mean_level, result.evaluations, result.seconds,
+                  dict(result.spill_before), dict(result.spill_after),
+                  _spill_alerts(rig, tuned, means, bounds.spill_limit))
+
+
+def equalise_params(params: Mapping, library: Library, passes: int = 1, now: datetime | None = None) -> FaceEq:
+    """Equalise the face of the rig of `params` and describe the result on the rig as built.
+
+    The barn doors are recomputed for each new aim, so the built rig lights a little differently from what
+    the engine solved; the stored `after`, spill and alerts are measured on it, `before` is the plain rig.
+    Extra `passes` re-solve from the built rig (they did not converge on the default rig: off by default).
+    """
+    from .layout import compute_layout  # layout imports this module lazily
+
+    ratio = params["front_pc"]["min_mean_ratio"]
+    first = equalise_rig(compute_layout(params, library).rig, library, ratio, now)
+    eq = first
+    for _ in range(passes - 1):
+        again = equalise_rig(compute_layout(params, library, eq).rig, library, ratio, now)
+        eq = dataclasses.replace(again, signature=first.signature, before=first.before,
+                                 spill_before=first.spill_before, evaluations=first.evaluations + again.evaluations)
+    final = compute_layout(params, library, eq).rig
+    limit = Bounds().spill_limit
+    tuned = _tuned(final, library, eq.by_name())
+    stats, spill = measure(final, tuned, limit)
+    return dataclasses.replace(
+        eq, after=stats, spill_after=spill, mean_ratio={g: s.mean / first.before[g].mean for g, s in stats.items()},
+        alerts=_spill_alerts(final, tuned, {g: s.mean for g, s in stats.items()}, limit))

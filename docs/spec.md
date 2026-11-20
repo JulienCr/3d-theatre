@@ -322,6 +322,7 @@ Chaque jeu :
 | `barn_doors` | Volets | automatique | aucun / automatique / manuel |
 | `row<j>_<d>_leaf_<k>` | Volet `k` (rang `j`, direction `d`) | 0° | 0 – 80° |
 | `row<j>_<d>_rotation` | Rotation des volets (rang `j`, direction `d`) | 0° | −90 – 90° |
+| `window_margin` | Marge de la fenêtre de face | 0 *(choix)* | 0 – 2 m |
 | `min_mean_ratio` | Moyenne minimale de l'égalisation | 0,85 *(choix)* | 0,5 – 1 |
 
 `fixture` et `mode` servent le rang 0, sur la perche de face ; `fixture_far`
@@ -1523,6 +1524,14 @@ Deux appareils par zone, un par direction `d` : `L` (accroché côté jardin,
   d'azimut d'un rang utilisent la fiche de ce rang. Les deux fiches sont de
   famille `pc` et partagent les circuits et le patch (15.1).
 
+- **Fenêtre de face** *(choix)* : la lumière de face doit tomber dans l'ouverture de la
+  façade vue de la salle : `X ∈ [−W/2 + m, W/2 − m]` dans le plan de la façade `Y = Ys`, du
+  nez au sol (`Z = Hp`) au bas du linteau (`Hp + Hc`) ; `m` = `front_pc.window_margin`
+  (0 par défaut). Hors de cette fenêtre, la façade, les murs de salle, la face avant de la
+  scène (`Y = 0`, `Z < Hp`) et le linteau ne doivent pas être éclairés : les coupes
+  automatiques du rang 0 (13.12) en suivent les bords, l'égalisation (13.13) en mesure le
+  débord.
+
 - **Accroche en Y** : rang 0 sur la perche de face `(Yp, Zp)`. Rang `j ≥ 1` :
   sur une porteuse lumière `(Y, Zb)` avec `ΔY = yr_j − Y ≥ 0,10`. Candidates :
   toutes celles-là. Une candidate **convient** si un azimut existe (ci-dessous)
@@ -1897,12 +1906,10 @@ sans fiche ou avec `front_pc.barn_doors = none`). Même idée que les lames
   libre : il coïncide avec `Π` quand `ρ` aligne la feuille, et passe sinon par
   `E` en penchant autour de `L E`.
 - **Coupes automatiques** :
-  rang 0 : bas = ligne du nez au sol, `Q = (0, 0, Hp)`, `u = X` ; haut = bas du
-  linteau, `Q = (0, Ys + 0,05, Hp + Hc)`, `u = X` ; gauche et droite =
-  bords de l'avancée, `Q = (±W/2, 0, Hp)`, `u = Y` — sauf pour un PC accroché
-  à l'extérieur du cadre (`|X| > Wc/2`, côté de la coupe) *(choix)* : la droite
-  est alors la verticale du bord intérieur du montant,
-  `Q = (±Wc/2, Ys + 0,05, 0)`, `u = Z`, pour ne pas éclairer la face du montant.
+  rang 0 : les bords de la fenêtre de face (13.7), pour tous les PC du rang, accrochés dans
+  ou hors de l'ouverture : bas = ligne du nez au sol, `Q = (0, 0, Hp)`, `u = X` ; haut = bas du
+  linteau dans le plan de la façade, `Q = (0, Ys, Hp + Hc)`, `u = X` ; gauche et droite =
+  verticales de l'ouverture, `Q = (±(W/2 − m), Ys, 0)`, `u = Z`.
   Rangs du fond : gauche et droite = verticales de l'ouverture du
   pendrillonnage `Q = (±min(opening, Wk)/2, yr_j, 0)`, `u = Z` ; haut = première
   frise en amont du bord aval de la zone couverte, `Q = (0, Y_frise − épaisseur/2, bas
@@ -1964,12 +1971,17 @@ rig et range le résultat dans la scène (13.14).
   jusqu'à `±Wc/2`. Défauts : 246 sondes.
 - **Grille utile** (`margin`, 0,30 m *(choix)*) : le rig ne mesure que là où l'on veut
   de la lumière de face, à l'intérieur de chaque coupe voulue avec une marge de 0,30 m.
-  Derrière la façade, `|X| ≤ Wc/2 − 0,30` ; sur l'avancée, `|X| ≤ L/2 − 0,30` et
-  `Y ≥ 0,30` (nez + marge), `L` valant `W` (ligne de coupe du bord de l'avancée) ou `Wc`
-  quand un PC du rang 0 est accroché hors du cadre (sa coupe passe sur le bord du montant :
-  `FaceSetup.nose_width`) ; jusqu'au fond de la zone. **Deux hauteurs**, mêmes `X`, `Y` : la tête (`Za`) et le torse
-  (`Hp + 1,20` *(choix)*, `FaceSetup.z_torso`), comptées à égalité : 2 × 209 = 418 sondes par défaut. Les coins
-  du nez hors cadre, que les volets coupent exprès, n'y sont plus : ils fixaient seuls `U`.
+  Derrière la façade, `|X| ≤ Wc/2 − 0,30` ; sur l'avancée, `|X| ≤ W/2 − m − 0,30` et
+  `Y ≥ 0,30` (nez + marge : `FaceSetup.nose_width = W − 2m`) ; jusqu'au fond de la zone. **Deux hauteurs**, mêmes `X`, `Y` : la tête (`Za`) et le torse
+  (`Hp + 1,20` *(choix)*, `FaceSetup.z_torso`), comptées à égalité : 2 × 212 = 424 sondes par défaut. Les coins
+  du nez hors cadre, que les volets coupaient exprès, n'y étaient plus avant la fenêtre : ils fixaient
+  seuls `U`.
+- **Sondes de débord** (`FaceSetup.spill`, 236 par défaut) : des points hors de la fenêtre,
+  à 0,30 m de ses bords, avec leur normale : la façade de part et d'autre de l'ouverture
+  (3 colonnes, pas de 0,5 m, du sol à la hauteur de façade), le linteau (2 rangées), les murs de
+  salle (7 mètres le long de la façade, de 1,5 m de haut au plafond) et la face avant de la scène
+  (3 hauteurs). Seuls les PC accrochés en avant de la façade (`Emitter.spill`) les éclairent : les
+  autres sont cachés par elle.
 - Éclairement vertical `E = niveau · I(θ, φ) · max(0, s·n) / d²` (lux), `s`
   unitaire vers la source. Ni ombre, ni réflexion, ni brume.
 - **Lames** : `cut_planes` donne des plans `(point, normale)` par le centre de
@@ -1992,10 +2004,13 @@ rig et range le résultat dans la scène (13.14).
 pour leur somme, sur toute la grille utile : `CV = σ / Emoy` (à minimiser) et une pénalité
 sur chaque sonde sous 70 % de la moyenne *(choix)*, `Σ (0,7 − E/Emoy)²` : un trou profond
 coûte plus qu'une petite perte uniforme. `P10 / Emoy`, `Emin / Emoy` et le nombre de sondes
-sous 70 % sont calculés et affichés, sans entrer dans la perte. Les deux
+sous 70 % sont calculés et affichés, sans entrer dans la perte. **Débord** : chaque sonde de
+débord dont l'éclairement dépasse 5 % de la moyenne de la face *(choix)* ajoute
+`10 · (E/Emoy − 0,05)²`, par direction et en somme (`Bounds.spill_limit`, `spill_weight`). Les deux
 directions d'une zone ne sont jamais couplées (ADEC) : elles pèsent chacune
 autant que la somme. Perte minimisée :
-`Σ_g CV_g + Σ_i (0,7 − E_i/Emoy_g)²₊ − 0,5 · Emoy_g / Emoy_g(plein)`, `g ∈ {L, R, somme}`.
+`Σ_g CV_g + Σ_i (0,7 − E_i/Emoy_g)²₊ + 10 · Σ_s (E_s/Emoy_g − 0,05)²₊ − 0,5 · Emoy_g / Emoy_g(plein)`,
+`g ∈ {L, R, somme}`, `i` les sondes de face, `s` celles de débord.
 
 **Leviers et bornes.**
 
@@ -2091,33 +2106,54 @@ la scène, propriété `theatre_face_eq` (JSON : `signature`, `date`, par PC la 
 
   | Série | Corrélation | Pente | `CV` mesuré / calculé | `Emin/Emoy` mesuré / calculé | sondes < 70 % mesuré / calculé |
   |---|---|---|---|---|---|
-  | avant, jardin (cour : identique) | 0,9991 | 0,95 | 0,455 / 0,437 | 0,197 / 0,206 | 116 / 114 |
-  | avant, somme | | | 0,429 / 0,414 | 0,275 / 0,281 | 108 / 104 |
-  | après, jardin | 0,988 | 0,94 | 0,272 / 0,245 | 0,487 / 0,483 | 31 / 22 |
-  | après, cour | 0,988 | 0,94 | 0,271 / 0,243 | 0,477 / 0,472 | 33 / 20 |
-  | après, somme | | | 0,254 / 0,228 | 0,599 / 0,585 | 27 / 16 |
+  | avant, jardin (cour : identique) | 0,9945 | 0,92 | 0,414 / 0,401 | 0,076 / 0,077 | 118 / 115 |
+  | avant, somme | | | 0,393 / 0,371 | 0,282 / 0,312 | 125 / 121 |
+  | après, jardin | 0,9925 | 0,93 | 0,389 / 0,361 | 0,171 / 0,171 | 85 / 76 |
+  | après, cour | 0,9882 | 0,92 | 0,356 / 0,320 | 0,185 / 0,183 | 78 / 65 |
+  | après, somme | | | 0,351 / 0,322 | 0,222 / 0,234 | 74 / 53 |
 
-  La pente vaut 0,95 et non 1 : le demi-plan d'une feuille surestime d'environ 5 %
-  la lumière que les feuilles laissent passer. Un PC seul, volets retirés : pente
-  1,000 et corrélation 1,000 sur toute la plage d'angles (0 à 50° de l'axe).
+  La pente vaut 0,92 à 0,93 : le demi-plan d'une feuille surestime la lumière que les feuilles
+  laissent passer. Un PC seul, volets retirés : pente 1,000 et corrélation 1,000.
 
-  Il reste 27 sondes sur 418 sous 70 % de la moyenne en somme (19 à hauteur de tête, 8 au
-  torse ; 19 au fond, `Y = 5,75`, 6 au nez, `Y = 0,75`, 2 à `Y = 3,75`) : le plancher de moyenne
-  (0,85) et les volets ne laissent pas tout combler. Le niveau moyen tombe à 0,86.
+  « Calculé » est le rig tel que construit (volets recalculés pour la nouvelle visée) : le moteur,
+  qui garde les bords de feuilles de départ, croyait atteindre `CV` 0,267 en somme.
+  `equalise_params` mesure le résultat sur le rig construit pour le stocker.
+
+  Débord (moteur, part de la moyenne de la face, plus forte sonde / sondes au-dessus de 5 %,
+  avant → après) : jardin 46 % / 50 → 14 % / 36 ; cour 46 % / 50 → 15 % / 42 ; somme 23 % / 50
+  → 9 % / 40. Il en reste, signalé par une alerte par surface : la face avant de la scène
+  (10 %, `FrontPC_L_01`), la façade (15 %, `FrontPC_R_01`) et les murs de salle (6 %,
+  `FrontPC_R_01`). Ce sont les sondes à 0,30 m du bord d'une coupe : la pénombre d'une feuille
+  (13.13, ± 26° autour du plan) y laisse passer 10 à 45 % de la lumière, et décaler la
+  droite de coupe vers l'intérieur de 0,15 à 0,5 m n'a presque rien changé au débord.
+
+  Luminance linéaire moyenne des régions de `Cam_Face` (PC de face seuls, rig sans égalisation
+  puis égalisé ; rapport à la scène dans la fenêtre, le sol visible entre `X = ±4,5` et
+  `Y = 0,5 … 5,5`) :
+
+  | Région | avant | après | après / avant | / scène avant | / scène après |
+  |---|---|---|---|---|---|
+  | façade, de part et d'autre | 0,00153 | 0,00105 | 0,69 | 0,55 | 0,52 |
+  | murs de salle | 0,00124 | 0,00129 | 1,03 | 0,45 | 0,64 |
+  | face avant de la scène | 0,00717 | 0,00253 | 0,35 | 2,58 | 1,26 |
+  | linteau | 0,00015 | 0,00014 | 0,94 | 0,06 | 0,07 |
+  | scène dans la fenêtre (sol) | 0,00277 | 0,00201 | 0,72 | 1 | 1 |
+
+  La façade et la face avant baissent nettement ; les murs et le linteau ne bougent pas. Ces
+  surfaces sont sombres (rouge, albédo ≈ 0,1) : 5 % de l'éclairement moyen de la face y reste
+  visible à +1,5 EV.
 
   Sur `Cam_Face`, trois comédiens de la scène de l'utilisateur, valeur linéaire au torse avant
-  → après : jardin (`X = −0,24`) 0,0355 → 0,0344, centre (`X = 1,44`) 0,0674 → 0,0506, cour
-  (`X = 3,11`, `Y = 0,77`) 0,0522 → 0,0280. Le rapport max/min passe de 1,90 à 1,81 : à
-  peine plus proche. Le comédien de cour reste dans un point chaud de l'avancée (1,4 fois la
-  moyenne à hauteur de tête), et la lumière moyenne baisse de 19 % (plancher de 0,85).
+  → après : jardin (`X = −0,24`) 0,0272 → 0,0376, centre (`X = 1,44`) 0,0477 → 0,0509, cour
+  (`X = 3,11`, `Y = 0,77`) 0,0431 → 0,0273. Le rapport max/min passe de 1,75 à 1,86 : pas plus
+  proche. Le comédien de cour se tient dans le point chaud de l'avancée que l'égalisation et les
+  volets rabotent.
 
-- **Lumière sur les murs de salle** (rendus `Cam_Face`, PC de face seuls, un appareil à la
+- **Lumière sur les murs de salle** (avant la fenêtre ; PC de face seuls, un appareil à la
   fois) : elle vient des deux PC les plus extérieurs du rang 0, `FrontPC_L_01` et
-  `FrontPC_R_04`, accrochés à `X = ±6,65` à moins de 1 m des murs. Leur volet extérieur
-  (coupe sur le bord du montant) la réduit de 40 % (0,00021 → 0,00013, ambiant 0,00005) ; le
-  reste est la pénombre de la feuille et la queue de l'IES si près d'un mur. L'égalisation
-  la double (0,00013 → 0,00021) en décalant la visée de 0,37 m vers l'extérieur : le moteur
-  ne mesure pas les murs.
+  `FrontPC_R_04`, accrochés à `X = ±6,65` à moins de 1 m des murs ; leur volet extérieur la
+  réduisait de 40 %, le reste est la pénombre de la feuille et la queue de l'IES si près d'un mur.
+  Les sondes de débord mesurent maintenant les murs.
 
 ## 14. Appareils dans Blender
 

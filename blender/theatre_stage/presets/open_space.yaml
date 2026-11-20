@@ -154,6 +154,7 @@ front_pc:
   rows: 2
   azimuth: 45.0
   overlap: 0.2
+  window_margin: 0.0
   min_mean_ratio: 0.85
   barn_doors: auto
   row1_l_leaf_1: 0.0

@@ -227,3 +227,23 @@ def test_only_probes_under_the_hole_level_add_to_the_loss():
     assert deep == pytest.approx((0.7 - 20.0 / 96.0) ** 2)
     shallow = {"L": [100.0] * 19 + [80.0]}
     assert _Search([emitter()], probes, hole).loss(shallow) == _Search([emitter()], probes, base).loss(shallow)
+
+
+def test_spill_probes_pull_the_aim_off_the_wall():
+    """A probe beside the area, lit by the outer PCs: the spill penalty lowers what it receives (spec 13.13)."""
+    emitters, probes = uneven_rig(), grid()
+    walls = [Probe((6.0 * s, 2.0, GRID_Z), (-float(s), 0.0, 0.0)) for s in (-1, 1)]
+    free = equalise(emitters, probes, Bounds(aim_dx=1.0, aim_dy=1.0, spill_weight=0.0), walls)
+    held = equalise(emitters, probes, Bounds(aim_dx=1.0, aim_dy=1.0), walls)
+    assert free.spill_before["sum"].ratio > 0.0
+    assert free.spill_before["sum"].ratio == pytest.approx(held.spill_before["sum"].ratio)
+    assert held.spill_after["sum"].ratio < free.spill_after["sum"].ratio
+    assert held.spill_after["sum"].worst in (0, 1)
+
+
+def test_emitters_hidden_from_the_spill_probes_add_nothing_there():
+    probe = Probe((9.0, 2.0, GRID_Z), (-1.0, 0.0, 0.0))
+    probes = [Probe((0.0, 2.0, GRID_Z))]
+    lit = equalise([emitter(field=60.0)], probes, Bounds(), [probe]).spill_before["sum"].ratio
+    hidden = equalise([emitter(field=60.0, spill=False)], probes, Bounds(), [probe]).spill_before["sum"].ratio
+    assert lit > 0.0 and hidden == 0.0

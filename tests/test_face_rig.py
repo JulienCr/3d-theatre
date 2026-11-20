@@ -2,7 +2,9 @@
 
 import pytest
 
-from core.face_rig import USEFUL_MARGIN, FaceEq, emitters_of, equalise_rig, probes_of, signature
+from core.face_rig import (
+    USEFUL_MARGIN, FaceEq, _tuned, emitters_of, equalise_params, equalise_rig, measure, probes_of, signature,
+)
 from core.layout import STALE_FACE_EQ, compute_layout
 from core.qlc import patched_from_rig
 from core.rig import default_library, head_frame
@@ -80,8 +82,9 @@ def test_equalisation_is_stored_as_json_and_read_back(eq):
 
 def test_equalisation_improves_each_direction_and_the_sum(eq):
     assert set(eq.before) == {"L", "R", "sum"}
-    assert all(eq.after[k].cv < eq.before[k].cv and eq.after[k].uniformity > eq.before[k].uniformity for k in eq.before)
-    assert all(eq.after[k].below < eq.before[k].below for k in eq.before)
+    assert all(eq.after[k].cv < eq.before[k].cv and eq.after[k].below < eq.before[k].below for k in eq.before)
+    assert all(eq.spill_after[k].ratio < eq.spill_before[k].ratio for k in eq.before)
+    assert eq.spill_after["sum"].over < eq.spill_before["sum"].over
     assert eq.mean_ratio["sum"] >= RATIO - 0.01 and all(0.0 <= a.level <= 1.0 for a in eq.adjustments)
 
 
@@ -94,7 +97,8 @@ def test_no_face_pc_cannot_be_equalised():
 def test_matching_result_sets_aim_field_and_level_of_each_face_pc(plain, eq):
     layout = compute_layout(make(), LIB, eq)
     assert layout.face_eq_state == "applied" and layout.rig.equalised and STALE_FACE_EQ not in layout.warnings
-    assert not any("nez" in w or "couverte" in w for w in layout.warnings)
+    assert not any("couverte" in w or "n'est pas dans le faisceau" in w for w in layout.warnings)
+    assert all(alert in layout.warnings for alert in eq.alerts)
     by_name = eq.by_name()
     for f, before in zip(faces(layout.rig), faces(plain.rig)):
         adj = by_name[f.name]
@@ -142,7 +146,7 @@ def test_panel_lines_per_state(plain, eq):
     assert face_eq_lines(plain) == []
     applied = "\n".join(face_eq_lines(compute_layout(make(), LIB, eq)))
     for expected in ("Face égalisée le ", "Jardin : P10/moy ", "Cour : P10/moy ", "Somme : P10/moy ", "CV ", "→", "lx",
-                     "Emin/Emoy"):
+                     "Emin/Emoy", "Débord hors de la fenêtre"):
         assert expected in applied
     stale = face_eq_lines(compute_layout(make(front_pc={"zone_width": 2.0}), LIB, eq))
     assert len(stale) == 1 and stale[0].startswith("Égalisation de la face périmée le ")
@@ -158,9 +162,42 @@ def test_useful_grid_stays_inside_the_intended_cuts(plain):
         assert abs(p.position[0]) <= half - USEFUL_MARGIN + 1e-9 and p.position[1] <= face.area_depth
 
 
-def test_forestage_is_wanted_as_wide_as_the_frame_when_a_row_0_pc_cuts_on_the_post(plain):
-    outside = [f for f in faces(plain.rig) if f.circuit.endswith("Row1_L") or f.circuit.endswith("Row1_R")]
-    assert any(abs(f.hang[0]) > plain.rig.face.frame_width / 2 for f in outside)
-    assert plain.rig.face.nose_width == plain.rig.face.frame_width
-    inside = compute_layout(make(stage={"width": 14.0}), LIB).rig
-    assert inside.face.nose_width >= inside.face.frame_width
+def test_face_window_is_the_facade_opening_less_its_margin(plain):
+    assert plain.rig.face.nose_width == pytest.approx(11.6)
+    narrow = compute_layout(make(front_pc={"window_margin": 0.5}), LIB).rig
+    assert narrow.face.nose_width == pytest.approx(plain.rig.face.nose_width - 1.0)
+    assert signature(narrow, RATIO) != signature(plain.rig, RATIO)
+
+
+def test_row_0_barn_doors_cut_on_the_window_edges():
+    """The side leaves of a row 0 PC close on the vertical line of the facade opening, whichever side it hangs."""
+    for margin in (0.0, 0.6):
+        rig = compute_layout(make(front_pc={"window_margin": margin}), LIB).rig
+        edge = rig.face.nose_width / 2
+        for f in faces(rig):
+            if not f.circuit.startswith("FrontPC_Row1"):
+                continue
+            side = {leaf.cut for leaf in f.barn_doors.leaves if leaf.angle > 0}
+            assert "bottom" in side and side & {"left", "right"}, (f.name, side)
+        assert edge == pytest.approx(5.8 - margin)
+
+
+def test_spill_probes_surround_the_window_and_rear_rows_cannot_reach_them(plain):
+    labels = {label for label, _ in plain.rig.face.spill}
+    assert labels == {"façade", "linteau", "murs de salle", "face du nez"}
+    face = plain.rig.face
+    assert all(p.position[1] <= face.forestage_depth + 0.1 for _, p in plain.rig.face.spill)
+    emitters = emitters_of(plain.rig, LIB)
+    assert {e.name: e.spill for e in emitters if e.row > 0} == {e.name: False for e in emitters if e.row > 0}
+    assert all(e.spill for e in emitters if e.row == 0)
+
+
+def test_equalise_params_reports_the_rig_as_built():
+    params = make()
+    result = equalise_params(params, LIB)
+    layout = compute_layout(params, LIB, result)
+    assert layout.face_eq_state == "applied"
+    tuned = _tuned(layout.rig, LIB, result.by_name())
+    stats, spill = measure(layout.rig, tuned, 0.05)
+    assert result.after["sum"].cv == pytest.approx(stats["sum"].cv) and result.spill_after["sum"] == spill["sum"]
+    assert result.before["sum"].cv > result.after["sum"].cv and set(result.alerts) <= set(layout.warnings)

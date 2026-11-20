@@ -1318,8 +1318,8 @@ def test_row_zero_leaf_angles_of_a_central_and_an_outer_pc():
     rig = shipped_layout(make()).rig
     inner, outer = rig.find("FrontPC_L_03").barn_doors, rig.find("FrontPC_L_01").barn_doors
     cuts = lambda d: {leaf.cut: leaf for leaf in d.leaves if leaf.cut}
-    assert set(cuts(inner)) == {"bottom", "right"} and set(cuts(outer)) == {"bottom", "left"}
-    assert cuts(inner)["bottom"].angle == pytest.approx(28.3, abs=0.5)
+    assert set(cuts(inner)) == {"bottom", "right"} and set(cuts(outer)) == {"bottom", "left", "right"}
+    assert cuts(inner)["bottom"].angle == pytest.approx(28.5, abs=0.5)
     assert cuts(outer)["bottom"].angle == pytest.approx(24.0, abs=0.5)
     assert all(leaf.reached and leaf.active for d in (inner, outer) for leaf in cuts(d).values())
     assert [leaf.angle for leaf in inner.leaves if not leaf.cut] == [0.0, 0.0]

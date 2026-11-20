@@ -14,14 +14,14 @@ from functools import lru_cache
 from collections.abc import Mapping
 
 from .barndoors import BarnDoorSet, auto_set, cut_normal, envelope_points, manual_set
-from .face_eq import Adjustment
+from .face_eq import Adjustment, Probe
 from .fixtures import (
     SHIPPED_DIR, Blades, Channel, Dimensions, Fixture, Library, LensTube, Mode, Mount, Optics, Range,
     cct_to_rgb, discover, encode,
 )
 from .fixture_models import fixture_model
 from .layout import (
-    BATTEN_CLEARANCE, BATTEN_RADIUS, EPS, PLEAT_AMPLITUDE, PROSCENIUM_RECESS, Ctx, Part, _masking,
+    BATTEN_CLEARANCE, BATTEN_RADIUS, EPS, FRONT_BAND_THICKNESS, PLEAT_AMPLITUDE, PROSCENIUM_RECESS, Ctx, Part, _masking,
     _metres, _nn, _polys_overlap, _side_stair,
 )
 from .meshes import MAX_DEPTH_FACTOR
@@ -56,6 +56,10 @@ AZIMUTH_STEP = 0.5
 AZIMUTH_SEARCH = 30.0
 FOOTPRINT_MARGIN = 0.02
 TORSO_HEIGHT = 1.20
+SPILL_MARGIN = 0.30
+SPILL_PITCH = 0.5
+SPILL_FACADE_COLUMNS = 3
+SPILL_WALL_ROWS = 7
 PIPE2_NAME = "FrontPipe_02"
 HEIGHT_STEP = 0.05
 TILT_STEP = 1.0
@@ -250,9 +254,9 @@ class RigDims:
 
 @dataclass(frozen=True)
 class FaceSetup:
-    """Measuring plane of the face equalisation (spec 13.13): width wanted lit on the forestage (the nose
-    width, or the frame opening when a row 0 PC hangs outside the frame and cuts on the post), frame
-    width, forestage and area depths, height of the head and of the torso probes."""
+    """Measuring planes of the face equalisation (spec 13.13): width of the face window at the nose (the
+    façade opening less its margin), frame width, forestage and area depths, height of the head and of
+    the torso probes, and the labelled spill probes around the window."""
 
     nose_width: float
     frame_width: float
@@ -260,6 +264,7 @@ class FaceSetup:
     area_depth: float
     z: float
     z_torso: float
+    spill: tuple[tuple[str, Probe], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -1397,18 +1402,16 @@ def _channel_values(s: _Slot, overrides: Mapping[str, float]) -> tuple[ChannelVa
 
 
 def _pc_cut_lines(w: _Work, s: _Slot) -> dict[str, tuple[Vec3, Vec3]]:
-    """Target lines of the barn door cuts of a face PC (spec 13.12): row 0 keeps the light off the
-    stage front, the lintel, and the sides of the forestage (a PC hung beside the frame cuts on the
-    inner edge of the post instead); the other rows stay within the masking opening and below the
-    first border upstage of their zone."""
+    """Target lines of the barn door cuts of a face PC (spec 13.12): row 0 cuts on the edges of the face
+    window (the nez, the lintel bottom, the facade opening less `window_margin`, 13.7); the other rows
+    stay within the masking opening and below the first border upstage of their zone."""
     c, zone = w.c, s.meta["zone"]
     if s.meta["row"] == 0:
+        edge = c.W / 2 - c.p["front_pc"]["window_margin"]
         lines = {"bottom": ((0.0, 0.0, c.Hp), (1.0, 0.0, 0.0)),
-                 "top": ((0.0, c.Ys + PROSCENIUM_RECESS, c.Hp + c.Hc), (1.0, 0.0, 0.0))}
+                 "top": ((0.0, c.Ys, c.Hp + c.Hc), (1.0, 0.0, 0.0))}
         for name, sign in (("left", -1), ("right", 1)):
-            outside = s.x * sign > c.Wc / 2
-            lines[name] = (((sign * c.Wc / 2, c.Ys + PROSCENIUM_RECESS, 0.0), (0.0, 0.0, 1.0)) if outside
-                           else ((sign * c.W / 2, 0.0, c.Hp), (0.0, 1.0, 0.0)))
+            lines[name] = ((sign * edge, c.Ys, 0.0), (0.0, 0.0, 1.0))
         return lines
     half = min(c.p["masking"]["opening"], c.Wk) / 2
     lines = {"left": ((-half, zone[1], 0.0), (0.0, 0.0, 1.0)), "right": ((half, zone[1], 0.0), (0.0, 0.0, 1.0))}
@@ -2033,11 +2036,28 @@ def _pipe_part(w: _Work, pipe: _Support, index: int) -> None:
                                  (pipe.limit, pipe.y, pipe.z), BATTEN_RADIUS))
 
 
-def _forestage_width(w: _Work) -> float:
-    """Width wanted lit on the forestage: the nose, narrowed to the frame when a row 0 PC cuts on the post."""
-    c = w.c
-    outside = any(s.family == "front_pc" and s.meta["row"] == 0 and abs(s.x) > c.Wc / 2 + EPS for s in w.slots)
-    return c.Wc if outside else c.W
+def _spill_probes(c: Ctx) -> tuple[tuple[str, Probe], ...]:
+    """Probes where face light is not wanted, `SPILL_MARGIN` outside the face window (spec 13.13): the
+    facade beside the opening, the lintel, the house walls near the stage and the front of the stage."""
+    half, ys = c.W / 2, c.Ys
+    facing = (0.0, -1.0, 0.0)
+    out: list[tuple[str, Probe]] = []
+    columns = [half + SPILL_MARGIN + SPILL_PITCH * i for i in range(SPILL_FACADE_COLUMNS)]
+    if c.Z > EPS:
+        for x in (x for x in columns if x < c.Wt / 2):
+            for k in range(int((c.Hf - 0.25) / SPILL_PITCH)):
+                out += [("façade", Probe((sign * x, ys, 0.25 + SPILL_PITCH * k), facing)) for sign in (-1, 1)]
+    top = c.Hp + c.Hc
+    xs = [-half + SPILL_MARGIN + SPILL_PITCH * i for i in range(int((2 * half - 2 * SPILL_MARGIN) / SPILL_PITCH) + 1)]
+    for z in (top + 0.1, top + c.lintel - 0.1):
+        out += [("linteau", Probe((x, ys + PROSCENIUM_RECESS, z), facing)) for x in xs]
+    for sign in (-1, 1):
+        for j in range(1, SPILL_WALL_ROWS + 1):
+            for z in [1.5 + k for k in range(int(c.Hf - 2.0))]:
+                out.append(("murs de salle", Probe((sign * c.Wt / 2, ys - j, z), (-float(sign), 0.0, 0.0))))
+    for x in xs[::2]:
+        out += [("face du nez", Probe((x, -FRONT_BAND_THICKNESS, c.Hp * f), facing)) for f in (0.25, 0.5, 0.75)]
+    return tuple(out)
 
 
 def compute_rig(c: Ctx, library: Library, adjust: Mapping[str, Adjustment] | None = None) -> tuple[Rig, Part]:
@@ -2102,5 +2122,6 @@ def compute_rig(c: Ctx, library: Library, adjust: Mapping[str, Adjustment] | Non
                    tuple(w.row_supports), masking_clearance, tuple(w.nez_reach))
     rig = Rig(True, zones, tuple(fixtures), tuple(entries), _rest_map(fixtures), _loads(fixtures),
               tuple((k, tuple(v)) for k, v in circuits.items()), _haze_link(w, fixtures), dims,
-              tuple(w.warnings), FaceSetup(_forestage_width(w), c.Wc, c.Ys, ya, za, c.Hp + TORSO_HEIGHT), bool(w.adjust))
+              tuple(w.warnings), FaceSetup(c.W - 2 * c.p["front_pc"]["window_margin"], c.Wc, c.Ys, ya, za, c.Hp + TORSO_HEIGHT,
+                        _spill_probes(c)), bool(w.adjust))
     return rig, Part(tuple(w.objects), warnings=tuple(w.warnings))

@@ -111,4 +111,8 @@ def face_eq_lines(layout: Layout) -> list[str]:
         lines.append(f"Emin/Emoy (somme) : {_number(eq.before['sum'].uniformity, 2)} → "
                      f"{_number(total.uniformity, 2)} ; sondes sous 70 % de la moyenne : "
                      f"{eq.before['sum'].below} → {total.below}")
+        if "sum" in eq.spill_before and "sum" in eq.spill_after:
+            b, a = eq.spill_before["sum"], eq.spill_after["sum"]
+            lines.append(f"Débord hors de la fenêtre (somme) : au plus {round(100 * b.ratio)} % → {round(100 * a.ratio)} % "
+                         f"de la moyenne ; sondes au-dessus de 5 % : {b.over} → {a.over}")
     return lines

@@ -169,7 +169,7 @@ class THEATRE_OT_equalize_face(bpy.types.Operator):
             self.report({"ERROR"}, "Pas de PC de face à égaliser.")
             return {"CANCELLED"}
         try:
-            result = face_rig.equalise_rig(plain, props.library(), params["front_pc"]["min_mean_ratio"])
+            result = face_rig.equalise_params(params, props.library())
         except ValueError as error:
             self.report({"ERROR"}, str(error))
             return {"CANCELLED"}

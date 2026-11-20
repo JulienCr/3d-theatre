@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import math
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from operator import mul
 from typing import Callable, Mapping, Sequence
 
@@ -22,6 +22,8 @@ STEP_SCALE_MIN = 1.0 / 16
 PERCENTILE = 0.10
 HOLE_LEVEL = 0.7
 HOLE_WEIGHT = 1.0
+SPILL_LIMIT = 0.05
+SPILL_WEIGHT = 10.0
 FLOOR_PENALTY = 1000.0
 
 
@@ -55,7 +57,8 @@ class Emitter:
     fallback profile only. `cut_planes`: `(point, normal)` through the lens centre, normal toward the
     lit side; a probe behind any plane gets 0. `aim_z`: height of the plane where aim offsets apply
     (None: the plane of the probes). `cut_edges`: leaf edges; a probe sees the part of the lens disc of
-    `lens_radius` they leave open (penumbra; radius 0 gives a sharp plane).
+    `lens_radius` they leave open (penumbra; radius 0 gives a sharp plane). `spill`: False when walls hide
+    the emitter from the spill probes.
     """
 
     name: str
@@ -73,6 +76,7 @@ class Emitter:
     aim_z: float | None = None
     cut_edges: tuple[CutEdge, ...] = ()
     lens_radius: float = 0.0
+    spill: bool = True
 
     def beam_at(self, field: float) -> float:
         """50 % angle at `field`; a table is read linearly and held at its ends."""
@@ -105,6 +109,8 @@ class Bounds:
     mean_weight: float = 0.5
     hole_level: float = HOLE_LEVEL
     hole_weight: float = HOLE_WEIGHT
+    spill_limit: float = SPILL_LIMIT
+    spill_weight: float = SPILL_WEIGHT
     max_evaluations: int = 3000
 
     @classmethod
@@ -313,6 +319,24 @@ class Adjustment:
 
 
 @dataclass(frozen=True)
+class Spill:
+    """Light outside the face window as a share of the mean face illuminance: the largest `ratio` over the
+    spill probes, the index of that probe, and how many probes are above the limit."""
+
+    ratio: float
+    worst: int
+    over: int
+
+
+def spill_stats(values: Sequence[float], mean: float, limit: float) -> Spill:
+    if not values or mean <= 0.0:
+        return Spill(0.0, 0, 0)
+    ratios = [v / mean for v in values]
+    worst = max(range(len(ratios)), key=ratios.__getitem__)
+    return Spill(ratios[worst], worst, sum(1 for r in ratios if r > limit))
+
+
+@dataclass(frozen=True)
 class Result:
     """Outcome of `equalise`. Groups are the directions present (`L`, `R`) and `sum`.
 
@@ -329,6 +353,8 @@ class Result:
     mean_level: float
     evaluations: int
     seconds: float
+    spill_before: Mapping[str, Spill] = field(default_factory=dict)
+    spill_after: Mapping[str, Spill] = field(default_factory=dict)
 
 
 def _groups(by_direction: Mapping[str, list[float]]) -> dict[str, list[float]]:
@@ -350,14 +376,19 @@ def _darkest(vector: Sequence[float], probes: Sequence[Probe], count: int = 3):
 class _Search:
     """Pattern search over `(dx, dy, field, level)` of every emitter, one coordinate at a time."""
 
-    def __init__(self, emitters: Sequence[Emitter], probes: Sequence[Probe], bounds: Bounds):
+    def __init__(self, emitters: Sequence[Emitter], probes: Sequence[Probe], bounds: Bounds,
+                 spill: Sequence[Probe] = ()):
         self.emitters, self.probes, self.bounds = emitters, probes, bounds
-        self.count = len(probes)
+        self.face_count = len(probes)
+        every = [*probes, *spill]
+        self.count = len(every)
         self.aim_z = [probes[0].position[2] if em.aim_z is None else em.aim_z for em in emitters]
         self.geometry = []
         for em in emitters:
             active = []
-            for i, probe in enumerate(probes):
+            for i, probe in enumerate(every):
+                if i >= self.face_count and not em.spill:
+                    break
                 found = _probe_geometry(em, probe)
                 if found is not None:
                     active.append((i, *found))
@@ -368,7 +399,8 @@ class _Search:
                        for em in emitters]
         self.evaluations = 0
         self.units = [self.unit(k, p) for k, p in enumerate(self.params)]
-        self.base_mean = {name: sum(vec) / self.count for name, vec in self.group_vectors(full=True).items()}
+        self.base_mean = {name: sum(vec[:self.face_count]) / self.face_count
+                          for name, vec in self.group_vectors(full=True).items()}
 
     def unit(self, k: int, p: Sequence[float]) -> list[float]:
         """Illuminance of emitter `k` at level 1 for the aim offset and zoom of `p`."""
@@ -386,15 +418,20 @@ class _Search:
         return _groups(sums)
 
     def loss(self, groups: Mapping[str, Sequence[float]]) -> float:
-        """Sum over groups of `CV + hole_weight * sum(shortfall^2) - mean_weight * mean_ratio`, plus a steep ramp
-        under the mean floor. A shortfall is how far a probe falls under `hole_level` of the mean, in means."""
+        """Sum over groups of `CV + hole_weight * sum(shortfall^2) + spill_weight * sum(excess^2) - mean_weight *
+        mean_ratio`, plus a steep ramp under the mean floor. A shortfall is how far a face probe falls under
+        `hole_level` of the face mean, an excess how far a spill probe rises over `spill_limit` of it."""
         total = 0.0
-        floor = self.bounds.hole_level
+        floor, limit = self.bounds.hole_level, self.bounds.spill_limit
         for name, vec in groups.items():
-            s = statistics(vec)
+            face = vec[:self.face_count]
+            s = statistics(face)
             ratio = s.mean / self.base_mean[name] if self.base_mean[name] > 0.0 else 1.0
-            holes = sum((floor - v / s.mean) ** 2 for v in vec if v < floor * s.mean) if s.mean > 0.0 else 0.0
-            total += s.cv + self.bounds.hole_weight * holes - self.bounds.mean_weight * ratio
+            holes = sum((floor - v / s.mean) ** 2 for v in face if v < floor * s.mean) if s.mean > 0.0 else 0.0
+            spill = sum((v / s.mean - limit) ** 2 for v in vec[self.face_count:]
+                        if v > limit * s.mean) if s.mean > 0.0 else 0.0
+            total += s.cv + self.bounds.hole_weight * holes + self.bounds.spill_weight * spill
+            total -= self.bounds.mean_weight * ratio
             total += FLOOR_PENALTY * max(0.0, self.bounds.min_mean_ratio - ratio)
         return total
 
@@ -446,20 +483,24 @@ class _Search:
         return best
 
 
-def equalise(emitters: Sequence[Emitter], probes: Sequence[Probe], bounds: Bounds | None = None) -> Result:
+def equalise(emitters: Sequence[Emitter], probes: Sequence[Probe], bounds: Bounds | None = None,
+             spill: Sequence[Probe] = ()) -> Result:
     """Aim offset, zoom and level of every emitter for the most even face light.
 
     Deterministic. Minimises, for each direction present and for their sum, `(1 - U) + CV`, minus
     `mean_weight` times the mean relative to the rig at full, under the `min_mean_ratio` floor, by pattern
     search from the given setting. Levels stay in `[level_min, level_max]` (at most 1), the zoom in each
-    `zoom_range`.
+    `zoom_range`. `spill` are probes outside the face window, whose illuminance above `spill_limit` of the face
+    mean is penalised.
     """
     if not emitters or not probes:
         raise ValueError("égalisation : aucun appareil ou aucun point de mesure")
     if any(e.direction not in DIRECTIONS for e in emitters):
         raise ValueError("égalisation : direction `L` ou `R` attendue")
     started = time.perf_counter()
-    search = _Search(emitters, probes, bounds or Bounds())
+    bounds = bounds or Bounds()
+    search = _Search(emitters, probes, bounds, spill)
+    nf = search.face_count
     before = search.group_vectors()
     search.run()
     after = search.group_vectors()
@@ -470,15 +511,17 @@ def equalise(emitters: Sequence[Emitter], probes: Sequence[Probe], bounds: Bound
         adjustments.append(Adjustment(em.name, (dx, dy), field, level, axis, _aim_point(em, axis, search.aim_z[k])))
     return Result(
         tuple(adjustments),
-        {n: statistics(v) for n, v in before.items()},
-        {n: statistics(v) for n, v in after.items()},
-        {n: statistics(v).mean / search.base_mean[n] if search.base_mean[n] > 0.0 else 1.0
+        {n: statistics(v[:nf]) for n, v in before.items()},
+        {n: statistics(v[:nf]) for n, v in after.items()},
+        {n: statistics(v[:nf]).mean / search.base_mean[n] if search.base_mean[n] > 0.0 else 1.0
          for n, v in after.items()},
-        {n: _darkest(v, probes) for n, v in before.items()},
-        {n: _darkest(v, probes) for n, v in after.items()},
+        {n: _darkest(v[:nf], probes) for n, v in before.items()},
+        {n: _darkest(v[:nf], probes) for n, v in after.items()},
         sum(p[3] for p in search.params) / len(emitters),
         search.evaluations,
         time.perf_counter() - started,
+        {n: spill_stats(v[nf:], statistics(v[:nf]).mean, bounds.spill_limit) for n, v in before.items()},
+        {n: spill_stats(v[nf:], statistics(v[:nf]).mean, bounds.spill_limit) for n, v in after.items()},
     )
 
 
