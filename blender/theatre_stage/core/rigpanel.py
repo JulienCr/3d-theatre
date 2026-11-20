@@ -102,10 +102,12 @@ def face_eq_lines(layout: Layout) -> list[str]:
     for key, label in FACE_GROUPS:
         if key in eq.before and key in eq.after:
             b, a = eq.before[key], eq.after[key]
-            lines.append(f"{label} : U {_number(b.uniformity, 2)} → {_number(a.uniformity, 2)}, "
+            lines.append(f"{label} : P10/moy {_number(b.p10_ratio, 2)} → {_number(a.p10_ratio, 2)}, "
                          f"CV {_number(b.cv, 2)} → {_number(a.cv, 2)}")
     total = eq.after.get("sum")
     if total is not None:
         lines.append(f"Éclairement moyen (somme) : {_number(eq.before['sum'].mean, 0)} → "
                      f"{_number(total.mean, 0)} lx, niveau moyen {_number(eq.mean_level, 2)}")
+        lines.append(f"Emin/Emoy (somme, indicatif) : {_number(eq.before['sum'].uniformity, 2)} → "
+                     f"{_number(total.uniformity, 2)}")
     return lines

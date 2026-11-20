@@ -249,8 +249,9 @@ class RigDims:
 
 @dataclass(frozen=True)
 class FaceSetup:
-    """Measuring plane of the face equalisation (spec 13.13): nose and frame widths, forestage and
-    area depths, height of the probes."""
+    """Measuring plane of the face equalisation (spec 13.13): width wanted lit on the forestage (the nose
+    width, or the frame opening when a row 0 PC hangs outside the frame and cuts on the post), frame
+    width, forestage and area depths, height of the probes."""
 
     nose_width: float
     frame_width: float
@@ -2030,6 +2031,13 @@ def _pipe_part(w: _Work, pipe: _Support, index: int) -> None:
                                  (pipe.limit, pipe.y, pipe.z), BATTEN_RADIUS))
 
 
+def _forestage_width(w: _Work) -> float:
+    """Width wanted lit on the forestage: the nose, narrowed to the frame when a row 0 PC cuts on the post."""
+    c = w.c
+    outside = any(s.family == "front_pc" and s.meta["row"] == 0 and abs(s.x) > c.Wc / 2 + EPS for s in w.slots)
+    return c.Wc if outside else c.W
+
+
 def compute_rig(c: Ctx, library: Library, adjust: Mapping[str, Adjustment] | None = None) -> tuple[Rig, Part]:
     """The whole rig for the context `c` and the fiches of `library` (spec 13 and 15).
 
@@ -2092,5 +2100,5 @@ def compute_rig(c: Ctx, library: Library, adjust: Mapping[str, Adjustment] | Non
                    tuple(w.row_supports), masking_clearance, tuple(w.nez_reach))
     rig = Rig(True, zones, tuple(fixtures), tuple(entries), _rest_map(fixtures), _loads(fixtures),
               tuple((k, tuple(v)) for k, v in circuits.items()), _haze_link(w, fixtures), dims,
-              tuple(w.warnings), FaceSetup(c.W, c.Wc, c.Ys, ya, za), bool(w.adjust))
+              tuple(w.warnings), FaceSetup(_forestage_width(w), c.Wc, c.Ys, ya, za), bool(w.adjust))
     return rig, Part(tuple(w.objects), warnings=tuple(w.warnings))

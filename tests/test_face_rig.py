@@ -2,7 +2,7 @@
 
 import pytest
 
-from core.face_rig import FaceEq, emitters_of, equalise_rig, signature
+from core.face_rig import USEFUL_MARGIN, FaceEq, emitters_of, equalise_rig, probes_of, signature
 from core.layout import STALE_FACE_EQ, compute_layout
 from core.qlc import patched_from_rig
 from core.rig import default_library, head_frame
@@ -80,7 +80,7 @@ def test_equalisation_is_stored_as_json_and_read_back(eq):
 
 def test_equalisation_improves_each_direction_and_the_sum(eq):
     assert set(eq.before) == {"L", "R", "sum"}
-    assert all(eq.after[k].cv < eq.before[k].cv for k in eq.before)
+    assert all(eq.after[k].cv < eq.before[k].cv and eq.after[k].p10_ratio > eq.before[k].p10_ratio for k in eq.before)
     assert eq.mean_ratio["sum"] >= RATIO - 0.01 and all(0.0 <= a.level <= 1.0 for a in eq.adjustments)
 
 
@@ -140,8 +140,25 @@ def test_qlc_marks_the_face_pcs_of_an_equalised_rig_only(plain, eq):
 def test_panel_lines_per_state(plain, eq):
     assert face_eq_lines(plain) == []
     applied = "\n".join(face_eq_lines(compute_layout(make(), LIB, eq)))
-    for expected in ("Face égalisée le ", "Jardin : U ", "Cour : U ", "Somme : U ", "CV ", "→", "lx"):
+    for expected in ("Face égalisée le ", "Jardin : P10/moy ", "Cour : P10/moy ", "Somme : P10/moy ", "CV ", "→", "lx",
+                     "Emin/Emoy"):
         assert expected in applied
     stale = face_eq_lines(compute_layout(make(front_pc={"zone_width": 2.0}), LIB, eq))
     assert len(stale) == 1 and stale[0].startswith("Égalisation de la face périmée le ")
 
+
+
+def test_useful_grid_stays_inside_the_intended_cuts(plain):
+    face, probes = plain.rig.face, probes_of(plain.rig)
+    assert probes and min(p.position[1] for p in probes) >= USEFUL_MARGIN
+    for p in probes:
+        half = (face.nose_width if p.position[1] < face.forestage_depth else face.frame_width) / 2
+        assert abs(p.position[0]) <= half - USEFUL_MARGIN + 1e-9 and p.position[1] <= face.area_depth
+
+
+def test_forestage_is_wanted_as_wide_as_the_frame_when_a_row_0_pc_cuts_on_the_post(plain):
+    outside = [f for f in faces(plain.rig) if f.circuit.endswith("Row1_L") or f.circuit.endswith("Row1_R")]
+    assert any(abs(f.hang[0]) > plain.rig.face.frame_width / 2 for f in outside)
+    assert plain.rig.face.nose_width == plain.rig.face.frame_width
+    inside = compute_layout(make(stage={"width": 14.0}), LIB).rig
+    assert inside.face.nose_width >= inside.face.frame_width

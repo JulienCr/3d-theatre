@@ -15,14 +15,15 @@ from dataclasses import dataclass
 from datetime import datetime
 from functools import lru_cache
 
-from .face_eq import Adjustment, Bounds, CutEdge, Emitter, Result, Stats, Vec3, equalise, face_grid
+from .face_eq import Adjustment, Bounds, CutEdge, Emitter, Probe, Result, Stats, Vec3, equalise, face_grid
 from .fixtures import Fixture, Library, Optics
 from .ies import IesTable, Photometry, ZoomSet, load_ies
 from .rig import Rig, RigFixture, aim_angles, head_frame
 from .vecmath import cross as _cross
 
 FAMILY = "front_pc"
-VERSION = 1
+VERSION = 2
+USEFUL_MARGIN = 0.30
 DIGITS = 4
 _ROW = re.compile(r"Row(\d+)")
 
@@ -219,14 +220,21 @@ class FaceEq:
         return self.signature == signature(rig, min_mean_ratio)
 
 
+def probes_of(rig: Rig) -> tuple[Probe, ...]:
+    """The useful grid: probes `USEFUL_MARGIN` inside the intended cuts of the rig's measuring plane (spec 13.13)."""
+    face = rig.face
+    if face is None:
+        return ()
+    return face_grid(nose_width=face.nose_width, frame_width=face.frame_width, forestage_depth=face.forestage_depth,
+                     area_depth=face.area_depth, z=face.z, margin=USEFUL_MARGIN)
+
+
 def equalise_rig(rig: Rig, library: Library, min_mean_ratio: float, now: datetime | None = None) -> FaceEq:
     """Run the engine on the face PCs of a plain (unadjusted) rig and package the result for storage."""
     emitters = emitters_of(rig, library)
     if not emitters or rig.face is None or rig.zones is None:
         raise ValueError("Égalisation impossible : aucun PC de face dans l'implantation.")
-    face = rig.face
-    probes = face_grid(nose_width=face.nose_width, frame_width=face.frame_width,
-                       forestage_depth=face.forestage_depth, area_depth=face.area_depth, z=face.z)
+    probes = probes_of(rig)
     bounds = Bounds.for_zone(rig.zones.width, rig.zones.depth, min_mean_ratio=min_mean_ratio)
     result: Result = equalise(emitters, probes, bounds)
     stamp = (now or datetime.now()).isoformat(timespec="seconds")

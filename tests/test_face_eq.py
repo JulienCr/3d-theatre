@@ -6,7 +6,7 @@ from dataclasses import replace
 import pytest
 
 from core.face_eq import (
-    AUDIENCE, Bounds, CutEdge, Emitter, Probe, equalise, evaluate, face_grid, illuminance,
+    AUDIENCE, Bounds, CutEdge, Emitter, Probe, equalise, evaluate, face_grid, illuminance, statistics,
 )
 from core.fixtures import SHIPPED_DIR
 from core.ies import Photometry, ZoomSet, fallback_profile, load_ies, parse_ies
@@ -92,7 +92,8 @@ def test_cut_plane_zeroes_the_dark_side():
 
 def test_statistics_of_an_even_field():
     stats = evaluate([emitter()], [Probe((0.0, 0.0, GRID_Z))] * 3)["L"]
-    assert stats.uniformity == pytest.approx(1.0) and stats.cv == pytest.approx(0.0, abs=1e-9)
+    assert stats.uniformity == pytest.approx(1.0) and stats.p10_ratio == pytest.approx(1.0)
+    assert stats.cv == pytest.approx(0.0, abs=1e-9)
 
 
 AIMS_L = (-4.0, -3.0, -0.5, 3.0)
@@ -118,9 +119,9 @@ def test_optimiser_improves_each_direction_and_the_sum():
     result = equalise(emitters, probes, Bounds(aim_dx=1.0, aim_dy=1.0))
     assert set(result.before) == {"L", "R", "sum"}
     for name in ("L", "R", "sum"):
-        assert result.after[name].uniformity > result.before[name].uniformity + 0.1, name
+        assert result.after[name].p10_ratio > result.before[name].p10_ratio + 0.1, name
         assert result.after[name].cv < result.before[name].cv, name
-    assert result.before["sum"].uniformity == pytest.approx(evaluate(emitters, probes)["sum"].uniformity)
+    assert result.before["sum"].p10_ratio == pytest.approx(evaluate(emitters, probes)["sum"].p10_ratio)
 
 
 def test_optimiser_respects_the_levers_and_the_mean_floor():
@@ -201,3 +202,17 @@ def test_leaf_edge_penumbra_widens_with_the_lens_and_vanishes_for_a_point():
     near = Probe(tuple(c + o for c, o in zip(base.source, (0.0, 8.0, 5.0))))
     sharp, soft = illuminance(edge_emitter(0.0), near), illuminance(edge_emitter(0.1), near)
     assert 0.0 < soft < illuminance(base, near) and sharp in (0.0, illuminance(base, near))
+
+
+def test_percentile_ignores_one_dark_probe_in_twenty_that_the_minimum_sees():
+    stats = statistics([100.0] * 19 + [0.0])
+    assert stats.uniformity == 0.0 and stats.p10_ratio == pytest.approx(100.0 / 95.0)
+    assert statistics([0.0] * 3 + [100.0] * 7).p10_ratio == 0.0
+
+
+def test_face_grid_margin_drops_the_nose_rows_and_narrows_every_row():
+    plain = face_grid(nose_width=11.6, frame_width=10.0, forestage_depth=1.5, area_depth=6.0, z=GRID_Z)
+    inner = face_grid(nose_width=11.6, frame_width=10.0, forestage_depth=1.5, area_depth=6.0, z=GRID_Z, margin=0.3)
+    assert min(p.position[1] for p in inner) >= 0.3 > min(p.position[1] for p in plain)
+    assert max(abs(p.position[0]) for p in inner) <= 5.8 - 0.3 and max(p.position[1] for p in inner) == max(p.position[1] for p in plain)
+    assert len(inner) < len(plain)

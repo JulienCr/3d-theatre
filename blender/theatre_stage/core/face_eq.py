@@ -19,6 +19,7 @@ Vec3 = tuple[float, float, float]
 AUDIENCE: Vec3 = (0.0, -1.0, 0.0)
 DIRECTIONS = ("L", "R")
 STEP_SCALE_MIN = 1.0 / 16
+PERCENTILE = 0.10
 FLOOR_PENALTY = 1000.0
 
 
@@ -109,17 +110,22 @@ class Bounds:
 
 
 def face_grid(*, nose_width: float, frame_width: float, forestage_depth: float, area_depth: float,
-              z: float, pitch: float = 0.5) -> tuple[Probe, ...]:
+              z: float, pitch: float = 0.5, margin: float = 0.0) -> tuple[Probe, ...]:
     """Cell-centred probes at height `z` over the acting area, rows ordered from the nose upstage.
 
     A row whose centre is in the forestage (`Y < forestage_depth`) spans `nose_width`, the others
-    `frame_width`; both centred on X = 0.
+    `frame_width`; both centred on X = 0. `margin` keeps probes that far inside the intended cuts: rows
+    nearer the nose than `margin` are dropped and each row is narrowed by `margin` on both sides.
     """
     rows = max(1, round(area_depth / pitch))
     probes = []
     for j in range(rows):
         y = (j + 0.5) * area_depth / rows
-        width = nose_width if y < forestage_depth else frame_width
+        if y < margin:
+            continue
+        width = (nose_width if y < forestage_depth else frame_width) - 2.0 * margin
+        if width <= 0.0:
+            continue
         cols = max(1, round(width / pitch))
         probes.extend(Probe((-width / 2 + (i + 0.5) * width / cols, y, z)) for i in range(cols))
     return tuple(probes)
@@ -264,13 +270,15 @@ def illuminance(emitter: Emitter, probe: Probe, *, field: float | None = None, l
 
 @dataclass(frozen=True)
 class Stats:
-    """`uniformity` is `minimum / mean` (U), `cv` the coefficient of variation (standard deviation / mean)."""
+    """`p10_ratio` is the 10th percentile over the mean (the objective), `uniformity` `minimum / mean` (U, for
+    information), `cv` the coefficient of variation (standard deviation / mean)."""
 
     mean: float
     minimum: float
     maximum: float
     uniformity: float
     cv: float
+    p10_ratio: float = 0.0
 
 
 def statistics(values: Sequence[float]) -> Stats:
@@ -279,8 +287,11 @@ def statistics(values: Sequence[float]) -> Stats:
     if mean <= 0.0:
         return Stats(0.0, 0.0, 0.0, 0.0, 0.0)
     variance = max(sum(map(mul, values, values)) / n - mean * mean, 0.0)
-    low = min(values)
-    return Stats(mean, low, max(values), low / mean, math.sqrt(variance) / mean)
+    ordered = sorted(values)
+    rank = PERCENTILE * (n - 1)
+    below = int(rank)
+    p10 = ordered[below] + (ordered[min(below + 1, n - 1)] - ordered[below]) * (rank - below)
+    return Stats(mean, ordered[0], ordered[-1], ordered[0] / mean, math.sqrt(variance) / mean, p10 / mean)
 
 
 @dataclass(frozen=True)
@@ -369,12 +380,12 @@ class _Search:
         return _groups(sums)
 
     def loss(self, groups: Mapping[str, Sequence[float]]) -> float:
-        """Sum over groups of `(1 - U) + CV - mean_weight * mean_ratio`, plus a steep ramp under the mean floor."""
+        """Sum over groups of `(1 - P10/mean) + CV - mean_weight * mean_ratio`, plus a steep ramp under the mean floor."""
         total = 0.0
         for name, vec in groups.items():
             s = statistics(vec)
             ratio = s.mean / self.base_mean[name] if self.base_mean[name] > 0.0 else 1.0
-            total += (1.0 - s.uniformity) + s.cv - self.bounds.mean_weight * ratio
+            total += (1.0 - s.p10_ratio) + s.cv - self.bounds.mean_weight * ratio
             total += FLOOR_PENALTY * max(0.0, self.bounds.min_mean_ratio - ratio)
         return total
 

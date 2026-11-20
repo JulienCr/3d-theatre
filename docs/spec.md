@@ -1950,6 +1950,13 @@ rig et range le résultat dans la scène (13.14).
   0,50 m *(choix)*, centres de cellules (les bords sont à 0,25 m), sur `Y ∈ [0,
   Ya]` ; les rangées de l'avancée (`Y < Ys`) vont jusqu'à `±W/2`, les autres
   jusqu'à `±Wc/2`. Défauts : 246 sondes.
+- **Grille utile** (`margin`, 0,30 m *(choix)*) : le rig ne mesure que là où l'on veut
+  de la lumière de face, à l'intérieur de chaque coupe voulue avec une marge de 0,30 m.
+  Derrière la façade, `|X| ≤ Wc/2 − 0,30` ; sur l'avancée, `|X| ≤ L/2 − 0,30` et
+  `Y ≥ 0,30` (nez + marge), `L` valant `W` (ligne de coupe du bord de l'avancée) ou `Wc`
+  quand un PC du rang 0 est accroché hors du cadre (sa coupe passe sur le bord du montant :
+  `FaceSetup.nose_width`) ; jusqu'au fond de la zone. Défauts : 209 sondes. Les coins
+  du nez hors cadre, que les volets coupent exprès, n'y sont plus : ils fixaient seuls `U`.
 - Éclairement vertical `E = niveau · I(θ, φ) · max(0, s·n) / d²` (lux), `s`
   unitaire vers la source. Ni ombre, ni réflexion, ni brume.
 - **Lames** : `cut_planes` donne des plans `(point, normale)` par le centre de
@@ -1969,10 +1976,12 @@ rig et range le résultat dans la scène (13.14).
   calculée s'écartait de 0,18 de la mesurée (13.14).
 
 **Critère.** Pour chaque direction seule (jardin, cour) et pour leur somme,
-`U = Emin / Emoy` (à maximiser) et `CV = σ / Emoy` (à minimiser). Les deux
+`P10 / Emoy` (10ᵉ centile sur la moyenne, interpolation linéaire, à maximiser) et
+`CV = σ / Emoy` (à minimiser). `U = Emin / Emoy` reste calculé, **pour information**
+(un seul point sombre le fixe). Les deux
 directions d'une zone ne sont jamais couplées (ADEC) : elles pèsent chacune
 autant que la somme. Perte minimisée :
-`Σ_g (1 − U_g) + CV_g − 0,5 · Emoy_g / Emoy_g(plein)`, `g ∈ {L, R, somme}`.
+`Σ_g (1 − P10_g/Emoy_g) + CV_g − 0,5 · Emoy_g / Emoy_g(plein)`, `g ∈ {L, R, somme}`.
 
 **Leviers et bornes.**
 
@@ -1999,7 +2008,8 @@ décalage X, Y, zoom, niveau, pas divisé par deux quand un tour n'améliore rie
 ne coûte rien. Contrôle : 12 départs tirés au hasard (visée et zoom) ne gagnent
 pas plus de 1 % de perte sur le départ nominal.
 
-**Résultats**, `U` puis `CV`, avant → après (`front_pc` : défauts ; IES de la
+**Résultats d'origine** (grille complète sans marge, volets ignorés, critère `U = Emin / Emoy` ;
+remplacés dans le rig par ceux de 13.14), `U` puis `CV`, avant → après (`front_pc` : défauts ; IES de la
 bibliothèque ; niveau moyen 1,00 ; 0,6 s, 2 100 évaluations, Python 3.12) :
 
 | Rig | Jardin seul | Cour seule | Somme | Moyenne (somme) |
@@ -2015,10 +2025,11 @@ Les sondes les plus sombres avant sont les coins du nez (`X = ±5,55 ; Y = 0,25`
   réglage de niveau par appareil dans le patch (15.1). Le sens de `φ` des IES
   asymétriques n'est pas vérifié dans Cycles : les profils du T15 et ceux du
   Fresnel (9 plans de 45°, identiques à 1 % près) sont de révolution.
-- `U = Emin / Emoy` est dominé par les quelques sondes que les volets laissent dans
-  l'ombre (coins du nez hors cadre : 0,3 lx pour 220 lx de moyenne par direction) :
-  avec les volets automatiques `U` reste de l'ordre de 0,02 par direction et 0,15 en
-  somme, c'est `CV` qui descend (0,48 → 0,37 en somme).
+- Avec la grille complète, les coins du nez hors cadre (0,3 lx pour 220 lx de moyenne par
+  direction, à cause des volets) faisaient `U ≈ 0,02` par direction et le minimum ne
+  bougeait pas (0,19 → 0,17 en somme) ; d'où la grille utile et le 10ᵉ centile.
+- Égaliser aplatit les points chauds : un comédien debout dans un point chaud est
+  assombri (13.14).
 
 ### 13.14 Égalisation de la face dans le rig
 
@@ -2035,7 +2046,7 @@ la scène, propriété `theatre_face_eq` (JSON : `signature`, `date`, par PC la 
   `Photometry` des IES de la fiche (ou du tube), repli sans IES ; `aim_z` du plan de
   visée ; `cut_edges` : le bord libre de chaque feuille (`hinge + λ·z`, direction `x`
   de `axes`, tournés dans le monde par `head_frame`), normale côté éclairé = `−normal`
-  de la feuille ; `lens_radius = aperture/2`. Sondes : `face_grid` sur `Rig.face`
+  de la feuille ; `lens_radius = aperture/2`. Sondes : grille utile de 13.13, `face_grid` sur `Rig.face`
   (`FaceSetup` : `W`, `Wc`, `Ys`, `Ya`, `Za`) ; bornes `Bounds.for_zone(zones.width,
   zones.depth, min_mean_ratio=front_pc.min_mean_ratio)`.
 - **Signature** : empreinte (SHA-1 tronqué) des entrées du moteur lues sur le rig
@@ -2053,21 +2064,27 @@ la scène, propriété `theatre_face_eq` (JSON : `signature`, `date`, par PC la 
   rien (état vide). `Layout.face_eq_state` et `Layout.face_eq` les portent.
 - **Niveaux** : le niveau de repos du PC est `rest.pc_level × level` (15.2).
 - **Panneau** (groupe « Implantation lumière », sous les boutons) : date, puis par
-  direction et en somme `U` et `CV` avant → après, éclairement moyen et niveau moyen ;
+  direction et en somme `P10/Emoy` et `CV` avant → après (plus `Emin/Emoy` en somme, indicatif), éclairement moyen et niveau moyen ;
   une ligne « périmée » quand l'état est `stale`.
 - **Vérification dans Cycles** (2026-11-20, copie de la scène de l'utilisateur, PC de
   face seuls à `pc_level` 0,7, blanc neutre 6 500 K, sans brume ni architecture,
-  rebonds 0, vue Standard) : 246 cartes diffuses verticales de 0,20 × 0,30 m
-  (albédo 0,8) aux sondes, caméra orthographique inclinée de 40°, 256 échantillons
-  sans débruitage (bruit médian 0,2 %), valeur moyenne du cœur de chaque carte. Mesuré
+  rebonds 0, vue Standard) : 209 cartes diffuses verticales de 0,20 × 0,30 m
+  (albédo 0,8) aux sondes de la grille utile, caméra orthographique inclinée de 40°, 512 échantillons
+  sans débruitage (bruit médian 0,15 %), valeur moyenne du cœur de chaque carte. Mesuré
   contre calculé (`pixel = ρ·niveau·E/683` attendu) :
 
-  | Série | Corrélation | Pente mesuré/attendu | `U` mesuré / calculé | `CV` mesuré / calculé |
-  |---|---|---|---|---|
-  | avant, jardin (cour : identique) | 0,9992 | 0,95 | 0,023 / 0,025 | 0,534 / 0,515 |
-  | avant, somme | | | 0,180 / 0,190 | 0,498 / 0,482 |
-  | après, jardin | 0,9991 | 0,96 | 0,028 / 0,030 | 0,402 / 0,392 |
-  | après, somme | | | 0,152 / 0,161 | 0,374 / 0,368 |
+  | Série | Corrélation | Pente | `P10/Emoy` mesuré / calculé | `CV` mesuré / calculé | `Emin/Emoy` mesuré / calculé |
+  |---|---|---|---|---|---|
+  | avant, jardin (cour : identique) | 0,9992 | 0,95 | 0,456 / 0,475 | 0,498 / 0,477 | 0,195 / 0,205 |
+  | avant, somme | | | 0,503 / 0,522 | 0,466 / 0,448 | 0,273 / 0,278 |
+  | après, jardin | 0,9971 | 0,95 | 0,727 / 0,732 | 0,266 / 0,255 | 0,291 / 0,297 |
+  | après, cour | 0,9949 | 0,95 | 0,743 / 0,755 | 0,236 / 0,224 | 0,328 / 0,333 |
+  | après, somme | | | 0,762 / 0,759 | 0,235 / 0,226 | 0,499 / 0,497 |
+
+  Sur `Cam_Face`, les trois comédiens de la scène de l'utilisateur, valeur linéaire au torse
+  avant → après : jardin (`X = −0,24`) 0,036 → 0,049 (+38 %), centre (`X = 1,44`)
+  0,067 → 0,068, cour (`X = 3,11`, `Y = 0,77`) 0,052 → 0,027 (**−48 %**) : il se tenait
+  dans le point chaud de l'avancée (1,8 fois la moyenne avant, 1,0 après).
 
   La pente vaut 0,95 et non 1 : le demi-plan d'une feuille surestime d'environ 5 %
   la lumière que les feuilles laissent passer. Un PC seul, volets retirés : pente
