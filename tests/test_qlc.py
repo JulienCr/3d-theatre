@@ -237,6 +237,20 @@ def test_missing_qlc_definition_falls_back_to_generation(library, tmp_path):
     assert any("introuvable" in w for w in result.warnings)
 
 
+def test_two_sheets_with_the_same_model_keep_their_own_definition(library, tmp_path):
+    twin = _sheet("test_pc_copy", "Test", "PC LED", "pc", [
+        {"name": "Wide", "footprint": 5, "channels": [_channel(1, "dimmer", 8, 0)]}],
+        motion={"type": "static"})
+    lib = Library({**library.fixtures, "test_pc_copy": twin})
+    patch = (PatchedFixture("PC_01", "test_pc", "2 Ch", 1, 1, None),
+             PatchedFixture("PC_02", "test_pc_copy", "Wide", 1, 10, None))
+    result = export_workspace(patch, lib, tmp_path)
+    assert sorted(p.name for p in result.written_qxf) == ["Test-PC-LED-(test_pc_copy).qxf", "Test-PC-LED.qxf"]
+    models = [f["Model"] for f in _fixtures(ET.parse(result.workspace).getroot())]
+    assert models == ["PC LED", "PC LED (test_pc_copy)"]
+    assert any("même fabricant et modèle" in w for w in result.warnings)
+
+
 def test_refused_placements_are_reported(library, tmp_path):
     patch = (
         PatchedFixture("A", "test_pc", "2 Ch", 1, 1, None),

@@ -452,6 +452,11 @@ class _Planner:
                 self.warnings.append(f"Fiche « {fixture.id} » : modèle renommé « {model} », "
                                      f"QLC+ garde sa propre définition de même nom.")
             filename = definition_filename(fixture.manufacturer, model)
+            if filename in self.definitions:
+                model = f"{model} ({fixture.id})"
+                filename = definition_filename(fixture.manufacturer, model)
+                self.warnings.append(f"Fiche « {fixture.id} » : même fabricant et modèle qu'une autre "
+                                     f"fiche exportée, modèle renommé « {model} ».")
             if _ILLEGAL_FILE_CHARS.search(f"{fixture.manufacturer}{model}"):
                 self.warnings.append(f"Fiche « {fixture.id} » : le nom du fichier « {filename} » "
                                      f"remplace des caractères interdits, QLC+ ne le retrouvera pas seul.")
