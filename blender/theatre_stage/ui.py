@@ -8,8 +8,9 @@ import textwrap
 
 import bpy
 
-from . import build, materials, operators, props
+from . import build, materials, operators, props, rigbuild
 from .core import params as schema
+from .core import rigpanel
 from .core.layout import MATERIAL_LABELS
 from .core.params import Group, Param
 
@@ -62,10 +63,23 @@ def _draw_set(layout, node, params, group: Group) -> None:
         _draw_param(layout, node, param, group, active=bool(getattr(node, flag)) if flag else True)
 
 
+def _draw_rig_buttons(layout) -> None:
+    column = layout.column(align=True)
+    column.operator("theatre.rest_full", icon="LIGHT_SUN")
+    column.operator("theatre.export_qlc", icon="EXPORT")
+    column.operator("theatre.reload_library", icon="FILE_REFRESH")
+    if operators.export_report:
+        box = layout.box()
+        for line in operators.export_report:
+            box.label(text=line)
+
+
 def _draw_group(self, context):
     group: Group = self.group
     node = getattr(getattr(context.scene, props.SCENE_ATTR), group.key)
     _draw_set(self.layout, node, group.params, group)
+    if group.key == "rig":
+        _draw_rig_buttons(self.layout)
     if not group.side_params:
         return
     if node.symmetric:
@@ -102,7 +116,20 @@ class _SubPanel(bpy.types.Panel):
 
 
 def _layout(context):
-    return build.cached_layout(props.scene_params(context.scene))
+    return props.current_layout(context.scene)
+
+
+_text: tuple | None = None
+
+
+def _rig_text(layout) -> tuple[list[str], list[str], list[tuple[str, str, str, str]]]:
+    """Dimension lines, mover lines and patch rows, rebuilt only when the cached layout changes."""
+    global _text
+    if _text is None or _text[0] is not layout:
+        rig = layout.rig
+        built = (rigpanel.dimension_lines(rig), rigpanel.mover_lines(rig), rigpanel.patch_rows(rig)) if rig else ([], [], [])
+        _text = (layout, *built)
+    return _text[1:]
 
 
 class THEATRE_PT_main(bpy.types.Panel):
@@ -156,6 +183,40 @@ class THEATRE_PT_derived(_SubPanel):
         for lane, jardin, cour in d.visible_depths:
             where = f"rue {lane}" if lane else "avant plan 1"
             col.label(text=f"Coulisse vue ({where}) : {_metres(jardin)} / {_metres(cour)}")
+        rig_lines = _rig_text(_layout(context))[0]
+        if rig_lines:
+            col.separator()
+            for line in rig_lines:
+                _wrap(col, context, line)
+
+
+class THEATRE_PT_aims(_SubPanel):
+    bl_idname = "THEATRE_PT_aims"
+    bl_label = "Visées de repos"
+    bl_parent_id = "THEATRE_PT_derived"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw(self, context):
+        col = self.layout.column(align=True)
+        for line in _rig_text(_layout(context))[1]:
+            _wrap(col, context, line)
+
+
+class THEATRE_PT_patch(_SubPanel):
+    bl_idname = "THEATRE_PT_patch"
+    bl_label = "Liste du patch"
+    bl_parent_id = "THEATRE_PT_derived"
+    bl_options = {"DEFAULT_CLOSED"}
+
+    def draw(self, context):
+        col = self.layout.column(align=True)
+        for name, address, mode, circuit in _rig_text(_layout(context))[2]:
+            head = col.split(factor=0.62, align=True)
+            head.label(text=name)
+            head.label(text=address)
+            detail = col.row()
+            detail.active = False
+            detail.label(text=f"{circuit} · {mode}")
 
 
 class THEATRE_PT_alerts(_SubPanel):
@@ -169,6 +230,7 @@ class THEATRE_PT_alerts(_SubPanel):
         messages += operators.preset_warnings
         messages += props.library().messages
         messages += materials.warnings
+        messages += rigbuild.warnings
         if not messages:
             self.layout.label(text="Aucune alerte.", icon="CHECKMARK")
         for message in messages:
@@ -188,8 +250,8 @@ class THEATRE_PT_presets(_SubPanel):
 
 
 GROUP_PANELS = [_group_panel(g) for g in schema.SCHEMA]
-CLASSES = (THEATRE_PT_main, *GROUP_PANELS, THEATRE_PT_materials, THEATRE_PT_derived, THEATRE_PT_alerts,
-           THEATRE_PT_presets)
+CLASSES = (THEATRE_PT_main, *GROUP_PANELS, THEATRE_PT_materials, THEATRE_PT_derived, THEATRE_PT_aims,
+           THEATRE_PT_patch, THEATRE_PT_alerts, THEATRE_PT_presets)
 
 
 def register() -> None:

@@ -653,6 +653,12 @@ def export_workspace(patched: Sequence[PatchedFixture], library: Library, out_di
     return ExportResult(workspace, tuple(written), export.reused, export.warnings)
 
 
+def existing_fixture_dirs(program: Path = Path("C:/QLC+"), home: Path | None = None) -> tuple[Path, ...]:
+    """The QLC+ fixture folders that exist: the installation's, then the user's (spec 16.4)."""
+    user = (Path.home() if home is None else Path(home)) / "QLC+"
+    return tuple(d for d in (Path(program) / "Fixtures", user / "Fixtures") if d.is_dir())
+
+
 def patched_from_rig(rig: Rig) -> tuple[PatchedFixture, ...]:
     """One `PatchedFixture` per computed fixture, in patch order (spec 16.1).
 

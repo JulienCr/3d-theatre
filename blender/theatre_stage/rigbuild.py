@@ -577,6 +577,9 @@ def _drive_field(ctx: _Build, tree) -> None:
 def _label(root, f: RigFixture) -> None:
     root["theatre_fixture"], root["theatre_family"], root["theatre_mode"] = f.fixture_id, f.family, f.mode
     root["theatre_circuit"], root["theatre_universe"], root["theatre_address"] = f.circuit or "", f.universe, f.address
+    patch = getattr(root, "dmx_patch", None)
+    if patch is not None:
+        patch.universe, patch.address = f.universe, f.address
 
 
 def _build_fixture(base: _Build, f: RigFixture) -> bpy.types.Object:
@@ -619,6 +622,15 @@ def ensure_dmx_props(scene, rig: Rig) -> int:
             scene[key] = float(value)
             created += 1
     return created
+
+
+def rest_full(scene, rig: Rig) -> int:
+    """Overwrite every patched channel with its rest value (spec 15.2); returns the channel count."""
+    for (universe, channel), value in rig.rest.items():
+        scene[f"dmx_{universe}_{channel}"] = float(value)
+    scene.update_tag()
+    bpy.context.view_layer.update()
+    return len(rig.rest)
 
 
 def _feeds_world_output(tree, name: str) -> bool:

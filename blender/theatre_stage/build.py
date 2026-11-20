@@ -29,17 +29,17 @@ ROUGHNESS = {
     "TS_Enclosure": 0.85, "TS_HouseFloor": 0.7, "TS_Fixture": 0.55, "TS_Lens": 0.05,
 }
 
-_layout_cache: tuple[str, Layout] | None = None
+_layout_cache: tuple[tuple, Layout] | None = None
 foreign_names: list[str] = []
 rebuilding = False
 
 
-def cached_layout(params: dict) -> Layout:
-    """`compute_layout` memoised on the last params (the panel calls it per redraw)."""
+def cached_layout(params: dict, library=None) -> Layout:
+    """`compute_layout` memoised on the last params and library (the panel calls it per redraw)."""
     global _layout_cache
-    key = repr(params)
+    key = (repr(params), id(library))
     if _layout_cache is None or _layout_cache[0] != key:
-        _layout_cache = (key, compute_layout(params))
+        _layout_cache = (key, compute_layout(params, library))
     return _layout_cache[1]
 
 
@@ -324,20 +324,20 @@ def _make_camera(spec, collections) -> bpy.types.Object:
 
 # ------------------------------------------------------------------ rebuild
 
-def rebuild(scene: bpy.types.Scene, params: dict) -> Layout:
-    """Delete every generated object of `scene` and recreate it from `params`."""
+def rebuild(scene: bpy.types.Scene, params: dict, library=None) -> Layout:
+    """Delete every generated object of `scene` and recreate it from `params` and the fixture `library`."""
     global rebuilding
     rebuilding = True
     try:
-        return _rebuild(scene, params)
+        return _rebuild(scene, params, library)
     finally:
         rebuilding = False
 
 
-def _rebuild(scene: bpy.types.Scene, params: dict) -> Layout:
+def _rebuild(scene: bpy.types.Scene, params: dict, library) -> Layout:
     materials.ensure_items(scene)
     materials.detect(scene)
-    layout = cached_layout(params)
+    layout = cached_layout(params, library)
     collections = ensure_collections(scene, layout)
 
     active = scene.camera
@@ -354,7 +354,7 @@ def _rebuild(scene: bpy.types.Scene, params: dict) -> Layout:
     for spec in layout.lights:
         _make_light(spec, collections)
     rigbuild.build_rig(scene, layout, collections, _new_mesh,
-                       lambda name: chosen.get(name) or get_material(name, layout.materials, scene))
+                       lambda name: chosen.get(name) or get_material(name, layout.materials, scene), library)
     haze = bpy.data.materials.get("TS_Haze")
     if haze is not None:
         drive_haze_density(haze, scene, layout.rig.haze if layout.rig else None)

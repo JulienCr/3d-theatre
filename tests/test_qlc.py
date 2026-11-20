@@ -365,3 +365,14 @@ def test_full_rig_exports_without_warning(tmp_path):
     rig = compute_layout(default_params()).rig
     result = export_workspace(patched_from_rig(rig), default_library(), tmp_path)
     assert result.warnings == ()
+
+
+def test_existing_fixture_dirs_keeps_only_folders_that_exist(tmp_path):
+    from core.qlc import existing_fixture_dirs
+
+    program, home = tmp_path / "program", tmp_path / "home"
+    assert existing_fixture_dirs(program, home) == ()
+    (program / "Fixtures").mkdir(parents=True)
+    assert existing_fixture_dirs(program, home) == (program / "Fixtures",)
+    (home / "QLC+" / "Fixtures").mkdir(parents=True)
+    assert existing_fixture_dirs(program, home) == (program / "Fixtures", home / "QLC+" / "Fixtures")

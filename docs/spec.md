@@ -1911,7 +1911,7 @@ dépend ni de Blender ni d'une installation de QLC+. QLC+ est installé dans
 
 ### 16.1 Fichiers écrits
 
-Dans `bpy.utils.extension_path_user(__package__, path="qlc", create=True)`,
+Dans le dossier choisi dans le sélecteur de l'opérateur (`theatre.export_qlc`),
 écrasés à chaque export, jamais dans `C:\QLC+` :
 
 - `theatre_rig.qxw` ;
@@ -1924,7 +1924,8 @@ Pour un appareil inconnu de son cache, QLC+ cherche `<dossier du .qxw>/<Fabrican
 n'est nécessaire**, il suffit de garder les `.qxf` à côté du `.qxw`. Pour les
 réutiliser dans d'autres projets, les copier dans le dossier de l'utilisateur,
 `%USERPROFILE%\QLC+\Fixtures` (dossier plat, vérifié sur la machine). Le panneau
-affiche le dossier d'export et un bouton pour l'ouvrir.
+affiche le dossier d'export, les fichiers écrits ou réutilisés et les alertes
+du dernier export.
 
 Contrat de `core/qlc.py` (aucune dépendance à Blender) :
 
