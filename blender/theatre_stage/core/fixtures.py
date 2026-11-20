@@ -1085,10 +1085,32 @@ def cct_to_rgb(kelvin: float) -> tuple[float, float, float]:
 
 # ------------------------------------------------------------- photometry
 
-# Starting values of spec 14.8, to be replaced by the Cycles calibration.
+# Cycles calibration of spec 14.8: pixel = albedo * lux / 683 * EXPOSURE_GAIN on a diffuse plane.
 W_PER_CD_SPOT = 4 * math.pi**2 / 683
-W_PER_LM_AREA = math.pi / 683
+W_PER_LM_AREA = 0.366 * math.pi / 683
+IES_FAC_PER_CD = 0.0705
 EXPOSURE_GAIN = 1.0
+
+
+def ies_axis_candela(text: str) -> float:
+    """Candela on the optical axis of an IES file (LM-63), multiplier included.
+
+    Cycles returns `IES_FAC_PER_CD` times this value for the IES texture on the axis.
+    """
+    _, found, body = text.partition("TILT=")
+    if not found:
+        raise ValueError("fichier IES sans ligne TILT")
+    kind, _, rest = body.partition("\n")
+    tokens = rest.split()
+    if kind.strip().upper() == "INCLUDE":
+        tokens = tokens[2 + 2 * int(float(tokens[1])):]
+    try:
+        n_vertical, n_horizontal, multiplier = int(tokens[3]), int(tokens[4]), float(tokens[2])
+        data = 13 + n_vertical + n_horizontal
+        first = float(tokens[data])
+    except (IndexError, ValueError) as error:
+        raise ValueError("fichier IES illisible") from error
+    return first * multiplier
 
 
 def max_energy(beam_type: str, flux: float, field_angle: float) -> float:

@@ -445,3 +445,19 @@ def test_max_energy_takes_the_spot_from_intensity_and_the_wash_from_flux():
     assert F.max_energy("wash", 10000, 30) == pytest.approx(F.EXPOSURE_GAIN * F.W_PER_LM_AREA * 10000)
     assert F.max_energy("profile", 10000, 15) > F.max_energy("profile", 10000, 30)
     assert F.max_energy("wash", 10000, 15) == F.max_energy("wash", 10000, 30)
+
+
+def test_ies_axis_candela_of_shipped_files():
+    lustr = (F.SHIPPED_DIR / "etc_s4led_s3_lustr_x8" / "ies" / "xdlt_26.ies").read_text(errors="replace")
+    robe = (F.SHIPPED_DIR / "generic_pc_led" / "ies" / "t15_pc_zoom_0.ies").read_text(errors="replace")
+    assert F.ies_axis_candela(lustr) == pytest.approx(71293.17, rel=1e-6)
+    assert F.ies_axis_candela(robe) == pytest.approx(22657.9808, rel=1e-9)
+
+
+def test_ies_axis_candela_skips_included_tilt_and_rejects_garbage():
+    body = "1 -1 2.0 2 1 1 2 0 0 0\n1 1 50\n0 90\n0\n300 100\n"
+    assert F.ies_axis_candela("[TEST]\nTILT=NONE\n" + body) == 600.0
+    assert F.ies_axis_candela("TILT=INCLUDE\n1\n2\n0 90\n1 0.5\n" + body) == 600.0
+    for bad in ("no tilt line", "TILT=NONE\n1 2 3"):
+        with pytest.raises(ValueError):
+            F.ies_axis_candela(bad)

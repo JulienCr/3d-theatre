@@ -1668,7 +1668,8 @@ un gobo, un iris ou `cct`. EEVEE ne le lit pas.
   texture_k`, l'octet étant borné à la dernière fente. Fente sans image : 1.
   Le nœud de groupe de la lumière porte le nom de la roue ; ses entrées `Byte`
   (`round(255·v)`) et `Angle` sont pilotées. Un profil IES est un texte interne
-  `TSF_<id>_<fichier>.ies`, relu une fois.
+  `TSF_<id>_<fichier>.ies`, relu une fois ; sa valeur est normalisée sur l'axe
+  (14.8).
 - Iris : `Value` `IrisRadius = 1 − v·(1 − iris_min_ratio)` ; masque
   `Less Than(|p|, rayon)`.
 - Couleur blanche variable : nœud `Blackbody` de température `K` (attribut
@@ -1751,17 +1752,47 @@ colonne « Sans canal ».
   par `Ω`.
 - wash et PC : `max_energy = EXPOSURE_GAIN · W_PER_LM_AREA · flux` ; le
   resserrement de `spread` concentre alors la lumière à flux constant.
-- Valeurs de départ théoriques *(choix)*, **à remplacer par l'étalonnage** :
-  `W_PER_CD_SPOT = 4π²/683`, `W_PER_LM_AREA = π/683`, `EXPOSURE_GAIN = 1`.
-- Protocole : un plan blanc diffus (albédo 0,8) perpendiculaire à 5 m d'un
-  `etc_s4led_s3_lustr_x8` au tube 26°, plein feu ; rendu Cycles, vue
-  « Standard », exposition 0 ; mesurer la valeur linéaire au centre ; ajuster
-  `W_PER_CD_SPOT` pour la valeur de référence retenue, puis vérifier avec un
-  wash (`W_PER_LM_AREA`) que l'éclairement suit le rapport des flux. Seule la
-  photométrie **relative** des fiches est garantie ; `EXPOSURE_GAIN` règle
-  le niveau absolu contre les lumières de travail (5.9).
-- Les constantes portent *(choix)* tant que le protocole n'est pas passé et
-  que le résultat n'est pas consigné dans `docs/`.
+- Un profil IES multiplie la force d'émission de la lumière : Cycles rend
+  `IES_FAC_PER_CD · candela` sur l'axe, soit des milliers de fois la valeur
+  sans IES. Le nœud `Math` (multiplication) placé après la texture IES
+  divise donc par `IES_FAC_PER_CD · ies_axis_candela(fichier)` : l'axe vaut 1,
+  comme sans IES, et le fichier ne donne que la **forme** du faisceau.
+- **Constantes étalonnées** (Cycles 5.3) : `W_PER_CD_SPOT = 4π²/683`,
+  `W_PER_LM_AREA = 0,366·π/683`, `IES_FAC_PER_CD = 0,0705`,
+  `EXPOSURE_GAIN = 1`. Définition du niveau : sur un plan diffus d'albédo
+  `ρ`, la valeur linéaire du pixel vaut `ρ · E / 683 · EXPOSURE_GAIN`
+  (`E` en lux), **vue « Standard », exposition 0**.
+- **Protocole** : scène temporaire (supprimée ensuite), plan diffus
+  d'albédo 0,8 perpendiculaire à l'axe, monde noir, ombres coupées, lumières
+  invisibles de la caméra, caméra orthographique de 0,2 m sur le centre
+  (16 × 16 px), Cycles 64 à 256 échantillons sans débruitage. Attendu :
+  `E = I·cos θ / d²`, avec `I = flux / Ω(champ)` pour un profil et
+  `I = flux / Ω(spread)` pour un wash ou un PC (disque plat équivalent).
+- **Mesures**, `d` = 5 m sauf mention, rapport mesuré / attendu :
+
+  | Source | Rapport |
+  |---|---|
+  | spot sans IES, Esprite 27 000 lm, champ 27,75° | 1,000 ; 1,000 à 30° d'incidence ; 1,000 à 10 m |
+  | spot sans IES, Source Four tube 70, 10 889 lm, champ 72,5° | 1,000 |
+  | surfacique sans IES, MAC Aura 3 850 lm, spread 25,3° | 0,994 ; 0,998 à 30° |
+  | surfacique sans IES, PC 9 566 lm, spread 29,75° | 1,006 ; 1,047 à 10 m |
+  | spot avec IES, Source Four tube 26, 10 889 lm, champ 28,7° | 1,001 |
+  | surfacique avec IES, PC zoom 0, 9 566 lm, spread 29,75° | 1,004 ; 1,008 à 30° |
+
+  Un spot de 1 000 W de champ 30° donne 0,810 à 5 m (`4π²/683` exact). Un
+  disque surfacique concentre sa lumière sur un angle solide équivalent de
+  `0,36 · Ω(spread)` entre 20° et 60° (0,430 à 10°, 0,374 à 90°, `π` à 180°,
+  Lambert) : d'où le 0,366. En dessous (spread de 10°), le wash mesure 15 %
+  trop sombre, 40 % à 5°.
+- Seule la photométrie **relative** des fiches est garantie ; `EXPOSURE_GAIN`
+  et l'exposition de la scène règlent le niveau absolu.
+- **Niveau par défaut** : `EXPOSURE_GAIN = 1`, exposition de scène 0 EV (AgX).
+  Préréglage `reference_with_modules` en plein feu de repos, rendu Cycles
+  depuis `Cam_Face` : valeur affichée moyenne 0,23, visage 0,58, aucun pixel
+  proche du blanc ; avec brume (densité 0,02), moyenne 0,24 et faisceaux
+  lisibles. En vue « Standard », 0,16 % des pixels saturent (les lentilles
+  des appareils vus de face), 0,14 % avec brume. Aucun réglage d'exposition
+  n'est donc posé par l'extension.
 
 ## 15. Patch DMX, repos et brume
 

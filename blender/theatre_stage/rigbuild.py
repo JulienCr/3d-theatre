@@ -16,7 +16,7 @@ import bpy
 
 from . import materials
 from .core.fixture_models import fixture_model
-from .core.fixtures import Fixture, Strobe, cct_to_rgb, max_energy
+from .core.fixtures import IES_FAC_PER_CD, Fixture, Strobe, cct_to_rgb, ies_axis_candela, max_energy
 from .core.meshes import Mesh
 from .core.rig import FIXTURES_COLLECTION, Rig, RigFixture, default_library
 
@@ -529,8 +529,10 @@ def _build_tree(ctx: _Build, light) -> None:
     emission = next(n for n in tree.nodes if n.bl_idname == "ShaderNodeEmission")
     colour = None
     if ies:
-        texture = _node(tree, "ShaderNodeTexIES", mode="INTERNAL", ies=_ies_text(fx, ies))
-        tree.links.new(texture.outputs["Fac"], emission.inputs["Strength"])
+        text = _ies_text(fx, ies)
+        texture = _node(tree, "ShaderNodeTexIES", mode="INTERNAL", ies=text)
+        unit = _math(tree, "MULTIPLY", texture.outputs["Fac"], 1 / (ies_axis_candela(text.as_string()) * IES_FAC_PER_CD))
+        tree.links.new(unit.outputs[0], emission.inputs["Strength"])
     if cct:
         colour = _node(tree, "ShaderNodeBlackbody", "Blackbody").outputs["Color"]
         _drive_kelvin(ctx.expr(), tree, 'nodes["Blackbody"].inputs[0].default_value')
