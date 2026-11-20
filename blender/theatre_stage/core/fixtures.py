@@ -537,8 +537,13 @@ class _Parser:
             return
         if suffixes and Path(relative).suffix.lower() not in suffixes:
             self.fail(path, f"« {relative} » : extension attendue {', '.join(suffixes)}.")
-        elif self.folder is not None and not (self.folder / relative).is_file():
-            self.fail(path, f"fichier « {relative} » introuvable dans le dossier de la fiche.")
+        elif self.folder is not None:
+            root = self.folder.resolve()
+            target = (root / relative).resolve()
+            if not target.is_relative_to(root):
+                self.fail(path, f"« {relative} » : le fichier doit rester dans le dossier de la fiche.")
+            elif not target.is_file():
+                self.fail(path, f"fichier « {relative} » introuvable dans le dossier de la fiche.")
 
 
 def _parse_sources(p: _Parser, data) -> tuple[Source, ...]:

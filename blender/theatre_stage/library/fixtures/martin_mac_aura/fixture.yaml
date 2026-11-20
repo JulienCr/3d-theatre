@@ -8,7 +8,7 @@ sources:
   - {kind: gdtf, url: "source/Martin_Professional@MAC_Aura@20230201NoMeas.gdtf", note: "Official Martin Professional file (no measurements): geometry tree, meshes, DMX modes, channel sets."}
   - {kind: datasheet, url: "source/mac_aura_user_manual_revB.pdf", note: "MAC Aura user manual P/N 35000254 Rev. B (third-party mirror, martin.com refuses automated fetches). Dimensions drawing p.2, DMX protocol p.22-26, specifications p.33 (11-58 deg one-tenth peak, 3850 lm, 5.6 kg, 360 mm)."}
   - {kind: datasheet, url: "https://cdn01.4wall.com/cms/rentals/files/f60ec7c44f3a1b.pdf", note: "Download URL of the manual copy above."}
-  - {kind: other, url: "C:/QLC+/Fixtures/Martin/Martin-MAC-Aura.qxf", note: "QLC+ 4.13.1 definition, modes Standard and Extended compared channel by channel with this sheet (spec 16.4)."}
+  - {kind: other, url: "https://github.com/mcallegari/qlcplus/blob/master/resources/fixtures/Martin/Martin-MAC-Aura.qxf", note: "QLC+ 4.13.1 definition, modes Standard and Extended compared channel by channel with this sheet (spec 16.4)."}
 
 physical:
   weight: 5.6              # kg, manual p.33, without accessories (same value in the GDTF)

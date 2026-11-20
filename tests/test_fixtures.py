@@ -165,6 +165,8 @@ INVALID = {
     "blade sides wrong count": (setter("blades.sides", [0, 90, 180]), "quatre"),
     "missing gobo image": (setter("gobos.wheels.0.slots.1.image", "gobos/none.png"), "introuvable"),
     "missing source file": (setter("sources.1.url", "source/none.pdf"), "introuvable"),
+    "file above the sheet folder": (setter("sources.1.url", "../../../test_fixtures.py"), "rester dans le dossier"),
+    "absolute file path": (setter("sources.1.url", str(Path(__file__))), "rester dans le dossier"),
     "mesh file missing": (lambda d: d.update(model3d={"kind": "mesh", "parts": {
         p: {"file": f"meshes/{p}.obj", "offset": [0, 0, 0]} for p in F.MESH_PARTS}}), "introuvable"),
     "iris ratio above 1": (setter("iris.min_ratio", 1.5), "min_ratio"),
