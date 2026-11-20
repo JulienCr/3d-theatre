@@ -12,6 +12,8 @@ from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from .fixtures import DEFAULT_MODE
+
 SCHEMA_VERSION = 1
 SIDE_KEYS = ("left", "right")
 
@@ -23,6 +25,8 @@ INT = "int"
 BOOL = "bool"
 ENUM = "enum"
 BOOL_VECTOR = "bool_vector"
+FIXTURE = "fixture"  # dynamic: id of a library sheet of the declared `families`
+MODE = "mode"  # dynamic: DEFAULT_MODE or a mode name of the sheet in `depends_on`
 
 _NUMERIC = (LENGTH, ANGLE, FLOAT, INT)
 
@@ -33,7 +37,10 @@ class Param:
 
     `items` is a tuple of (value, label, tooltip) for enums; `length` is the
     vector size for BOOL_VECTOR. `rebuild=False` marks a value that must not
-    trigger a scene rebuild (it only drives existing objects).
+    trigger a scene rebuild (it only drives existing objects). FIXTURE and MODE
+    values are strings whose choices come from the library at runtime:
+    `families` filters the sheets, `depends_on` names the sibling FIXTURE key.
+    `shown_when` = (sibling key, value) hides the param from the panel otherwise.
     """
 
     key: str
@@ -47,10 +54,17 @@ class Param:
     length: int = 0
     animatable: bool = False
     rebuild: bool = True
+    families: tuple[str, ...] = ()
+    depends_on: str = ""
+    shown_when: tuple[str, Any] | None = None
 
     @property
     def is_numeric(self) -> bool:
         return self.kind in _NUMERIC
+
+    @property
+    def is_dynamic(self) -> bool:
+        return self.kind in (FIXTURE, MODE)
 
 
 @dataclass(frozen=True)
@@ -64,12 +78,12 @@ class Group:
     side_params: tuple[Param, ...] = ()
 
 
-def _length(key, default, lo, hi, label, tooltip):
-    return Param(key, LENGTH, default, label, tooltip, lo, hi)
+def _length(key, default, lo, hi, label, tooltip, **extra):
+    return Param(key, LENGTH, default, label, tooltip, lo, hi, **extra)
 
 
-def _angle(key, default, lo, hi, label, tooltip):
-    return Param(key, ANGLE, default, label, tooltip, lo, hi)
+def _angle(key, default, lo, hi, label, tooltip, **extra):
+    return Param(key, ANGLE, default, label, tooltip, lo, hi, **extra)
 
 
 def _flag(key, default, label, tooltip):
@@ -78,6 +92,25 @@ def _flag(key, default, label, tooltip):
 
 def _enum(key, default, label, tooltip, items):
     return Param(key, ENUM, default, label, tooltip, items=tuple(items))
+
+
+def _int(key, default, lo, hi, label, tooltip, **extra):
+    return Param(key, INT, default, label, tooltip, lo, hi, **extra)
+
+
+def _float(key, default, lo, hi, label, tooltip, **extra):
+    return Param(key, FLOAT, default, label, tooltip, lo, hi, **extra)
+
+
+def _fixture_pair(default_id, families, what, **extra):
+    """The `fixture` and `mode` params every fixture-bearing group declares."""
+    return (
+        Param("fixture", FIXTURE, default_id, "Appareil",
+              f"Fiche de la bibliothèque pour {what}.", families=tuple(families), **extra),
+        Param("mode", MODE, DEFAULT_MODE, "Mode DMX",
+              "Mode DMX de l'appareil ; « Défaut » prend le mode par défaut de la fiche.",
+              depends_on="fixture", **extra),
+    )
 
 
 _MODULE_PARAMS = (
@@ -108,6 +141,58 @@ _MODULE_PARAMS = (
     _length("window_offset", 0.0, -5.0, 5.0, "Décalage de fenêtre",
             "Décalage de la fenêtre, positif vers le plateau."),
 )
+
+_TOWER_PARAMS = (
+    _int("count", 1, 0, 4, "Nombre de pylônes", "Nombre de pylônes de ce côté (0 : aucun)."),
+    _length("first_distance", 3.00, 0.0, 30.0, "Distance du premier",
+            "Distance du premier pylône au nez de scène, vers la salle."),
+    _length("spacing", 2.00, 1.0, 10.0, "Écart entre pylônes", "Écart entre deux pylônes voisins."),
+    _length("height", 4.50, 2.0, 10.0, "Hauteur du pylône",
+            "Hauteur du pylône depuis le sol de salle."),
+    _int("movers", 2, 0, 6, "Mobiles par pylône", "Nombre de mobiles accrochés à chaque pylône."),
+)
+
+# (key, French label, default universe) of the DMX families, in patch order (spec 15.1).
+PATCH_FAMILIES = (
+    ("backlight", "Contre", 1),
+    ("front_movers", "Mobiles de face", 2),
+    ("tower_movers", "Mobiles des pylônes", 3),
+    ("front_pc", "PC de face", 4),
+    ("profiles", "Découpes", 5),
+    ("hazer", "Hazer", 6),
+)
+
+_PROFILE_SIDES = (("l", "jardin"), ("c", "centre"), ("r", "cour"))
+
+
+def _profile_manual_params() -> tuple[Param, ...]:
+    """Manual blade setting of the three profiles, read only when `blades_mode` is `manual`."""
+    shown = ("blades_mode", "manual")
+    out = []
+    for key, name in _PROFILE_SIDES:
+        for blade in range(1, 5):
+            out.append(_float(f"{key}_blade_{blade}_insertion", 0.0, 0.0, 1.0,
+                              f"Lame {blade} ({name}) : insertion",
+                              "0 : lame dégagée. 1 : course complète.", shown_when=shown))
+            out.append(_angle(f"{key}_blade_{blade}_angle", 0.0, -45.0, 45.0,
+                              f"Lame {blade} ({name}) : inclinaison",
+                              "Inclinaison du bord de la lame, dans les limites de la fiche.",
+                              shown_when=shown))
+        out.append(_angle(f"{key}_rotation", 0.0, -90.0, 90.0, f"Rotation du cadrage ({name})",
+                          "Rotation de l'ensemble des lames autour de l'axe du faisceau.",
+                          shown_when=shown))
+    return tuple(out)
+
+
+def _patch_params() -> tuple[Param, ...]:
+    out = []
+    for key, label, universe in PATCH_FAMILIES:
+        out.append(_int(f"{key}_universe", universe, 1, 63999, f"Univers : {label}",
+                        f"Univers DMX de départ de la famille « {label} »."))
+        out.append(_int(f"{key}_address", 1, 1, 512, f"Adresse : {label}",
+                        f"Adresse DMX du premier appareil de la famille « {label} »."))
+    return tuple(out)
+
 
 SCHEMA: tuple[Group, ...] = (
     Group("stage", "Plateau", (
@@ -223,6 +308,92 @@ SCHEMA: tuple[Group, ...] = (
         Param("lens", FLOAT, 22.0, "Focale (mm)", "Focale de l'objectif des caméras.",
               10.0, 200.0),
     )),
+    Group("rig", "Implantation lumière", (
+        _flag("enabled", True, "Implantation lumière",
+              "Appareils, porteuses, pylônes et patch DMX. Décoché : aucun objet ni patch."),
+        _length("aim_height", 1.70, 0.50, 2.50, "Hauteur de visée",
+                "Hauteur de visée au-dessus du plancher."),
+        _angle("site", 45.0, 20.0, 70.0, "Site de face",
+               "Élévation du faisceau des projecteurs de face (45° : méthode McCandless)."),
+        _length("area_depth", 6.00, 1.0, 30.0, "Profondeur de la zone de jeu",
+                "Profondeur de la zone de jeu éclairée, depuis le nez de scène."),
+    )),
+    Group("rig_front", "Perche de face", (
+        _length("ceiling_gap", 0.30, 0.05, 2.0, "Écart sous plafond",
+                "Écart de la perche de face sous le plafond de salle."),
+        _flag("auto_position", True, "Position calculée", "Calcule la position en Y de la perche."),
+        _length("y", -1.40, -30.0, 5.0, "Position en Y",
+                "Position en Y de la perche, mode manuel (négatif : côté salle).",
+                shown_when=("auto_position", False)),
+    )),
+    Group("backlight", "Contre", (
+        _flag("enabled", True, "Contre", "Appareils de contre, accrochés à une porteuse."),
+        *_fixture_pair("martin_mac_aura", ("moving_wash",), "le contre"),
+        _int("count", 6, 1, 24, "Nombre d'appareils", "Nombre d'appareils de contre."),
+        _length("distance", 4.00, 0.50, 30.0, "Distance au nez",
+                "Distance au nez de scène de la porteuse visée."),
+    )),
+    Group("front_movers", "Mobiles de face", (
+        _flag("enabled", True, "Mobiles de face", "Mobiles accrochés à la perche de face."),
+        *_fixture_pair("robe_robin_esprite", ("moving_wash", "moving_profile"),
+                       "les mobiles de face"),
+        _int("count", 4, 1, 16, "Nombre d'appareils", "Nombre de mobiles de face."),
+    )),
+    Group("towers", "Pylônes", (
+        _flag("symmetric", True, "Symétrique",
+              "Applique le jeu de gauche aux deux côtés, en miroir."),
+        *_fixture_pair("robe_robin_esprite", ("moving_wash", "moving_profile"),
+                       "les mobiles de pylône"),
+        _length("truss_size", 0.30, 0.15, 0.60, "Section du truss",
+                "Côté de la section carrée du truss."),
+        _length("base_size", 0.80, 0.30, 2.0, "Côté de la platine", "Côté de la platine du pylône."),
+    ), side_params=_TOWER_PARAMS),
+    Group("front_pc", "PC de face", (
+        _flag("enabled", True, "PC de face", "PC de face, deux par zone, un par direction."),
+        *_fixture_pair("generic_pc_led", ("pc",), "les PC de face"),
+        _enum("zone_mode", "auto", "Découpage en zones", "Découpage de la zone de jeu.", (
+            ("auto", "Automatique", "Zones de la largeur visée."),
+            ("manual", "Manuel", "Nombre de colonnes et de rangs réglé à la main."),
+        )),
+        _length("zone_width", 3.00, 1.0, 10.0, "Largeur de zone visée",
+                "Largeur de zone visée en mode automatique.", shown_when=("zone_mode", "auto")),
+        _int("columns", 3, 1, 8, "Zones en largeur", "Nombre de zones en largeur (mode manuel).",
+             shown_when=("zone_mode", "manual")),
+        _int("rows", 2, 1, 4, "Rangs en profondeur", "Nombre de rangs en profondeur (mode manuel).",
+             shown_when=("zone_mode", "manual")),
+        _angle("azimuth", 45.0, 10.0, 80.0, "Azimut de croisement",
+               "Angle en plan entre l'axe de la salle et chaque faisceau (45° : fiche ADEC 6-3)."),
+        _float("overlap", 0.20, 0.0, 1.0, "Recouvrement",
+               "Fraction de la taille d'une zone ajoutée au champ couvert, pour les zones voisines."),
+    )),
+    Group("profiles", "Découpes", (
+        _flag("enabled", True, "Découpes", "Trois découpes de face : jardin, centre, cour."),
+        *_fixture_pair("etc_s4led_s3_lustr_x8", ("profile",), "les découpes"),
+        _length("lintel_margin", 0.10, 0.0, 1.0, "Marge sous le linteau",
+                "Marge sous le linteau pour la coupe haute."),
+        _angle("tube_angle", 0.0, 0.0, 90.0, "Tube de lentille",
+               "Angle de champ du tube de lentille. 0 : choisi automatiquement."),
+        _enum("blades_mode", "auto", "Lames", "Réglage des lames des découpes.", (
+            ("auto", "Automatique", "Lames calculées pour cadrer la zone."),
+            ("manual", "Manuel", "Insertion et inclinaison réglées à la main."),
+        )),
+        *_profile_manual_params(),
+    )),
+    Group("rest", "Repos", (
+        _float("pc_level", 0.70, 0.0, 1.0, "Niveau des PC", "Niveau des PC de face au repos."),
+        _float("profile_level", 0.70, 0.0, 1.0, "Niveau des découpes",
+               "Niveau des découpes au repos."),
+        _float("mover_level", 0.50, 0.0, 1.0, "Niveau des mobiles",
+               "Niveau des mobiles au repos (contre, face et pylônes)."),
+        _float("haze_level", 1.00, 0.0, 1.0, "Niveau du hazer", "Niveau du hazer au repos."),
+        _int("cct_left", 3200, 1500, 12000, "Température jardin (K)",
+             "Température de couleur des PC accrochés côté jardin."),
+        _int("cct_right", 5600, 1500, 12000, "Température cour (K)",
+             "Température de couleur des PC accrochés côté cour."),
+        _int("cct_profile", 4000, 1500, 12000, "Température découpes (K)",
+             "Température de couleur des découpes."),
+    )),
+    Group("patch", "Patch DMX", _patch_params()),
     Group("haze", "Brume", (
         _flag("enabled", False, "Atmosphère (brume)",
               "Volume de brume pour voir les faisceaux. Inactif : aucun réglage de rendu modifié."),
@@ -241,6 +412,9 @@ SCHEMA: tuple[Group, ...] = (
             ("medium", "Moyenne", "Faisceaux plus doux."),
             ("fine", "Fine", "Volume le plus précis, le plus lent."),
         )),
+        _flag("dmx_driven", False, "Densité pilotée par le hazer",
+              "La densité suit le canal du hazer DMX : un hazer est créé et patché."),
+        *_fixture_pair("generic_hazer", ("hazer",), "le hazer", shown_when=("dmx_driven", True)),
     )),
     Group("house", "Salle", (
         _flag("ceiling", True, "Plafond de salle",
@@ -277,10 +451,13 @@ def default_params() -> dict:
     return out
 
 
-def module_sets(modules: Mapping) -> tuple[Mapping, Mapping]:
-    """(left, right) parameter sets; the right one is the left when symmetric."""
-    left = modules["left"]
-    return left, (left if modules["symmetric"] else modules["right"])
+def side_sets(node: Mapping) -> tuple[Mapping, Mapping]:
+    """(left, right) parameter sets of `modules` or `towers`; right is left when symmetric."""
+    left = node["left"]
+    return left, (left if node["symmetric"] else node["right"])
+
+
+module_sets = side_sets
 
 
 def _fmt(value) -> str:
@@ -299,6 +476,8 @@ def _coerce(param: Param, value, path: str) -> tuple[Any, list[str]]:
         if value in {item[0] for item in param.items}:
             return value, []
         return param.default, [bad]
+    if param.is_dynamic:
+        return (value, []) if isinstance(value, str) and value.strip() else (param.default, [bad])
     if kind == BOOL_VECTOR:
         if not isinstance(value, (list, tuple)):
             return param.default, [bad]
@@ -353,11 +532,44 @@ def _merge(raw: Mapping, params: tuple[Param, ...], extra_keys: tuple[str, ...],
             warnings.append(f"Clé inconnue ignorée : {dotted}.")
 
 
-def validate_params(raw: Mapping | None) -> tuple[dict, list[str]]:
+def check_catalog(params: dict, catalog, warnings: list[str]) -> None:
+    """Reset FIXTURE and MODE values the library does not know (spec 9), in place.
+
+    `catalog` offers `get(id)` returning an object with `family` and
+    `mode_names()`, or None (a fixtures.Library). A value equal to the default
+    is left alone: a missing default sheet is reported by the library itself.
+    """
+    for group in SCHEMA:
+        node = params[group.key]
+        for param in group.params:
+            if param.kind != FIXTURE:
+                continue
+            sheet = catalog.get(node[param.key])
+            if sheet is not None and sheet.family in param.families:
+                _check_mode(node, group, param, sheet, warnings)
+            elif node[param.key] != param.default:
+                warnings.append(
+                    f"Appareil « {node[param.key]} » ({group.key}.{param.key}) absent de la "
+                    f"bibliothèque ou de la mauvaise famille, défaut utilisé.")
+                node[param.key] = param.default
+
+
+def _check_mode(node: dict, group: Group, fixture_param: Param, sheet, warnings: list[str]) -> None:
+    for param in group.params:
+        if param.kind == MODE and param.depends_on == fixture_param.key:
+            value = node[param.key]
+            if value != DEFAULT_MODE and value not in sheet.mode_names():
+                warnings.append(f"Mode « {value} » ({group.key}.{param.key}) inconnu de la fiche, "
+                                f"défaut utilisé.")
+                node[param.key] = param.default
+
+
+def validate_params(raw: Mapping | None, catalog=None) -> tuple[dict, list[str]]:
     """Merge `raw` over the defaults. Returns (params, French warnings).
 
     Missing keys take their default, unknown keys are dropped and reported,
-    out-of-range numbers are clamped and reported.
+    out-of-range numbers are clamped and reported. With a `catalog`, unknown
+    fixture ids and modes fall back to the default and are reported (spec 9).
     """
     result = default_params()
     warnings: list[str] = []
@@ -385,4 +597,6 @@ def validate_params(raw: Mapping | None) -> tuple[dict, list[str]]:
                 warnings.append(f"Jeu « {side} » de {key} invalide ; défauts utilisés.")
                 continue
             _merge(sub, group.side_params, (), result[key][side], (key, side), warnings)
+    if catalog is not None:
+        check_catalog(result, catalog, warnings)
     return result, warnings

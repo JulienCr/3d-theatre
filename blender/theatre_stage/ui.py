@@ -50,12 +50,14 @@ def _draw_param(layout, node, param: Param, group: Group, active: bool = True) -
         for index in range(min(shown, param.length)):
             flags.prop(node, param.key, index=index, text=str(index + 1), toggle=True)
         return
-    row.prop(node, param.key)
+    row.prop(node, props.pick_name(param) if param.is_dynamic else param.key)
 
 
 def _draw_set(layout, node, params, group: Group) -> None:
     keys = {p.key for p in params}
     for param in params:
+        if param.shown_when and getattr(node, param.shown_when[0]) != param.shown_when[1]:
+            continue
         flag = _depends_on_flag(param, keys)
         _draw_param(layout, node, param, group, active=bool(getattr(node, flag)) if flag else True)
 
@@ -165,6 +167,7 @@ class THEATRE_PT_alerts(_SubPanel):
         messages = list(layout.warnings)
         messages += [f"Objet non généré laissé en place : {name}." for name in build.foreign_names]
         messages += operators.preset_warnings
+        messages += props.library().messages
         messages += materials.warnings
         if not messages:
             self.layout.label(text="Aucune alerte.", icon="CHECKMARK")

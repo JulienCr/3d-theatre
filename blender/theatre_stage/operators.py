@@ -85,7 +85,7 @@ class THEATRE_OT_load_preset(bpy.types.Operator):
             self.report({"ERROR"}, "Aucun préréglage sélectionné.")
             return {"CANCELLED"}
         try:
-            params, warnings = presets.read_preset(path)
+            params, warnings = presets.read_preset(path, catalog=props.library())
         except (presets.PresetError, OSError) as error:
             self.report({"ERROR"}, str(error))
             return {"CANCELLED"}
