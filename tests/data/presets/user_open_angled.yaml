@@ -1,0 +1,222 @@
+version: 1
+stage:
+  width: 11.6
+  depth: 7.0
+  grid_height: 6.1
+  wings: 2.0
+advanced:
+  stage_height: 1.2
+  apron_depth: 3.1
+  facade_height: 7.3
+  proscenium_height: 5.0
+  proscenium_thickness: 0.8
+  proscenium_setback: 1.2
+  lintel_height: 0.8
+  side_zone_width: 1.2
+stairs:
+  left: true
+  right: false
+  center: false
+  riser_max: 0.25
+  going: 0.3
+  width: 1.2
+  side_angle: 0.0
+  side_offset: -1.27
+  clearance: 0.0
+  landing_depth: 0.0
+  center_width: 0.6
+modules:
+  symmetric: true
+  left:
+    enabled: false
+    frame_gap: 0.0
+    setback: 1.5
+    width: 1.55
+    depth: 2.0
+    height: 5.0
+    angle: 60.0
+    door_enabled: true
+    door_width: 0.94
+    door_height: 2.4
+    door_offset: 0.0
+    window_enabled: false
+    window_width: 1.0
+    window_height: 1.2
+    window_sill: 1.0
+    window_offset: 0.0
+  right:
+    enabled: false
+    frame_gap: 0.0
+    setback: 1.5
+    width: 1.55
+    depth: 2.0
+    height: 5.0
+    angle: 60.0
+    door_enabled: true
+    door_width: 0.94
+    door_height: 2.4
+    door_offset: 0.0
+    window_enabled: false
+    window_width: 1.0
+    window_height: 1.2
+    window_sill: 1.0
+    window_offset: 0.0
+grid:
+  batten_spacing: 1.0
+  batten_drop: 0.5
+masking:
+  style: italian
+  lanes: 3
+  opening: 8.0
+  front_border: true
+  borders:
+  - true
+  - true
+  - true
+  - true
+  - true
+  - true
+  - true
+  - true
+  border_bottom: 4.5
+  backdrop: black_curtain
+  leg_angle: 10.0
+  convergence: 5.0
+  borders_mode: computed
+  drape: 0.8
+sightlines:
+  seat_distance: 2.0
+  seat_wall_gap: 0.5
+  eye_height: 1.1
+curtains:
+  main_enabled: true
+  main_opening: 100.0
+lights:
+  enabled: false
+  spacing: 3.0
+  intensity: 1.0
+  front: false
+cameras:
+  distance: 11.0
+  height: 3.0
+  lens: 22.0
+rig:
+  enabled: true
+  aim_height: 1.7
+  site: 45.0
+  area_depth: 6.0
+rig_front:
+  ceiling_gap: 0.3
+  auto_position: true
+  y: -1.4
+  movers_offset: 1.5
+  movers_height_mode: auto
+  movers_z: 6.8
+backlight:
+  enabled: true
+  fixture: martin_mac_aura
+  mode: default
+  count: 6
+  position: upstage
+  distance: 3.1
+front_movers:
+  enabled: true
+  fixture: robe_robin_esprite
+  mode: default
+  count: 4
+towers:
+  symmetric: true
+  fixture: robe_robin_esprite
+  mode: default
+  truss_size: 0.3
+  base_size: 0.8
+  left:
+    count: 1
+    first_distance: 3.0
+    spacing: 2.0
+    height: 4.5
+    movers: 2
+  right:
+    count: 1
+    first_distance: 3.0
+    spacing: 2.0
+    height: 4.5
+    movers: 2
+front_pc:
+  enabled: true
+  fixture: generic_pc_led
+  mode: default
+  zone_mode: auto
+  zone_width: 1.62
+  columns: 3
+  rows: 2
+  azimuth: 45.0
+  overlap: 0.2
+profiles:
+  enabled: true
+  fixture: etc_s4led_s3_lustr_x8
+  mode: default
+  lintel_margin: 0.1
+  top_height: 2.2
+  tube_angle: 0.0
+  blades_mode: auto
+  l_blade_1_insertion: 0.0
+  l_blade_1_angle: 0.0
+  l_blade_2_insertion: 0.0
+  l_blade_2_angle: 0.0
+  l_blade_3_insertion: 0.0
+  l_blade_3_angle: 0.0
+  l_blade_4_insertion: 0.0
+  l_blade_4_angle: 0.0
+  l_rotation: 0.0
+  c_blade_1_insertion: 0.0
+  c_blade_1_angle: 0.0
+  c_blade_2_insertion: 0.0
+  c_blade_2_angle: 0.0
+  c_blade_3_insertion: 0.0
+  c_blade_3_angle: 0.0
+  c_blade_4_insertion: 0.0
+  c_blade_4_angle: 0.0
+  c_rotation: 0.0
+  r_blade_1_insertion: 0.0
+  r_blade_1_angle: 0.0
+  r_blade_2_insertion: 0.0
+  r_blade_2_angle: 0.0
+  r_blade_3_insertion: 0.0
+  r_blade_3_angle: 0.0
+  r_blade_4_insertion: 0.0
+  r_blade_4_angle: 0.0
+  r_rotation: 0.0
+rest:
+  pc_level: 0.7
+  profile_level: 0.7
+  mover_level: 0.5
+  haze_level: 1.0
+  cct_left: 3200
+  cct_right: 5600
+  cct_profile: 4000
+patch:
+  backlight_universe: 1
+  backlight_address: 1
+  front_movers_universe: 2
+  front_movers_address: 1
+  tower_movers_universe: 3
+  tower_movers_address: 1
+  front_pc_universe: 4
+  front_pc_address: 1
+  profiles_universe: 5
+  profiles_address: 1
+  hazer_universe: 6
+  hazer_address: 1
+haze:
+  enabled: true
+  extent: stage_and_house
+  falloff: 5.0
+  density: 0.01
+  anisotropy: 0.4
+  quality: light
+  dmx_driven: false
+  fixture: generic_hazer
+  mode: default
+house:
+  ceiling: true

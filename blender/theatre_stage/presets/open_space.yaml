@@ -146,6 +146,8 @@ front_pc:
   enabled: true
   fixture: generic_pc_led
   mode: default
+  fixture_far: generic_fresnel_led
+  mode_far: default
   zone_mode: auto
   zone_width: 3.0
   columns: 3

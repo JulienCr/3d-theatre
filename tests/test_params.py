@@ -176,10 +176,15 @@ def test_fixture_and_mode_params_are_dynamic_with_the_families_of_the_spec():
                 "profiles": ("profile",), "haze": ("hazer",)}
     for key, families in expected.items():
         by_key = {p.key: p for p in P.GROUPS[key].params}
-        assert by_key["fixture"].kind == P.FIXTURE and by_key["fixture"].families == families
-        assert by_key["mode"].kind == P.MODE and by_key["mode"].depends_on == "fixture"
-        assert by_key["fixture"].is_dynamic and by_key["mode"].default == "default"
-    assert sorted(g.key for g in P.SCHEMA for p in g.params if p.kind == P.FIXTURE) == sorted(expected)
+        for suffix in ("_far",) if key == "front_pc" else ():
+            assert by_key[f"fixture{suffix}"].families == families
+            assert by_key[f"mode{suffix}"].depends_on == f"fixture{suffix}"
+            assert by_key["fixture_far"].default == "generic_fresnel_led"
+        for suffix in ("", "_far") if key == "front_pc" else ("",):
+            assert by_key[f"fixture{suffix}"].kind == P.FIXTURE and by_key[f"fixture{suffix}"].families == families
+            assert by_key[f"mode{suffix}"].kind == P.MODE and by_key[f"mode{suffix}"].depends_on == f"fixture{suffix}"
+            assert by_key[f"fixture{suffix}"].is_dynamic and by_key[f"mode{suffix}"].default == "default"
+    assert sorted({g.key for g in P.SCHEMA for p in g.params if p.kind == P.FIXTURE}) == sorted(expected)
 
 
 def test_shown_when_points_at_a_sibling_with_a_valid_value():

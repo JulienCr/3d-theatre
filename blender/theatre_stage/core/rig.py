@@ -66,6 +66,7 @@ LEG_GRAZE = 0.30
 MASK_CONE = 0.5
 GOLDEN = 0.6180339887498949
 GOLDEN_STEPS = 24
+TILT_SEARCH_STEPS = 40
 _MODEL_ERRORS = (OSError, ValueError, KeyError, IndexError, struct.error)
 
 FAMILY_LABELS = {
@@ -76,6 +77,7 @@ FAMILY_GROUPS = {
     "backlight": "backlight", "front_movers": "front_movers", "tower_movers": "towers",
     "front_pc": "front_pc", "profiles": "profiles", "hazer": "haze",
 }
+FAR_LABEL = "appareils des rangs du fond"
 MOVER_GROUPS = {"backlight": "Backlight", "front_movers": "FrontMovers"}
 PACK_ORDER = {"backlight": 0, "profiles": 1, "front_movers": 2}
 CUT_NAMES = ("bottom", "top", "left", "right")
@@ -381,25 +383,29 @@ class _Work:
         if message not in self.warnings:
             self.warnings.append(message)
 
-    def sheet(self, family: str, node: Mapping) -> _Sheet | None:
-        """Fiche and mode of a family, or None with a French alert."""
-        label, fid = FAMILY_LABELS[family], node["fixture"]
+    def sheet(self, family: str, node: Mapping, suffix: str = "",
+              fallback: _Sheet | None = None) -> _Sheet | None:
+        """Fiche and mode of a family (`fixture<suffix>`), or `fallback` with a French alert."""
+        label, fid = FAR_LABEL if suffix else FAMILY_LABELS[family], node[f"fixture{suffix}"]
         fx = self.lib.get(fid)
+        ignored = f"{label} ignoré" if fallback is None else f"{label} posés avec « {fallback.fixture.id} »"
         if fx is None:
-            self.warn(f"Fiche « {fid} » introuvable dans la bibliothèque : {label} ignoré.")
-            return None
-        allowed = next(p.families for p in GROUPS[FAMILY_GROUPS[family]].params if p.kind == FIXTURE)
+            self.warn(f"Fiche « {fid} » introuvable dans la bibliothèque : {ignored}.")
+            return fallback
+        allowed = next(p.families for p in GROUPS[FAMILY_GROUPS[family]].params
+                       if p.key == f"fixture{suffix}")
         if fx.family not in allowed:
-            self.warn(f"Fiche « {fid} » : famille « {fx.family} » inadaptée aux {label}, ignorés.")
-            return None
+            self.warn(f"Fiche « {fid} » : famille « {fx.family} » inadaptée aux {label} : {ignored}.")
+            return fallback
         dimensions, mount, optics = fx.physical.dimensions, fx.physical.mount, fx.optics
         if fx.family != "hazer" and None in (dimensions, mount, optics):
-            self.warn(f"Fiche « {fid} » incomplète (dimensions, accroche ou optique) : {label} ignoré.")
-            return None
+            self.warn(f"Fiche « {fid} » incomplète (dimensions, accroche ou optique) : {ignored}.")
+            return fallback
         try:
-            mode = fx.mode(node["mode"])
+            mode = fx.mode(node[f"mode{suffix}"])
         except KeyError:
-            self.warn(f"Mode « {node['mode']} » inconnu de la fiche « {fid} » : mode par défaut utilisé.")
+            self.warn(f"Mode « {node[f'mode{suffix}']} » inconnu de la fiche « {fid} » : "
+                      f"mode par défaut utilisé.")
             mode = fx.mode()
         return _Sheet(fx, mode, dimensions or NO_DIMENSIONS, mount or NO_MOUNT, optics or NO_OPTICS)
 
@@ -649,10 +655,11 @@ def _row_x(zones: Zones, drop: float, azimuth: float) -> list[tuple[str, int, fl
 
 
 def _row_azimuth(w: _Work, tube: _Support, yr: float, nominal: float, sheet: _Sheet,
-                 taken: list[tuple[float, float]]) -> float | None:
-    """Azimuth nearest to `nominal` (+-0.5 deg steps, +-10 deg) where no posed PC of the row
+                 taken: list[tuple[float, float]], strict: bool = False) -> float | None:
+    """Azimuth nearest to `nominal` (+-0.5 deg steps, +-30 deg) where no posed PC of the row
     overlaps another on the tube (`taken`: intervals of earlier rows) and every zone stays
-    within the widest field of the sheet."""
+    within the widest field of the sheet. `strict` also asks the beams to clear the borders,
+    the legs and the profiles already hung on the tube."""
     zones = w.zones
     drop, za = yr - tube.y, w.za
     mount, widest = sheet.mount, sheet.optics.widest_field
@@ -662,15 +669,25 @@ def _row_azimuth(w: _Work, tube: _Support, yr: float, nominal: float, sheet: _Sh
             row = _row_x(zones, drop, nominal + delta)
             clear = all(abs(x) <= tube.limit + EPS for _, _, x in row)
             if clear:
-                spans = [_span_at(w, sheet, (x, tube.y, tube.z), (zones.xs[i], yr, za))
+                spans = [_span_at(w, sheet, (x, tube.y, tube.z),
+                                  _wash_target(w, (zones.xs[i], yr), za, (x, tube.y, z)))
                          for _, i, x in row] + taken
                 clear = not any(_overlaps(a, b) for n, a in enumerate(spans) for b in spans[n + 1:])
             if clear and all(
                     _wash_required(w, (zones.xs[i], yr), za, (x, tube.y, z),
-                                   _unit(_sub((zones.xs[i], yr, za), (x, tube.y, z)))) <= widest + EPS
-                    for _, i, x in row):
+                                   _wash_axis(w, (zones.xs[i], yr), za, (x, tube.y, z))) <= widest + EPS
+                    for _, i, x in row) and (not strict or _row_clear(w, sheet, tube, yr, nominal + delta)):
                 return nominal + delta
     return None
+
+
+def _row_clear(w: _Work, sheet: _Sheet, tube: _Support, yr: float, azimuth: float) -> bool:
+    """Whether the beams of a PC row keep `BEAM_MARGIN` from the borders, legs and the profiles
+    planned on the tube (spec 13.7)."""
+    beams = _row_beams(w, sheet, tube, yr, azimuth)
+    bodies = [_slot_body(w, s) for s in w.slots if s.group == tube.name and s.family == "profiles"]
+    gaps = [g for *_, g in _wall_gaps(beams, w.walls) + _gaps(beams, bodies)]
+    return min(gaps, default=math.inf) >= BEAM_MARGIN
 
 
 def _site(w: _Work, tube: _Support, yr: float, azimuth: float) -> float:
@@ -682,21 +699,20 @@ def _pc_beam(w: _Work, sheet: _Sheet, name: str, tube: _Support, x: float, zone:
     """Beam of a face PC hung at `x` on `tube` and aimed at `zone`, as `_build_fixture` will make it."""
     optics, mount = sheet.optics, sheet.mount
     pivot = (x, tube.y, tube.z - mount.hook_height - mount.tilt_axis_height)
-    target = (zone[0], zone[1], w.za)
-    axis = _unit(_sub(target, pivot))
+    axis = _wash_axis(w, zone, w.za, pivot)
+    target = _wash_target(w, zone, w.za, pivot)
     lens, field_angle, _ = _fit_field(optics, _wash_required(w, zone, w.za, pivot, axis), 1.0)
     source_z = _source(optics, lens, field_angle)[1]
     return _make_beam(name, target, _add(pivot, _mul(axis, source_z)), axis, field_angle,
                       optics.lens_offset - source_z)
 
 
-def _row_gap(w: _Work, sheet: _Sheet, tube: _Support, yr: float, azimuth: float) -> float:
-    """Smallest gap between the beams of a PC row and the borders and legs (inf when far from all)."""
+def _row_beams(w: _Work, sheet: _Sheet, tube: _Support, yr: float, azimuth: float) -> list[_Beam]:
     zones, beams = w.zones, []
     for tag, i, x in _row_x(zones, yr - tube.y, azimuth):
         x = math.copysign(min(abs(x), tube.limit), x)
         beams.append(_pc_beam(w, sheet, f"{tag}{i}", tube, x, (zones.xs[i], yr)))
-    return min((g for *_, g in _wall_gaps(beams, w.walls)), default=math.inf)
+    return beams
 
 
 def _row_tube(w: _Work, j: int, yr: float, drop_auto: float, sheet: _Sheet,
@@ -713,19 +729,24 @@ def _row_tube(w: _Work, j: int, yr: float, drop_auto: float, sheet: _Sheet,
         return None if index is None else _batten(c, index)
     scored = []
     for tube in options:
-        azimuth = _row_azimuth(w, tube, yr, nominal, sheet, on_tube.get(tube.name, []))
+        taken = on_tube.get(tube.name, [])
+        azimuth = _row_azimuth(w, tube, yr, nominal, sheet, taken, strict=True)
+        fits = azimuth is not None
+        if azimuth is None:
+            azimuth = _row_azimuth(w, tube, yr, nominal, sheet, taken)
         site = abs(_site(w, tube, yr, nominal if azimuth is None else azimuth) - c.p["rig"]["site"])
-        fits = azimuth is not None and _row_gap(w, sheet, tube, yr, azimuth) >= BEAM_MARGIN
         scored.append((not fits, tube.y < floor, site, tube))
     return min(scored, key=lambda t: t[:3])[3]
 
 
 def _plan_front_pc(w: _Work, zones: Zones, za: float, pipe: _Support, drop_auto: float) -> None:
     c, node = w.c, w.c.p["front_pc"]
-    if not node["enabled"] or (sheet := w.sheet("front_pc", node)) is None:
+    if not node["enabled"] or (near := w.sheet("front_pc", node)) is None:
         return
-    on_tube: dict[str, list[tuple[float, float]]] = {}
+    far = (w.sheet("front_pc", node, "_far", near) if len(zones.ys) > 1 else near) or near
+    on_tube = {pipe.name: [_slot_span(w, s, s.x) for s in w.slots if s.family == "profiles"]}
     for j, yr in enumerate(zones.ys):
+        sheet = near if j == 0 else far
         if j == 0:
             tube = pipe
         elif (tube := _row_tube(w, j, yr, drop_auto, sheet, on_tube)) is None:
@@ -736,7 +757,9 @@ def _plan_front_pc(w: _Work, zones: Zones, za: float, pipe: _Support, drop_auto:
             w.warn(f"Rang {j + 1} : porteuse trop en arrière de la zone.")
             continue
         taken = on_tube.setdefault(tube.name, [])
-        azimuth = _row_azimuth(w, tube, yr, node["azimuth"], sheet, taken)
+        azimuth = _row_azimuth(w, tube, yr, node["azimuth"], sheet, taken, strict=True)
+        if azimuth is None:
+            azimuth = _row_azimuth(w, tube, yr, node["azimuth"], sheet, taken)
         if azimuth is None:
             azimuth = node["azimuth"]
             w.warn(f"Rang {j + 1} : aucun azimut à ±{AZIMUTH_SEARCH:g}° de {azimuth:g}° n'évite "
@@ -746,8 +769,10 @@ def _plan_front_pc(w: _Work, zones: Zones, za: float, pipe: _Support, drop_auto:
         for tag, i, x in _row_x(zones, drop, azimuth):
             name = f"FrontPC_{tag}_{_nn(j * zones.nx + i + 1)}"
             x = _clamp_x(w, name, x, tube)
-            taken.append(_span_at(w, sheet, (x, tube.y, tube.z), (zones.xs[i], yr, za)))
-            w.add(_Slot(name, "front_pc", sheet, x, tube.y, tube.z, (zones.xs[i], yr, za),
+            pivot = (x, tube.y, tube.z - sheet.mount.hook_height - sheet.mount.tilt_axis_height)
+            target = _wash_target(w, (zones.xs[i], yr), za, pivot)
+            taken.append(_span_at(w, sheet, (x, tube.y, tube.z), target))
+            w.add(_Slot(name, "front_pc", sheet, x, tube.y, tube.z, target,
                         tube.name, tube.name, tube.limit, movable=False,
                         circuit=f"FrontPC_Row{j + 1}_{tag}",
                         meta={"zone": (zones.xs[i], yr), "side": tag}))
@@ -978,13 +1003,59 @@ def _source(optics, tube, f_ref: float) -> tuple[str, float, float]:
     return "AREA", optics.lens_offset, 0.0
 
 
-def _wash_required(w: _Work, zone: tuple[float, float], za: float, pivot: Vec3, axis: Vec3) -> float:
-    """Field needed to cover `zone` plus the overlap from `pivot` along `axis`."""
+def _front_row(w: _Work, zone: tuple[float, float]) -> bool:
+    return abs(zone[1] - w.zones.ys[0]) < EPS
+
+
+def _coverage(w: _Work, zone: tuple[float, float], za: float) -> tuple[Vec3, ...]:
+    """Corners of the area a face PC lights (spec 13.7): the zone at `za` plus the overlap. Row 0
+    also lights the forestage: its downstage corners are on the floor at the nez, the outer zones
+    reach the nez width."""
     zones, overlap = w.zones, w.c.p["front_pc"]["overlap"]
     xc, yr = zone
-    hx, hy = zones.width / 2 * (1 + overlap), zones.depth / 2 * (1 + overlap)
-    return 2 * max(_angle_between(axis, _sub((xc + sx * hx, yr + sy * hy, za), pivot))
-                   for sx in (-1, 1) for sy in (-1, 1))
+    x0, x1 = xc - zones.width / 2, xc + zones.width / 2
+    hy = zones.depth / 2 * (1 + overlap)
+    if not _front_row(w, zone):
+        hx = zones.width / 2 * (1 + overlap)
+        return tuple((xc + sx * hx, yr + sy * hy, za) for sx in (-1, 1) for sy in (-1, 1))
+    grow = (x1 - x0) / 2 * overlap
+    x0 = -w.c.W / 2 if xc == zones.xs[0] and -w.c.W / 2 < x0 else x0 - grow
+    x1 = w.c.W / 2 if xc == zones.xs[-1] and w.c.W / 2 > x1 else x1 + grow
+    return tuple((x, y, z) for x in (x0, x1) for y, z in ((0.0, w.c.Hp), (yr + hy, za)))
+
+
+def _wash_axis(w: _Work, zone: tuple[float, float], za: float, pivot: Vec3) -> Vec3:
+    """Unit axis of a face PC at `pivot`: toward the zone centre. Row 0 keeps that heading and
+    takes the elevation that narrows the field the most, which lowers it onto the forestage."""
+    axis = _unit(_sub((zone[0], zone[1], za), pivot))
+    if not _front_row(w, zone):
+        return axis
+    flat = math.hypot(axis[0], axis[1])
+    dirs = [_unit(_sub(c, pivot)) for c in _coverage(w, zone, za)]
+
+    def tilted(t: float) -> Vec3:
+        return (axis[0] / flat * math.cos(t), axis[1] / flat * math.cos(t), -math.sin(t))
+
+    def widest(t: float) -> float:
+        a = tilted(t)
+        return max(_angle_between(a, d) for d in dirs)
+
+    lo, hi = 0.0, math.pi / 2
+    for _ in range(TILT_SEARCH_STEPS):
+        m1, m2 = lo + (hi - lo) / 3, hi - (hi - lo) / 3
+        lo, hi = (lo, m2) if widest(m1) < widest(m2) else (m1, hi)
+    return tilted((lo + hi) / 2)
+
+
+def _wash_target(w: _Work, zone: tuple[float, float], za: float, pivot: Vec3) -> Vec3:
+    """Where the axis of a face PC at `pivot` crosses the aim plane `za`."""
+    axis = _wash_axis(w, zone, za, pivot)
+    return _add(pivot, _mul(axis, (pivot[2] - za) / -axis[2]))
+
+
+def _wash_required(w: _Work, zone: tuple[float, float], za: float, pivot: Vec3, axis: Vec3) -> float:
+    """Field needed to cover the area of `zone` from `pivot` along `axis`."""
+    return 2 * max(_angle_between(axis, _sub(c, pivot)) for c in _coverage(w, zone, za))
 
 
 def _wash_field(w: _Work, s: _Slot, pivot: Vec3, axis: Vec3):
@@ -1367,16 +1438,29 @@ def _grid(corners: tuple[Vec3, ...]) -> tuple[Vec3, ...]:
     return tuple((x, y, z) for x in axes[0] for y in axes[1] for z in axes[2])
 
 
-def _static_body(w: _Work, f: RigFixture, sheet: _Sheet) -> _Body:
+def _body_at(w: _Work, name: str, support: str, root: Vec3, pan: float, tilt: float, sheet: _Sheet) -> _Body:
     boxes = _boxes(w, sheet)
     if boxes is None:
-        d, (x, y, z) = sheet.dimensions, f.root
+        d, (x, y, z) = sheet.dimensions, root
         points = _grid(tuple((x + sx * d.width / 2, y + sy * d.depth / 2, z - sz * d.height)
                              for sx in (-1, 1) for sy in (-1, 1) for sz in (0, 1)))
     else:
         dense = _Boxes(_grid(boxes.base), _grid(boxes.pan), _grid(boxes.tilt), boxes.pivot)
-        points = posed_points(dense, f.root, f.pan or 0.0, f.tilt or 0.0)
-    return _cloud(f.name, f.support, points)
+        points = posed_points(dense, root, pan, tilt)
+    return _cloud(name, support, points)
+
+
+def _static_body(w: _Work, f: RigFixture, sheet: _Sheet) -> _Body:
+    return _body_at(w, f.name, f.support, f.root, f.pan or 0.0, f.tilt or 0.0, sheet)
+
+
+def _slot_body(w: _Work, s: _Slot) -> _Body:
+    """Body of a static slot at its planned place and aim, before it is built."""
+    mount = s.sheet.mount
+    root = (s.x, s.y, s.z - mount.hook_height)
+    pivot = (s.x, s.y, root[2] - mount.tilt_axis_height)
+    pan, tilt, _ = _pan_tilt(s.sheet.fixture, _unit(_sub(s.target, pivot)))
+    return _body_at(w, s.name, s.group, root, pan, tilt, s.sheet)
 
 
 def _mover_body(w: _Work, s: _Slot) -> _Body:
@@ -1795,8 +1879,8 @@ def compute_rig(c: Ctx, library: Library) -> tuple[Rig, Part]:
     pipe, drop = _front_pipe(w, zones, za)
     _plan_backlight(w, zones, za)
     pipe2 = _plan_front_movers(w, zones, za, pipe)
-    _plan_front_pc(w, zones, za, pipe, drop)
     _plan_profiles(w, zones, za, pipe, ya)
+    _plan_front_pc(w, zones, za, pipe, drop)
     _plan_towers(w, za, ya)
     _plan_hazer(w)
     _check_stacks(w)

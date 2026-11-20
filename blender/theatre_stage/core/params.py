@@ -102,14 +102,14 @@ def _float(key, default, lo, hi, label, tooltip, **extra):
     return Param(key, FLOAT, default, label, tooltip, lo, hi, **extra)
 
 
-def _fixture_pair(default_id, families, what, **extra):
-    """The `fixture` and `mode` params every fixture-bearing group declares."""
+def _fixture_pair(default_id, families, what, suffix="", label="Appareil", mode_label="Mode DMX", **extra):
+    """The `fixture` and `mode` params (`fixture<suffix>`, `mode<suffix>`) of a fixture-bearing group."""
     return (
-        Param("fixture", FIXTURE, default_id, "Appareil",
+        Param(f"fixture{suffix}", FIXTURE, default_id, label,
               f"Fiche de la bibliothèque pour {what}.", families=tuple(families), **extra),
-        Param("mode", MODE, DEFAULT_MODE, "Mode DMX",
+        Param(f"mode{suffix}", MODE, DEFAULT_MODE, mode_label,
               "Mode DMX de l'appareil ; « Défaut » prend le mode par défaut de la fiche.",
-              depends_on="fixture", **extra),
+              depends_on=f"fixture{suffix}", **extra),
     )
 
 
@@ -366,7 +366,12 @@ SCHEMA: tuple[Group, ...] = (
     ), side_params=_TOWER_PARAMS),
     Group("front_pc", "PC de face", (
         _flag("enabled", True, "PC de face", "PC de face, deux par zone, un par direction."),
-        *_fixture_pair("generic_pc_led", ("pc",), "les PC de face"),
+        *_fixture_pair("generic_pc_led", ("pc",), "les PC du premier rang, sur la perche de face",
+                       label="Appareil du premier rang",
+                       mode_label="Mode DMX du premier rang"),
+        *_fixture_pair("generic_fresnel_led", ("pc",), "les rangs du fond, sur les porteuses de la scène",
+                       suffix="_far", label="Appareil des rangs du fond",
+                       mode_label="Mode DMX des rangs du fond"),
         _enum("zone_mode", "auto", "Découpage en zones", "Découpage de la zone de jeu.", (
             ("auto", "Automatique", "Zones de la largeur visée."),
             ("manual", "Manuel", "Nombre de colonnes et de rangs réglé à la main."),

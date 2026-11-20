@@ -307,14 +307,23 @@ Chaque jeu :
 | Clé | Libellé | Défaut | Bornes |
 |---|---|---|---|
 | `enabled` | PC de face | oui | |
-| `fixture` | Appareil | `generic_pc_led` | énumération |
-| `mode` | Mode DMX | mode par défaut de la fiche | énumération |
+| `fixture` | Appareil du premier rang | `generic_pc_led` | énumération (famille `pc`) |
+| `mode` | Mode DMX du premier rang | mode par défaut de la fiche | énumération |
+| `fixture_far` | Appareil des rangs du fond | `generic_fresnel_led` | énumération (famille `pc`) |
+| `mode_far` | Mode DMX des rangs du fond | mode par défaut de la fiche | énumération |
 | `zone_mode` | Découpage en zones | automatique | automatique / manuel |
 | `zone_width` | Largeur de zone **maximale** *(choix)* | 3,00 | 1 – 10 |
 | `columns` | Zones en largeur (mode manuel) | 3 | 1 – 8 |
 | `rows` | Rangs en profondeur (mode manuel) | 2 | 1 – 4 |
 | `azimuth` | Azimut de croisement | 45° | 10 – 80 |
 | `overlap` | Recouvrement des zones voisines *(choix)* | 0,20 | 0 – 1 |
+
+`fixture` et `mode` servent le rang 0, sur la perche de face ; `fixture_far`
+et `mode_far` servent tous les rangs accrochés à une porteuse de la scène
+(rang 1 et suivants) *(choix)* : depuis la porteuse de manteau, un rang demande
+un champ que le PC (54,4°) n'atteint pas, un Fresnel large (85°) oui. Fiche
+`fixture_far` absente, de la mauvaise famille ou incomplète : les rangs du fond
+prennent la fiche de `fixture`, avec une alerte (jamais d'arrêt).
 
 `overlap` : fraction de la taille d'une zone ajoutée au champ couvert (section
 13.7). Azimut 45° : fiche ADEC 6-3, nominal : 13.7 le règle rang par rang
@@ -1345,7 +1354,7 @@ Nouvelles :
   `zd = Ya/nr` (4 × 2 zones de 2,50 × 3,00 par défaut). Raison *(choix)* : le PC
   générique est calibré sur un Robe T15 PC dont le champ le plus large est
   54,4° ; des zones de 3,33 m vues depuis la première porteuse lumière
-  demandent 64,9°. Zone `(i, j)`, `i` de 0 (jardin) à `nx − 1`, `j`
+  demandent 64,9° : les rangs du fond ont leur propre fiche (3.15, 13.7). Zone `(i, j)`, `i` de 0 (jardin) à `nx − 1`, `j`
   de 0 (face) à `nr − 1` : centre `(xc_i, yr_j)` avec
   `xc_i = −Wc/2 + (i + ½)·zw`, `yr_j = (j + ½)·zd`. La grille est calculée
   même si `front_pc.enabled` est décoché.
@@ -1469,6 +1478,12 @@ Deux appareils par zone, un par direction `d` : `L` (accroché côté jardin,
 `s_d = −1`) et `R` (côté cour, `s_d = +1`). `NN = j·nx + i + 1`. Total
 `2·nx·nr` (16 par défaut).
 
+- **Fiche par rang** *(choix)* : le rang 0 (perche de face) prend `front_pc.fixture`
+  et `front_pc.mode`, les rangs `j ≥ 1` (porteuses) prennent `fixture_far` et
+  `mode_far`. Champ, empreintes posées (13.10), choix de la porteuse et recherche
+  d'azimut d'un rang utilisent la fiche de ce rang. Les deux fiches sont de
+  famille `pc` et partagent les circuits et le patch (15.1).
+
 - **Accroche en Y** : rang 0 sur la perche de face `(Yp, Zp)`. Rang `j ≥ 1` :
   sur une porteuse lumière `(Y, Zb)` avec `ΔY = yr_j − Y ≥ 0,10`. Candidates :
   toutes celles-là. Une candidate **convient** si un azimut existe (ci-dessous)
@@ -1485,10 +1500,12 @@ Deux appareils par zone, un par direction `d` : `L` (accroché côté jardin,
   devant la frise de face, les faisceaux du rang 2 traversent la frise (taches
   claires sur le tissu).
   Avec les défauts, le rang 2 est sur la perche de manteau (`Batten_02`,
-  `Y = 2,76`), site 48,2°. `open_space` n'a pas de perche de manteau (première
-  rue de 0,20 m) : le rang 2 reste sur `Batten_02` (`Y = 3,10`, site 63°), qui
-  ne couvre pas ses zones ; les alertes « aucun azimut », « Zone non couverte »
-  et celle d'un pendrillon le disent.
+  `Y = 2,76`), à l'azimut nominal 45° (site 57,7°) : le champ du Fresnel (jusqu'à
+  85°) le permet. `open_space` n'a pas de perche de manteau (première rue de
+  0,20 m) : le rang 2 reste sur `Batten_02` (`Y = 3,10`), site 66,1°, azimut 36° ;
+  avec un PC (54,4°) comme `fixture_far`, il ne couvre plus ses zones et les
+  alertes « aucun azimut », « Zone non couverte » et celle d'un pendrillon le
+  disent.
 - **Accroche en X** (croisement) : `X = xc_i + s_d·ΔY·tan(az_j)`. Même
   azimut `az_j` pour tous les appareils d'une direction d'un rang : faisceaux
   parallèles en plan ; le site varie avec le rang.
@@ -1497,23 +1514,48 @@ Deux appareils par zone, un par direction `d` : `L` (accroché côté jardin,
   ±132°, leurs têtes s'entrecoupent. Pour chaque rang,
   `az_j` est l'azimut le plus proche de `azimuth` (pas de 0,5°, en alternant
   + et −, jusqu'à ±30°) tel que les **empreintes posées** (13.10) de deux PC du
-  tube ne se recouvrent jamais, que les points d'accroche restent sur le tube et
-  que chaque zone tienne dans le champ le plus large de la fiche. Par défaut :
-  45° au rang 1, 60° au rang 2 : depuis la perche de manteau, une zone du rang 2
-  demande 64,9° de champ à 45° (54,4° au plus), 54,0° à 60°. Les deux
-  directions du rang utilisent ce même `az_j`. Aucun azimut ne convient :
-  alerte « Rang j : aucun azimut … » et azimut nominal conservé. L'azimut de
+  tube ne se recouvrent jamais (les découpes de la perche, posées avant, en
+  font partie), que les points d'accroche restent sur le tube et que chaque
+  zone tienne dans le champ le plus large de la fiche du rang. On cherche
+  d'abord un azimut dont en plus les faisceaux du rang dégagent de 0,05 m les
+  frises, les pendrillons et les découpes du tube (13.11) ; à défaut, l'azimut
+  qui respecte seulement les conditions précédentes, et 13.11 alerte.
+  Avec le Fresnel, 45° convient à tous les rangs des défauts ; avec un PC (54,4°)
+  la perche de manteau demande 60° : une zone du rang 2 y réclame 64,9° de champ
+  à 45°, 54,0° à 60°. Les deux directions du rang utilisent ce même `az_j`.
+  Aucun azimut ne convient : alerte « Rang j : aucun azimut … » et azimut
+  nominal conservé. L'azimut de
   chaque rang est affiché dans « Cotes calculées ». Le rangement des autres
   appareils (13.10) vient ensuite.
-- **Visée** : `T_ij`. Axe `a = (T_ij − P)/|T_ij − P|`.
-- **Champ couvert** : rectangle centré sur `T_ij` au plan `Za`, de demi-côtés
-  `(zw/2)·(1 + overlap)` en X et `(zd/2)·(1 + overlap)` en Y ; quatre coins
-  `C_k`. Champ requis `F_req = 2·max_k angle(a, (C_k − P)/|C_k − P|)`.
+- **Visée, rangs `j ≥ 1`** : `T_ij`. Axe `a = (T_ij − P)/|T_ij − P|`.
+- **Zone couverte, rangs `j ≥ 1`** : rectangle centré sur `T_ij` au plan `Za`, de
+  demi-côtés `(zw/2)·(1 + overlap)` en X et `(zd/2)·(1 + overlap)` en Y ; quatre
+  coins `C_k`.
+- **Rang 0 : l'avancée de scène** *(choix)* : la zone du rang 0 ne s'arrête pas
+  au plan de visée, elle descend jusqu'au sol de l'avancée. Ses coins aval sont
+  au **sol** (`Z = Hp`) sur la ligne du nez (`Y = 0`) ; ses coins amont restent
+  à `Za`, à `Y = yr_0 + (zd/2)·(1 + overlap)`. Latéralement, les zones
+  extrêmes vont jusqu'à la largeur du nez : `X = ±W/2` (au lieu de `±Wc/2`), sans
+  recouvrement au-delà ; côté intérieur et en amont le recouvrement s'applique
+  comme ailleurs. Raison : un appareil de face cadré à hauteur de tête laisse
+  noir le sol de l'avancée entre le nez et la façade (`Y ∈ [0, Ys]`), que le
+  recul du front engendre.
+- **Visée, rang 0** : le cap (en plan) est celui qui vise le centre de la zone,
+  donc le croisement et le parallélisme des faisceaux (azimut `az_0`) ne
+  changent pas ; **l'élévation** est celle qui minimise le champ requis pour
+  les quatre coins (recherche par tiers sur `[0°, 90°]`), ce qui abaisse la
+  visée de la profondeur de l'avancée : sur les défauts, le point où l'axe
+  coupe le plan `Za` passe de `Y = 1,50` à environ 1,06. Ce point devient la
+  cible `T_i0` des vérifications de 13.10 et 13.11.
+- **Champ requis** `F_req = 2·max_k angle(a, (C_k − P)/|C_k − P|)` sur les
+  quatre coins de la zone couverte.
   `F = clamp(F_req, field_angle.min, field_angle.max)`, puis le faisceau suit
   (12.3). `F_req > max` : alerte « Zone non couverte » ; `F_req < min` :
   alerte « Champ trop large » (une alerte par nature, qui liste les appareils).
   Le champ est une valeur de construction, pas un canal DMX, sauf si le mode
-  a `zoom` : la valeur de repos du canal reproduit alors `F` (15.2).
+  a `zoom` : la valeur de repos du canal reproduit alors `F` (15.2). Les tests
+  vérifient que tout point du sol de l'avancée (grille de 0,25 m sur
+  `X ∈ [−W/2, W/2]`, `Y ∈ [0, Ys]`) est dans le cône d'au moins un PC du rang 0.
 - **Circuits** : un par (rang, direction) : `FrontPC_Row1_L`, `FrontPC_Row1_R`,
   `FrontPC_Row2_L`, `FrontPC_Row2_R` (4 circuits pour 16 PC). Propriété
   `theatre_circuit` de la racine.
@@ -2030,6 +2072,9 @@ reconstruction recrée les objets, un patch saisi ailleurs serait perdu.
 - **Adresses** : le premier appareil d'une famille prend
   `<famille>_universe` / `<famille>_address` ; chaque suivant, l'adresse du
   précédent plus l'empreinte (`footprint`) du **mode choisi** de la famille.
+  `front_pc` a deux fiches : chaque appareil compte l'empreinte de son propre
+  mode (`mode` au rang 0, `mode_far` ailleurs), les adresses restent
+  consécutives dans l'univers de la famille.
   Le canal absolu de l'offset `o` d'un appareil à l'adresse `a` est `a + o − 1`
   (un canal 16 bits occupe `offset` et `fine`). Propriété de scène
   correspondante : `dmx_<univers>_<canal>`.
@@ -2135,7 +2180,8 @@ Dans le dossier choisi dans le sélecteur de l'opérateur (`theatre.export_qlc`)
 écrasés à chaque export, jamais dans `C:\QLC+` :
 
 - `theatre_rig.qxw` ;
-- `<Fabricant>-<Modèle>.qxf` **à côté du `.qxw`** pour chaque fiche utilisée
+- `<Fabricant>-<Modèle>.qxf` **à côté du `.qxw`** pour chaque fiche utilisée (les
+  PC de face, deux fiches, en écrivent deux)
   sans définition QLC+ vérifiée (16.4) : Esprite, PC, Source Four, hazer.
   Les espaces du fabricant et du modèle deviennent des `-`.
 

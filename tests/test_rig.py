@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from core.fixture_models import fixture_model
-from core.fixtures import EMPTY_LIBRARY, Range, cct_to_rgb, discover
+from core.fixtures import EMPTY_LIBRARY, SHIPPED_DIR, Range, cct_to_rgb, discover
 from core.layout import _make_context, compute_layout
 from core.presets import read_preset, shipped_presets
 from core.rig import (
@@ -22,16 +22,29 @@ DATA = Path(__file__).parent / "data" / "rig"
 LIB = discover([DATA])
 SYNTH = {
     "backlight": {"fixture": "rig_wash"}, "front_movers": {"fixture": "rig_wash"},
-    "towers": {"fixture": "rig_wash"}, "front_pc": {"fixture": "rig_pc"},
+    "towers": {"fixture": "rig_wash"}, "front_pc": {"fixture": "rig_pc", "fixture_far": "rig_pc"},
     "profiles": {"fixture": "rig_profile"}, "haze": {"fixture": "rig_hazer"},
 }
 
 
-def rig_layout(library=LIB, **groups):
+SHIPPED = discover([SHIPPED_DIR, DATA])
+
+
+def shipped_layout(params, far="rig_fresnel"):
+    """Layout with the shipped fiches and `far` (the synthetic wide Fresnel) on the far rows."""
+    params["front_pc"]["fixture_far"] = far
+    return compute_layout(params, SHIPPED)
+
+
+def rig_params(**groups):
     merged = {k: dict(v) for k, v in SYNTH.items()}
     for key, values in groups.items():
         merged.setdefault(key, {}).update(values)
-    return compute_layout(make(**merged), library)
+    return make(**merged)
+
+
+def rig_layout(library=LIB, **groups):
+    return compute_layout(rig_params(**groups), library)
 
 
 def rig_of(**groups):
@@ -179,7 +192,11 @@ def test_pc_cross_at_azimuth_with_parallel_beams():
         assert f.hang[0] == pytest.approx(z.xs[col] + side * drop * math.tan(math.radians(azimuth)))
         heading = math.degrees(math.atan2(f.aim[0] - f.pivot[0], f.aim[1] - f.pivot[1]))
         assert heading == pytest.approx(-side * azimuth)
-        assert f.aim == pytest.approx((z.xs[col], z.ys[row], 2.9))
+        assert f.aim[2] == pytest.approx(2.9)
+        if row:
+            assert f.aim == pytest.approx((z.xs[col], z.ys[row], 2.9))
+        else:
+            assert f.aim[1] < z.ys[0] - 0.1
     assert {f.support for f in pcs(rig)} == {"FrontPipe", "Batten_02"}
     first = rig.find("FrontPC_L_01")
     assert first.hang[0] == pytest.approx(-3.75 - 2.90, abs=0.01)
@@ -228,10 +245,10 @@ def overlapping(rig, library):
 def test_row_azimuth_moves_off_the_nominal_to_free_the_shared_tube():
     # At the nominal 45 degrees, FrontPC_L_06 and FrontPC_R_05 hang too close on Batten_02.
     nominal = 45.0
-    rig = compute_layout(make(front_pc={"azimuth": nominal})).rig
+    rig = shipped_layout(make(front_pc={"azimuth": nominal}), far="generic_pc_led").rig
     assert rig.dims.pc_azimuths[0] == nominal
     assert rig.dims.pc_azimuths[1] != nominal and abs(rig.dims.pc_azimuths[1] - nominal) <= AZIMUTH_SEARCH
-    assert not overlapping(rig, default_library())[0] and not has(rig.warnings, "se touchent")
+    assert not overlapping(rig, SHIPPED)[0] and not has(rig.warnings, "se touchent")
     row = [f for f in pcs(rig) if f.support == "Batten_02"]
     for side in "LR":
         headings = {round(math.degrees(math.atan2(f.aim[0] - f.pivot[0], f.aim[1] - f.pivot[1])), 6)
@@ -251,9 +268,9 @@ def test_row_azimuth_alerts_and_keeps_the_nominal_when_nothing_fits():
 
 
 def test_pc_row_azimuth_keeps_coverage_of_the_widest_field():
-    rig = compute_layout(make()).rig
+    rig = shipped_layout(make(), far="generic_pc_led").rig
     assert not has(rig.warnings, "Zone non couverte")
-    assert max(f.field_angle for f in rig.by_family("front_pc")) <= 54.4 + 1e-9
+    assert max(f.field_angle for f in pcs(rig)) <= 54.4 + 1e-9
 
 
 def test_pc_field_covers_the_zone_with_overlap():
@@ -261,6 +278,8 @@ def test_pc_field_covers_the_zone_with_overlap():
     z = rig.zones
     for f in pcs(rig):
         row, col = divmod(int(f.name[-2:]) - 1, z.nx)
+        if row == 0:
+            continue
         hx, hy = z.width / 2 * 1.2, z.depth / 2 * 1.2
         spans = [angle(f.axis, sub((z.xs[col] + sx * hx, z.ys[row] + sy * hy, 2.9), f.pivot))
                  for sx in (-1, 1) for sy in (-1, 1)]
@@ -268,11 +287,29 @@ def test_pc_field_covers_the_zone_with_overlap():
         assert f.beam_angle < f.field_angle
 
 
+def test_front_row_field_covers_its_zone_and_the_forestage_corners():
+    params = rig_params()
+    ctx, _ = _make_context(params)
+    rig = compute_layout(params, LIB).rig
+    z = rig.zones
+    for f in (f for f in pcs(rig) if int(f.name[-2:]) <= z.nx):
+        col = int(f.name[-2:]) - 1
+        x0, x1 = z.xs[col] - z.width / 2, z.xs[col] + z.width / 2
+        grow = z.width / 2 * 0.2
+        x0 = -ctx.W / 2 if col == 0 else x0 - grow
+        x1 = ctx.W / 2 if col == z.nx - 1 else x1 + grow
+        far = z.ys[0] + z.depth / 2 * 1.2
+        corners = [(x, y, zc) for x in (x0, x1) for y, zc in ((0.0, ctx.Hp), (far, 2.9))]
+        spans = [angle(f.axis, sub(c, f.pivot)) for c in corners]
+        assert f.field_angle == pytest.approx(2 * max(spans), abs=0.05)
+        assert f.axis[2] < unit(sub((z.xs[col], z.ys[0], 2.9), f.pivot))[2]
+
+
 def test_pc_field_alerts_when_out_of_the_zoom_range():
     wide = rig_layout(front_pc={"zone_width": 10.0})
     assert has(wide.warnings, "Zone non couverte")
     assert all(f.field_angle == 70.0 for f in wide.rig.by_family("front_pc"))
-    narrow = rig_layout(front_pc={"fixture": "rig_pc_tight"})
+    narrow = rig_layout(front_pc={"fixture": "rig_pc_tight", "fixture_far": "rig_pc_tight"})
     assert has(narrow.warnings, "Champ trop large")
     assert all(f.field_angle == 66.0 for f in narrow.rig.by_family("front_pc"))
     assert not has(rig_layout().warnings, "Zone non couverte") and not has(
@@ -757,7 +794,7 @@ def test_empty_library_never_crashes():
 
 
 def test_default_library_is_the_shipped_one():
-    lay = compute_layout(make())
+    lay = shipped_layout(make())
     assert default_fiche("generic_pc_led") is not None
     assert len(lay.rig.by_family("front_pc")) == 16
 
@@ -765,7 +802,7 @@ def test_default_library_is_the_shipped_one():
 # ------------------------------------------------------- shipped integration
 
 def test_shipped_library_default_rig():
-    lay = compute_layout(make())
+    lay = shipped_layout(make())
     rig = lay.rig
     missing = [w for w in lay.warnings if "introuvable" in w]
     assert not missing
@@ -783,7 +820,7 @@ def test_shipped_library_default_rig():
 
 
 def test_shipped_movers_round_trip_with_their_inverted_axes():
-    rig = compute_layout(make()).rig
+    rig = shipped_layout(make()).rig
     for f in (f for f in rig.fixtures if f.moving):
         fx = default_fiche(f.fixture_id)
         assert reached(fx.motion.pan, f.pan_dmx) == pytest.approx(f.pan, abs=0.01) \
@@ -795,6 +832,111 @@ def test_shipped_movers_round_trip_with_their_inverted_axes():
     assert esprite.motion.tilt.invert and esprite.blades.rotation.invert and not esprite.motion.pan.invert
 
 
+# ------------------------------------------- far rows fixture and the forestage
+
+USER_SCENE = Path(__file__).parent / "data" / "presets" / "user_open_angled.yaml"
+
+
+def user_params(**front_pc):
+    """The user's scene (no modules, angled legs). It was saved with `zone_width` 1.62, a 7 x 4 grid whose
+    28 far PC cannot hang on one batten whatever the fiche; the cases below use 3.0 and 2.0."""
+    params, messages = read_preset(USER_SCENE)
+    assert messages == []
+    params["front_pc"].update(front_pc)
+    return params
+
+
+CASES = {
+    "default": lambda: make(),
+    "reference_with_modules": lambda: read_preset(shipped_presets()["reference_with_modules"])[0],
+    "open_space": lambda: read_preset(shipped_presets()["open_space"])[0],
+    "user_3": lambda: user_params(zone_width=3.0),
+    "user_2": lambda: user_params(zone_width=2.0),
+}
+
+
+def uncovered_forestage(rig, params):
+    """Points of the forestage floor (grid 0.25 m, nez to facade, nez width) outside every row 0 cone."""
+    ctx, _ = _make_context(params)
+    row0 = [f for f in pcs(rig) if f.support == "FrontPipe"]
+    steps_x, steps_y = round(ctx.W / 0.25), int(ctx.Ys / 0.25 + 1e-9)
+    points = [(-ctx.W / 2 + i * 0.25, j * 0.25, ctx.Hp) for i in range(steps_x + 1) for j in range(steps_y + 1)]
+    return [p for p in points
+            if not any(angle(f.axis, sub(p, f.pivot)) <= f.field_angle / 2 + 1e-6 for f in row0)]
+
+
+@pytest.mark.parametrize("name", list(CASES))
+def test_scenes_are_alert_free_and_the_front_row_lights_the_whole_forestage(name):
+    params = CASES[name]()
+    rig = shipped_layout(params).rig
+    assert rig.warnings == ()
+    assert uncovered_forestage(rig, params) == []
+    assert len(rig.by_family("front_pc")) == 2 * rig.zones.nx * rig.zones.nr
+
+
+def test_the_front_row_aim_is_lowered_onto_the_forestage_with_the_same_heading():
+    lay = shipped_layout(make())
+    z = lay.rig.zones
+    for f in (f for f in pcs(lay.rig) if f.support == "FrontPipe"):
+        heading = math.atan2(f.aim[0] - f.pivot[0], f.aim[1] - f.pivot[1])
+        centre = (z.xs[int(f.name[-2:]) - 1], z.ys[0], 2.9)
+        assert heading == pytest.approx(math.atan2(centre[0] - f.pivot[0], centre[1] - f.pivot[1]))
+        assert 0.3 < centre[1] - f.aim[1] < 0.8 and f.aim[2] == pytest.approx(2.9)
+
+
+def test_far_rows_use_their_own_fixture_and_mode_and_the_front_row_keeps_its_own():
+    rig = rig_of(front_pc={"fixture_far": "rig_fresnel", "mode_far": "Dimmer 16 bit + CCT"})
+    near = [f for f in pcs(rig) if f.support == "FrontPipe"]
+    far = [f for f in pcs(rig) if f.support != "FrontPipe"]
+    assert near and far and not has(rig.warnings, "Fiche")
+    assert {(f.fixture_id, f.mode) for f in near} == {("rig_pc", "Basic")}
+    assert {(f.fixture_id, f.mode) for f in far} == {("rig_fresnel", "Dimmer 16 bit + CCT")}
+
+
+def test_a_family_with_two_fixtures_is_patched_by_each_footprint():
+    rig = rig_of(front_pc={"fixture_far": "rig_fresnel"})
+    address = 1
+    for f in pcs(rig):
+        assert (f.universe, f.address) == (4, address)
+        address += f.footprint
+    assert {f.footprint for f in pcs(rig)} == {3, 4}
+    assert dict((k, (u, a, b)) for k, u, a, b in rig.dims.patch_ranges)["front_pc"] == (4, 1, address - 1)
+
+
+def test_far_rows_cover_zones_the_front_row_fixture_cannot():
+    hard = user_params(zone_width=3.0)
+    pc = shipped_layout(hard, far="generic_pc_led").rig
+    assert has(pc.warnings, "Rang 2", "aucun azimut")
+    wide = shipped_layout(user_params(zone_width=3.0)).rig
+    assert wide.warnings == () and max(f.field_angle for f in pcs(wide)) > 54.4
+    assert {f.fixture_id for f in pcs(wide)} == {"generic_pc_led", "rig_fresnel"}
+
+
+def test_missing_or_unsuitable_far_fiche_falls_back_to_the_front_row_fiche_with_an_alert():
+    for far, word in (("ghost", "introuvable"), ("rig_wash", "inadaptée")):
+        rig = rig_layout(front_pc={"fixture_far": far}).rig
+        assert has(rig.warnings, far, word, "posés avec « rig_pc »")
+        assert {f.fixture_id for f in pcs(rig)} == {"rig_pc"}
+
+
+def test_unknown_far_mode_takes_the_default_mode_with_an_alert():
+    rig = rig_layout(front_pc={"fixture_far": "rig_fresnel", "mode_far": "Nope"}).rig
+    assert has(rig.warnings, "Nope", "rig_fresnel")
+    assert {f.mode for f in pcs(rig) if f.support != "FrontPipe"} == {"Dimmer 16 bit + CCT + Zoom"}
+
+
+def test_far_fiche_is_not_asked_for_when_there_is_one_row():
+    rig = rig_layout(front_pc={"fixture_far": "ghost", "zone_mode": "manual", "rows": 1}).rig
+    assert not has(rig.warnings, "ghost")
+
+
+def test_the_shipped_default_far_fixture_is_the_wide_fresnel():
+    lay = compute_layout(make())
+    assert lay.rig.warnings == ()
+    assert {f.fixture_id for f in pcs(lay.rig) if f.support != "FrontPipe"} == {"generic_fresnel_led"}
+    assert {f.fixture_id for f in pcs(lay.rig) if f.support == "FrontPipe"} == {"generic_pc_led"}
+
+
 # ------------------------------------------------------- alert-free defaults
 
 def test_shipped_presets_raise_no_rig_alert():
@@ -804,31 +946,29 @@ def test_shipped_presets_raise_no_rig_alert():
     for name, path in presets.items():
         params, messages = read_preset(path)
         assert not messages, name
-        rig = compute_layout(params).rig
-        assert (rig.warnings == ()) == (name != "open_space"), name
-    # Its first rue is 0.20 m deep: no pipe fits behind the front border, row 2 cannot be covered.
-    assert has(shipped_rigs()["open_space"].rig.warnings, "Zone non couverte")
+        rig = shipped_layout(params).rig
+        assert rig.warnings == (), name
 
 
 def shipped_rigs():
-    out = {"default": compute_layout(make())}
+    out = {"default": shipped_layout(make())}
     for name, path in shipped_presets().items():
-        out[name] = compute_layout(read_preset(path)[0])
+        out[name] = shipped_layout(read_preset(path)[0])
     return out
 
 
 @pytest.mark.parametrize("name", ["default", "reference_with_modules"])
 def test_no_two_fixtures_overlap_on_a_support_once_posed(name):
     lay = shipped_rigs()[name]
-    pairs, gaps = overlapping(lay.rig, default_library())
+    pairs, gaps = overlapping(lay.rig, SHIPPED)
     assert pairs == [] and gaps
     assert min(gaps.values()) >= 0.0 and lay.rig.warnings == ()
 
 
 def test_pc_footprint_includes_the_swing_of_the_heads():
     # FrontPC_L_07 and R_05 used to hang 0.34 m apart while panned +-132 degrees: heads intersected.
-    rig = compute_layout(make()).rig
-    library = default_library()
+    rig = shipped_layout(make(), far="generic_pc_led").rig
+    library = SHIPPED
     pc = rig.find("FrontPC_L_07")
     low, high = posed_interval(library, pc)
     assert high - low > 1.5 * pc.width
@@ -845,7 +985,7 @@ def test_posed_points_follow_the_head_frame_of_the_spec():
 
 
 def test_default_profiles_all_find_a_tube_within_travel():
-    lay = compute_layout(make())
+    lay = shipped_layout(make())
     assert [t for _, t, _ in lay.rig.dims.profiles] == ["70", "70", "70"]
     assert not has(lay.warnings, "Découpe")
 
@@ -872,11 +1012,11 @@ def beam_alerts(lay):
 
 
 def manual_movers(z, **front):
-    return compute_layout(make(rig_front={"movers_height_mode": "manual", "movers_z": z, **front}))
+    return shipped_layout(make(rig_front={"movers_height_mode": "manual", "movers_z": z, **front}))
 
 
 def test_front_movers_hang_on_a_second_pipe_behind_the_first():
-    lay = compute_layout(make())
+    lay = shipped_layout(make())
     rig, dims = lay.rig, lay.rig.dims
     first, second = lay.find("FrontPipe"), lay.find("FrontPipe_02")
     assert dims.movers_pipe_y == pytest.approx(dims.pipe_y - 1.50)
@@ -894,22 +1034,22 @@ def test_front_movers_hang_on_a_second_pipe_behind_the_first():
 
 
 def test_second_pipe_is_absent_without_front_movers():
-    lay = compute_layout(make(front_movers={"enabled": False}))
+    lay = shipped_layout(make(front_movers={"enabled": False}))
     assert "FrontPipe_02" not in lay.names() and lay.rig.dims.movers_pipe_y is None
     assert lay.rig.dims.mover_radius is None and "FrontPipe" in lay.names()
 
 
 def test_second_pipe_offset_and_house_alert():
-    near = compute_layout(make(rig_front={"movers_offset": 3.0}))
+    near = shipped_layout(make(rig_front={"movers_offset": 3.0}))
     assert near.rig.dims.movers_pipe_y == pytest.approx(near.rig.dims.pipe_y - 3.0)
     assert not has(near.warnings, "Perche des mobiles hors de la salle")
-    far = compute_layout(make(rig_front={"auto_position": False, "y": -4.0, "movers_offset": 10.0}))
+    far = shipped_layout(make(rig_front={"auto_position": False, "y": -4.0, "movers_offset": 10.0}))
     assert far.rig.dims.movers_pipe_y == pytest.approx(-14.0)
     assert has(far.warnings, "Perche des mobiles hors de la salle")
 
 
 def test_auto_height_is_the_highest_step_that_clears_every_beam():
-    dims = compute_layout(make()).rig.dims
+    dims = shipped_layout(make()).rig.dims
     steps = (dims.pipe_z - dims.movers_pipe_z) / HEIGHT_STEP
     assert steps >= 1 and steps == pytest.approx(round(steps))
     assert not beam_alerts(manual_movers(dims.movers_pipe_z))
@@ -919,7 +1059,7 @@ def test_auto_height_is_the_highest_step_that_clears_every_beam():
 
 
 def test_auto_height_keeps_the_height_of_the_first_pipe_when_nothing_blocks():
-    lay = compute_layout(make(front_pc={"enabled": False}, profiles={"enabled": False}))
+    lay = shipped_layout(make(front_pc={"enabled": False}, profiles={"enabled": False}))
     assert lay.rig.dims.movers_pipe_z == pytest.approx(lay.rig.dims.pipe_z) and lay.rig.warnings == ()
 
 
@@ -932,7 +1072,7 @@ def test_manual_height_is_taken_as_given_and_blocked_beams_are_named():
 
 
 def test_no_clear_height_keeps_the_best_one_and_reports_the_blocked_targets():
-    lay = compute_layout(make(rig_front={"movers_offset": 0.5}))
+    lay = shipped_layout(make(rig_front={"movers_offset": 0.5}))
     ctx, _ = _make_context(make())
     assert has(lay.warnings, "aucune hauteur")
     assert has(lay.warnings, "Faisceau de FrontMover_01 vers", "gêné par FrontMover_02")
@@ -952,12 +1092,12 @@ def test_swept_envelope_bounds_the_vertices_over_the_whole_tilt_range():
             for v in model.tilt.vertices:
                 x, y, _ = matvec(rx, v)
                 reach = max(reach, math.hypot(x, y + pivot[1]))
-        rig = compute_layout(make(front_movers={"fixture": fixture_id}, backlight={"fixture": fixture_id})).rig
+        rig = shipped_layout(make(front_movers={"fixture": fixture_id}, backlight={"fixture": fixture_id})).rig
         assert reach - 1e-9 <= rig.dims.mover_radius <= 1.25 * reach
 
 
 def test_movers_pack_by_their_swept_envelope_not_their_rest_pose():
-    rig = compute_layout(make(front_movers={"count": 14})).rig
+    rig = shipped_layout(make(front_movers={"count": 14})).rig
     radius = rig.dims.mover_radius
     xs = sorted(f.hang[0] for f in movers_of(rig))
     assert len(xs) == 14
@@ -1009,41 +1149,41 @@ def masking_alerts(warnings):
 
 
 def test_row_two_pcs_hang_on_the_mantle_batten_behind_the_front_border():
-    lay = compute_layout(make())
+    lay = shipped_layout(make())
     front = lay.find("MaskingBatten_00").start[1]
     row = [f for f in pcs(lay.rig) if f.circuit.startswith("FrontPC_Row2")]
     assert len(row) == 8 and {f.support for f in row} == {"Batten_02"}
     assert all(f.hang[1] == pytest.approx(front + 0.30) for f in row)
     (_, site), = [r for r in lay.rig.dims.pc_supports if r[0] == "Batten_02"]
-    assert abs(site - 45.0) < 5.0
+    assert lay.rig.dims.pc_azimuths[1] == 45.0 and site == pytest.approx(57.7, abs=0.1)
     assert lay.rig.warnings == () and lay.rig.dims.masking_clearance >= BEAM_MARGIN
 
 
 def test_row_two_keeps_the_site_nearest_battens_when_there_is_no_front_border():
-    rig = compute_layout(make(masking={"front_border": False})).rig
+    rig = shipped_layout(make(masking={"front_border": False})).rig
     assert [name for name, _ in rig.dims.pc_supports] == ["FrontPipe", "Batten_01"]
     assert rig.warnings == ()
 
 
 def test_row_without_a_fitting_batten_keeps_the_nearest_site_and_alerts():
-    lay = shipped_rigs()["open_space"]
+    lay = shipped_layout(read_preset(shipped_presets()["open_space"])[0], far="generic_pc_led")
     assert [name for name, _ in lay.rig.dims.pc_supports] == ["FrontPipe", "Batten_02"]
     assert has(lay.rig.warnings, "Rang 2", "aucun azimut") and has(lay.rig.warnings, "Zone non couverte")
 
 
 def test_a_low_border_makes_the_beam_checks_alert_and_names_beam_target_and_border():
-    lay = compute_layout(make(masking={"borders_mode": "manual", "border_bottom": 4.0}))
+    lay = shipped_layout(make(masking={"borders_mode": "manual", "border_bottom": 4.0}))
     hits = has(lay.warnings, "Faisceau de Backlight_", "vers (", "gêné par la frise Border_03")
     assert hits and lay.rig.dims.masking_clearance < 0
     assert not has(lay.warnings, "Faisceau de FrontMover_", "gêné par la frise")
 
 
 def test_auto_height_goes_down_to_keep_the_movers_beams_under_the_front_border():
-    high = compute_layout(make()).rig.dims.movers_pipe_z
-    low = compute_layout(make(masking={"borders_mode": "manual", "border_bottom": 4.0}))
+    high = shipped_layout(make()).rig.dims.movers_pipe_z
+    low = shipped_layout(make(masking={"borders_mode": "manual", "border_bottom": 4.0}))
     assert low.rig.dims.movers_pipe_z < high
     assert not has(low.warnings, "Faisceau de FrontMover_", "gêné par la frise")
-    raised = compute_layout(make(masking={"borders_mode": "manual", "border_bottom": 4.0},
+    raised = shipped_layout(make(masking={"borders_mode": "manual", "border_bottom": 4.0},
                                  rig_front={"movers_height_mode": "manual", "movers_z": high}))
     assert has(raised.warnings, "Faisceau de FrontMover_", "gêné par la frise Border_00")
 
