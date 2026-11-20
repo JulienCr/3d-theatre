@@ -793,7 +793,7 @@ porteuse de pendrillonnage, de `Z = Hp` à la hauteur des porteuses
 ### 8.2 Porteuses de pendrillonnage (`TS_Batten`)
 
 Distinctes des porteuses lumière, elles pourront porter des projecteurs
-plus tard (en perroquet, voir `BACKLOG.md`). Mêmes tube et longueur que les
+plus tard (en perroquet, voir [#4](https://github.com/JulienCr/3d-theatre/issues/4)). Mêmes tube et longueur que les
 porteuses lumière, à `Z = Zb`.
 
 - `MaskingBatten_NN` au plan `k` (`NN = k`) ;
@@ -1228,7 +1228,7 @@ nom, conservé tel quel, en minuscules et sans espaces (ex. `aura_dimmer`,
 `prism1`). Un tel canal compte dans l'empreinte, reçoit sa propriété
 `dmx_<u>_<c>` (valeur par défaut de la fiche), figure dans le patch et dans
 l'export QLC+, mais **aucun objet Blender ne le lit**. Le prisme et le frost
-sont dans ce cas (voir `BACKLOG.md`).
+sont dans ce cas (voir [#7](https://github.com/JulienCr/3d-theatre/issues/7)).
 
 ### 12.4 Canaux 8 et 16 bits
 
@@ -1730,7 +1730,7 @@ Récapitulatif des visées de repos :
 
 - **Charge** cumulée par support (chaque perche de face, chaque porteuse
   lumière, chaque pylône) : somme des `physical.weight`. Affichée, **sans alerte de
-  dépassement** (`BACKLOG.md`).
+  dépassement** ([#5](https://github.com/JulienCr/3d-theatre/issues/5)).
 - **Empreinte posée** : la largeur de la fiche ne suffit pas, une tête panotée
   et inclinée déborde de son corps. L'empreinte d'un appareil sur son support
   est l'intervalle des sommets de son modèle (14.2 : embase, étrier, tête)
@@ -1907,11 +1907,11 @@ sans fiche ou avec `front_pc.barn_doors = none`). Même idée que les lames
   de la charnière, `z` de la charnière au bord libre, `y = z × x`), `active`
   (`θ > 0`), `reached`, `normal` (plan réalisé, monde, `None` ouverte). La
   feuille se dessine de `hinge` sur `λ` selon `z` et `leaf_width` selon `x`.
+- **Dans Blender** (14.4 bis) : une boîte mince par feuille, fille de `_Tilt`, posée sur
+  `hinge` et tournée selon `axes`.
 - Valeurs sourcées : le catalogue Robe cite un « 4-leaf Barndoor module »
   (10981010) pour le T15 PC sans cotes ; Chauvet cite le « Ovation F 7.5" Barndoor
   V2 » (8 feuilles, 323 × 308 × 52 mm ouvert) pour l'Ovation F-915VW sans
-- **Dans Blender** (14.4 bis) : une boîte mince par feuille, fille de `_Tilt`, posée sur
-  `hinge` et tournée selon `axes`.
   longueur de feuille. Les longueurs et largeurs des deux fiches sont des
   estimations signalées dans les fiches ; elles respectent la règle des
   feuilles ouvertes de 12.7.
@@ -2111,6 +2111,7 @@ matériaux cherchés par nom.
       <Racine>_Blades       empty ; rotation Z = blade_rot
         <Racine>_Blade_K_Pivot    empty ; rotation Z fixe = side_k   (K = 1 à 4)
           <Racine>_Blade_K        plan
+      <Racine>_Leaf_K       boîte mince (volet de PC, 14.4 bis), K = 1 à 4
 ```
 
 - Racine : position `(X, Y, Zh − hook_height)`, repère du corps de 13.9.
@@ -2178,6 +2179,17 @@ est calculé avec `F_ref`. `_Blade_K` : `location.x = h_c`, `rotation.z = α`
 *(choix : la coupe reste calée sur la position du plan, ce qui n'est exact
 qu'à `F_ref`)*.
 
+### 14.4 bis Volets des PC
+
+Pour chaque PC dont `RigFixture.barn_doors` existe (13.12), quatre boîtes
+`_Leaf_K` (`K` = `index`), enfants de `_Tilt`, matériau `TS_Fixture`, visibles de la
+caméra **et** projetant une ombre. Maillage `TSF_<id>_leaf` : `leaf_width` selon X,
+2 mm selon Y, `leaf_length` selon Z depuis l'origine, partagé par nom. Position
+`hinge`, rotation = la matrice dont les colonnes sont `axes` (repère de la tête = repère
+de `_Tilt`). Les feuilles ouvertes (`θ = 0`) sont construites aussi : elles existent
+physiquement et rognent déjà la lumière (13.13). Les volets sont fixes : pas de
+driver.
+
 ### 14.5 Gobos, iris, couleur en Cycles
 
 Arbre de nœuds de la lumière, **construit seulement** si la fiche déclare
@@ -2187,7 +2199,6 @@ un gobo, un iris ou `cct`. EEVEE ne le lit pas.
   `p = (n_x, n_y) / (−n_z) / tan(F/2)` : le disque unité est le bord du champ.
   Nœud `Value` `FieldTan` piloté à `tan(F/2)`. *Le sens de `Normal` pour les
   lumières spot et surfaciques est à confirmer au premier rendu (11).*
-      <Racine>_Leaf_K       boîte mince (volet de PC, 14.4 bis), K = 1 à 4
 - Gobo : rotation de `p` par `β = gobo1_rot`, coordonnées image
   `0,5 + 0,5·p`, une `Image Texture` par fente (`CLIP`, linéaire, images de
   `gobos/`). Chaque roue (`gobo1`, `gobo2`) est un **groupe de nœuds**
@@ -2255,17 +2266,6 @@ colonne « Sans canal ».
 - Les drivers de nœuds sont portés par l'arbre de nœuds de la lumière : ce
   n'est pas l'objet, donc pas de cycle avec la racine.
 - `level = dimmer · shut` et, si le mode a `zoom`, `field_now = F(z)` et
-### 14.4 bis Volets des PC
-
-Pour chaque PC dont `RigFixture.barn_doors` existe (13.12), quatre boîtes
-`_Leaf_K` (`K` = `index`), enfants de `_Tilt`, matériau `TS_Fixture`, visibles de la
-caméra **et** projetant une ombre. Maillage `TSF_<id>_leaf` : `leaf_width` selon X,
-2 mm selon Y, `leaf_length` selon Z depuis l'origine, partagé par nom. Position
-`hinge`, rotation = la matrice dont les colonnes sont `axes` (repère de la tête = repère
-de `_Tilt`). Les feuilles ouvertes (`θ = 0`) sont construites aussi : elles existent
-physiquement et rognent déjà la lumière (13.13). Les volets sont fixes : pas de
-driver.
-
   `beam_now = B(z)` sont des propriétés de la racine pilotées par la scène (les
   constantes de la fiche y sont écrites en clair). `Light.energy` vaut
   `max_energy · level`, `spot_size` ou `spread` lit `field_now` ou `beam_now`.
@@ -2645,4 +2645,4 @@ retrouverait pas le mode de la fiche. Contrôle fait sur
 
 ## 17. Hors périmètre v1
 
-Voir `BACKLOG.md`.
+Voir les [issues GitHub](https://github.com/JulienCr/3d-theatre/issues).

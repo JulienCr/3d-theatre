@@ -172,7 +172,7 @@ See `blender/theatre_stage/library/fixtures/README.md` and spec section 12.
 
 - [`docs/spec.md`](docs/spec.md) (French): parameters, geometry, masking,
   presets, fixture library, rig layout, DMX, QLC+ export.
-- [`BACKLOG.md`](BACKLOG.md) (French): known gaps and ideas.
+- [Issues](https://github.com/JulienCr/3d-theatre/issues) (French): known gaps and ideas.
 
 ## License
 
