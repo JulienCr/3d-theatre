@@ -184,6 +184,13 @@ class HazeLink:
     bits: int
     rest: float
 
+    def level(self) -> tuple[str, dict[str, str]]:
+        """Driver expression of the 0..1 hazer level and its scene data paths, as `_Expr.dmx` reads a channel."""
+        paths = {"c": f'["{self.prop}"]'}
+        if self.bits == 8 or self.fine_prop is None:
+            return "c", paths
+        return "(256*c+f)/257", {**paths, "f": f'["{self.fine_prop}"]'}
+
 
 @dataclass(frozen=True)
 class RigDims:

@@ -1893,8 +1893,13 @@ reste `Haze_Volume`.
   densité réglée dans le panneau).
 - Alerte « Brume DMX Visualizer (World, `DMX_Haze`) active : la brume serait
   comptée deux fois » si le monde de la scène a un nœud Volume Scatter nommé
-  `DMX_Haze` relié à la sortie du monde. Calculée à la reconstruction ; le
-  dessin du panneau ne lit que la valeur Python.
+  `DMX_Haze` en amont de l'entrée Volume de la sortie du monde, tant que la
+  brume du théâtre est active (`Haze_Volume` présent ou hazer DMX). Calculée à
+  la reconstruction (`rigbuild.warnings`) ; le dessin du panneau ne lit que la
+  valeur Python.
+- Le driver de densité de `TS_Haze` est remplacé à chaque reconstruction :
+  `var` sans hazer, `var · c` (8 bits) ou `var · (256·c + f)/257` (16 bits)
+  avec lui, `c` et `f` étant les propriétés de scène du canal du hazer.
 
 ## 16. Export QLC+
 

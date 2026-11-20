@@ -23,6 +23,7 @@ from .core.rig import FIXTURES_COLLECTION, Rig, RigFixture, default_library
 TAG = materials.TAG
 MAX_CHANNEL = 512
 MAX_EXPRESSION = 255
+WORLD_HAZE = "DMX_Haze"
 LENS_ADVANCE = 0.005
 LENS_SEGMENTS = 32
 LENS_GAIN = 8.0
@@ -620,6 +621,27 @@ def ensure_dmx_props(scene, rig: Rig) -> int:
     return created
 
 
+def _feeds_world_output(tree, name: str) -> bool:
+    """True when the node `name` is upstream of the Volume input of the world output."""
+    output = next((n for n in tree.nodes if n.bl_idname == "ShaderNodeOutputWorld"), None)
+    pending = [link.from_node for link in output.inputs["Volume"].links] if output else []
+    seen = set()
+    while pending:
+        node = pending.pop()
+        if node.name == name:
+            return True
+        if node.name not in seen:
+            seen.add(node.name)
+            pending += [link.from_node for socket in node.inputs for link in socket.links]
+    return False
+
+
+def world_haze_active(scene) -> bool:
+    """A DMX Visualizer haze (`DMX_Haze`) feeds the world volume (spec 15.4)."""
+    tree = scene.world.node_tree if scene.world and scene.world.use_nodes else None
+    return tree is not None and tree.nodes.get(WORLD_HAZE) is not None and _feeds_world_output(tree, WORLD_HAZE)
+
+
 def build_rig(scene, layout, collections, new_mesh: Callable, material: Callable,
               library=None) -> dict[str, bpy.types.Object]:
     """Build the fixtures of `layout.rig` into `Theatre_Fixtures`; returns the root empties by name.
@@ -628,6 +650,9 @@ def build_rig(scene, layout, collections, new_mesh: Callable, material: Callable
     """
     warnings.clear()
     rig = layout.rig
+    hazy = (rig is not None and rig.haze is not None) or "Haze_Volume" in layout.names()
+    if hazy and world_haze_active(scene):
+        warnings.append("Brume DMX Visualizer (World, « DMX_Haze ») active : la brume serait comptée deux fois.")
     if rig is None or not rig.enabled:
         return {}
     if ensure_dmx_props(scene, rig):

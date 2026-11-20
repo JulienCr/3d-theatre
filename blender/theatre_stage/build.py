@@ -132,8 +132,7 @@ def _setup_haze_material(mat: bpy.types.Material, scene: bpy.types.Scene) -> Non
     links.new(density.outputs[0], scale.inputs[1])
     links.new(scale.outputs[0], scatter.inputs["Density"])
     links.new(scatter.outputs["Volume"], output.inputs["Volume"])
-    _drive(tree, f'nodes["{HAZE_DENSITY}"].outputs[0].default_value', "var", scene,
-           var="theatre.haze.density")
+    drive_haze_density(mat, scene, None)
     _drive(tree, f'nodes["{HAZE_NODE}"].inputs["Anisotropy"].default_value', "var", scene,
            var="theatre.haze.anisotropy")
     ramp_path = f'nodes["{HAZE_RAMP}"].inputs'
@@ -143,6 +142,20 @@ def _setup_haze_material(mat: bpy.types.Material, scene: bpy.types.Scene) -> Non
     _drive(tree, f'{ramp_path}["From Max"].default_value', "ys", scene, ys=setback)
     _drive(tree, f'{ramp_path}["To Min"].default_value', "mode", scene,
            mode="theatre.haze.extent")
+
+
+def drive_haze_density(mat: bpy.types.Material, scene: bpy.types.Scene, link) -> None:
+    """Density = `haze.density`, times the hazer level when the rig has a DMX-driven hazer (spec 15.4)."""
+    tree = mat.node_tree
+    if tree is None or tree.nodes.get(HAZE_DENSITY) is None:
+        return
+    path = f'nodes["{HAZE_DENSITY}"].outputs[0].default_value'
+    tree.driver_remove(path)
+    if link is None:
+        _drive(tree, path, "var", scene, var="theatre.haze.density")
+        return
+    level, paths = link.level()
+    _drive(tree, path, f"var*{level}", scene, var="theatre.haze.density", **paths)
 
 
 def _upgrade_haze_material(mat: bpy.types.Material, scene: bpy.types.Scene) -> None:
@@ -342,6 +355,9 @@ def _rebuild(scene: bpy.types.Scene, params: dict) -> Layout:
         _make_light(spec, collections)
     rigbuild.build_rig(scene, layout, collections, _new_mesh,
                        lambda name: chosen.get(name) or get_material(name, layout.materials, scene))
+    haze = bpy.data.materials.get("TS_Haze")
+    if haze is not None:
+        drive_haze_density(haze, scene, layout.rig.haze if layout.rig else None)
     cameras = {spec.name: _make_camera(spec, collections) for spec in layout.cameras}
     atmosphere.apply(scene, params, layout)
 
