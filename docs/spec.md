@@ -1123,9 +1123,10 @@ dernier, la valeur de l'extrémité est tenue.
 | `emitter_1` … `emitter_8` | niveau de chaque émetteur de `colour.emitters` |
 | `strobe` | octet `B = round(255·v)` ; interprété par `strobe` de la fiche (14.7) |
 | `gobo1`, `gobo2` | octet `B = round(255·v)` ; la fente est celle dont `dmx` contient `B` |
-| `gobo1_rot` | angle du gobo = `v·rotation_range` de la roue `gobo1` |
+| `gobo1_rot`, `gobo2_rot` | angle du gobo = `v·rotation_range` de la roue `gobo1` / `gobo2` |
 | `iris` | 0 = ouvert, 1 = fermé à `iris.min_ratio` |
 | `blade_1a`, `blade_1b` … `blade_4a`, `blade_4b` | insertion aux deux extrémités A et B de la lame ; 0 = dégagée, 1 = course complète |
+| `blade_1_rot` … `blade_4_rot` | pivotement de la lame K autour de son axe : angle = `angle_limit·(1 − 2v)`, 0 au milieu *(choix : sens du GDTF Robe, +30° à `v` = 0, à confirmer contre 13.8)* |
 | `blade_rot` | rotation du cadrage, `min + v·(max − min)` de `blades.rotation` |
 | `haze_density` | densité du hazer, 0 – 1 |
 
@@ -1162,7 +1163,7 @@ fiche constructeur » et saisies dans le YAML avec leur source.
 | `id` | Famille | Origine et données connues |
 |---|---|---|
 | `martin_mac_aura` | `moving_wash` | MAC Aura (pas la XB). GDTF `Martin_Professional@MAC_Aura@20230201NoMeas.gdtf` (dossier du module Open Stage Blender DMX de l'utilisateur), copié dans `source/`. Anneau « Aura » : canaux conservés comme attributs inconnus (`aura_*`), non rendus |
-| `robe_robin_esprite` | `moving_profile` | GDTF « Robin Esprite » `Robe_Lighting@Robin_Esprite@2024-02-15…gdtf`. Lames motorisées `blade_1a` … `blade_4b`, `blade_rot` ; gobos et iris ; couleur CMY + CTO |
+| `robe_robin_esprite` | `moving_profile` | GDTF « Robin Esprite » `Robe_Lighting@Robin_Esprite@2024-02-15…gdtf`. Lames motorisées `blade_1a` … `blade_4b`, `blade_1_rot` … `blade_4_rot`, `blade_rot` ; gobos et iris ; couleur CMY + CTO |
 | `generic_pc_led` | `pc` | PC LED générique, blanc variable (`cct`), **étalonné sur la photométrie d'un vrai PC LED** dont les sources sont citées dans `sources`. Pas de GDTF |
 | `etc_s4led_s3_lustr_x8` | `profile` | ETC Source Four LED Series 3 Lustr X8 : 10 889 lm, huit émetteurs (rouge profond à indigo, `colour.emitters`), fenêtre de 80 mm, 8,9 kg avec le barillet à lames (6,8 kg sans), lames manuelles, tubes de lentille 5, 10, 14, 19, 26, 36, 50 et 70° (ceux qui ont un plan ETC) ; dix modes DMX de 1 à 21 canaux (manuel v1.4.0 : cinq modes 8 bits de 1 à 12 canaux plus HSIC et quatre modes 16 bits ; la fiche technique n'en annonce que cinq). Pas de GDTF |
 | `etc_s4led_s3_daylight_hdr` | `profile` | Idem avec le module Daylight HDR : 14 214 lm, `cct` de 1900 à 10450 K. Pas de GDTF |
@@ -1214,9 +1215,7 @@ blender/theatre_stage/library/fixtures/<id>/` (Python système, `zipfile` et
   (bornes de `BladeRot` ou `ShaperRot`) sont pré-remplis, à confirmer.
 - Un canal dont l'attribut du vocabulaire est déjà pris dans le mode (second
   `Dimmer` de la géométrie « Auras ») est gardé sous `<géométrie>_<attribut>`,
-  en minuscules (`auras_dimmer`), comme un attribut inconnu. Les rotations par
-  lame `Blade1Rot` à `Blade4Rot` et `Gobo2Pos` restent inconnus (`blade1rot`,
-  `gobo2pos`) : l'auteur de la fiche les renomme à la main s'il veut les rendre.
+  en minuscules (`auras_dimmer`), comme un attribut inconnu.
 
 | Attribut GDTF | Attribut de la fiche |
 |---|---|
@@ -1228,9 +1227,10 @@ blender/theatre_stage/library/fixtures/<id>/` (Python système, `zipfile` et
 | `CTC` | `cct` |
 | `Shutter1` (et `Shutter1Strobe…`) | `strobe` |
 | `Gobo1`, `Gobo2` | `gobo1`, `gobo2` |
-| `Gobo1Pos` | `gobo1_rot` |
+| `Gobo1Pos`, `Gobo2Pos` | `gobo1_rot`, `gobo2_rot` |
 | `Iris` | `iris` |
 | `Blade1A`, `Blade1B` … `Blade4A`, `Blade4B` | `blade_1a`, `blade_1b` … `blade_4a`, `blade_4b` |
+| `Blade1Rot` … `Blade4Rot` | `blade_1_rot` … `blade_4_rot` |
 | `BladeRot`, `ShaperRot` | `blade_rot` |
 
 **Complété à la main** (laissé à `null  # à compléter` quand obligatoire) :

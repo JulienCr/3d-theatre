@@ -27,11 +27,12 @@ MESH_PARTS = ("base", "yoke", "head")
 
 # Attribute vocabulary of spec 12.3. Any other lowercase name is kept as an unknown attribute.
 BLADE_ATTRIBUTES = tuple(f"blade_{n}{s}" for n in range(1, 5) for s in "ab")
+BLADE_SWIVEL_ATTRIBUTES = tuple(f"blade_{n}_rot" for n in range(1, 5))
 EMITTER_ATTRIBUTES = tuple(f"emitter_{n}" for n in range(1, 9))
 ATTRIBUTES = (
     "dimmer", "pan", "tilt", "zoom", "color_r", "color_g", "color_b", "color_w",
     "cyan", "magenta", "yellow", "cto", "cct", *EMITTER_ATTRIBUTES, "strobe", "gobo1", "gobo2",
-    "gobo1_rot", "iris", *BLADE_ATTRIBUTES, "blade_rot", "haze_density",
+    "gobo1_rot", "gobo2_rot", "iris", *BLADE_ATTRIBUTES, *BLADE_SWIVEL_ATTRIBUTES, "blade_rot", "haze_density",
 )
 _ATTRIBUTE_NAME = re.compile(r"[a-z0-9_]+")
 _ID = re.compile(r"[a-z0-9_]+")

@@ -34,9 +34,10 @@ ATTRIBUTE_MAP = {
     "ColorAdd_R": "color_r", "ColorAdd_G": "color_g", "ColorAdd_B": "color_b", "ColorAdd_W": "color_w",
     "ColorSub_C": "cyan", "ColorSub_M": "magenta", "ColorSub_Y": "yellow",
     "CTO": "cto", "CTC": "cct", "Shutter1": "strobe", "Shutter1Strobe": "strobe",
-    "Gobo1": "gobo1", "Gobo2": "gobo2", "Gobo1Pos": "gobo1_rot", "Iris": "iris",
+    "Gobo1": "gobo1", "Gobo2": "gobo2", "Gobo1Pos": "gobo1_rot", "Gobo2Pos": "gobo2_rot", "Iris": "iris",
     "BladeRot": "blade_rot", "ShaperRot": "blade_rot",
     **{f"Blade{n}{s}": f"blade_{n}{s.lower()}" for n in range(1, 5) for s in "AB"},
+    **{f"Blade{n}Rot": f"blade_{n}_rot" for n in range(1, 5)},
 }
 BEAM_TYPES = {"spot": "profile", "rectangle": "profile", "wash": "wash", "pc": "wash", "fresnel": "wash"}
 SCALES = (1.0, 0.001, 0.01, 0.0254)
