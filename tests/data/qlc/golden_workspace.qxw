@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE Workspace>
+<Workspace xmlns="http://www.qlcplus.org/Workspace" CurrentWindow="FixtureManager">
+ <Creator>
+  <Name>Q Light Controller Plus</Name>
+  <Version>4.14.3</Version>
+  <Author>theatre_stage</Author>
+ </Creator>
+ <Engine>
+  <InputOutputMap>
+   <BeatGenerator BeatType="Disabled" BPM="0"/>
+   <Universe Name="Univers 1" ID="0"/>
+  </InputOutputMap>
+  <Fixture>
+   <Manufacturer>Test</Manufacturer>
+   <Model>Mover</Model>
+   <Mode>Basic</Mode>
+   <ID>0</ID>
+   <Name>Mover_01</Name>
+   <Universe>0</Universe>
+   <Address>0</Address>
+   <Channels>3</Channels>
+  </Fixture>
+  <Fixture>
+   <Manufacturer>Test</Manufacturer>
+   <Model>PC LED</Model>
+   <Mode>2 Ch</Mode>
+   <ID>1</ID>
+   <Name>PC_01</Name>
+   <Universe>0</Universe>
+   <Address>3</Address>
+   <Channels>2</Channels>
+  </Fixture>
+  <FixtureGroup ID="0">
+   <Name>Movers</Name>
+   <Size X="1" Y="1"/>
+   <Head X="0" Y="0" Fixture="0">0</Head>
+  </FixtureGroup>
+  <FixtureGroup ID="1">
+   <Name>Circuit_A</Name>
+   <Size X="1" Y="1"/>
+   <Head X="0" Y="0" Fixture="1">0</Head>
+  </FixtureGroup>
+  <Palette ID="0" Type="PanTilt" Name="Repos_Mover_01" Value="271,58"/>
+  <Function ID="0" Type="Scene" Name="Repos - positions">
+   <Speed FadeIn="0" FadeOut="0" Duration="0"/>
+   <FixtureVal ID="0">0,128,1,64</FixtureVal>
+  </Function>
+  <Function ID="1" Type="Scene" Name="Repos - plein feu">
+   <Speed FadeIn="0" FadeOut="0" Duration="0"/>
+   <FixtureVal ID="0">0,128,1,64</FixtureVal>
+   <FixtureVal ID="1">0,255,1,64</FixtureVal>
+  </Function>
+ </Engine>
+ <VirtualConsole>
+  <Frame Caption="">
+   <Appearance>
+    <FrameStyle>Sunken</FrameStyle>
+    <ForegroundColor>Default</ForegroundColor>
+    <BackgroundColor>Default</BackgroundColor>
+    <BackgroundImage>None</BackgroundImage>
+    <Font>Default</Font>
+   </Appearance>
+  </Frame>
+  <Properties>
+   <Size Width="1920" Height="1080"/>
+   <GrandMaster ChannelMode="Intensity" ValueMode="Reduce"/>
+  </Properties>
+ </VirtualConsole>
+ <SimpleDesk>
+  <Engine/>
+ </SimpleDesk>
+</Workspace>

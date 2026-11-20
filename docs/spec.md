@@ -1783,70 +1783,110 @@ Dans `bpy.utils.extension_path_user(__package__, path="qlc", create=True)`,
 écrasés à chaque export, jamais dans `C:\QLC+` :
 
 - `theatre_rig.qxw` ;
-- `fixtures/<Fabricant>-<Modèle>.qxf` pour chaque fiche utilisée sans
-  définition QLC+ vérifiée (16.4) : Esprite, PC, Source Four, hazer.
+- `<Fabricant>-<Modèle>.qxf` **à côté du `.qxw`** pour chaque fiche utilisée
+  sans définition QLC+ vérifiée (16.4) : Esprite, PC, Source Four, hazer.
+  Les espaces du fabricant et du modèle deviennent des `-`.
 
-Les `.qxf` sont à copier dans le dossier de fixtures de l'utilisateur de
-QLC+ (`%USERPROFILE%\QLC+\Fixtures` *(à vérifier à l'installation)*) avant
-d'ouvrir le `.qxw` : sans définition installée, QLC+ charge l'appareil en
-générique. Le panneau affiche le dossier d'export et un bouton pour l'ouvrir.
+Pour un appareil inconnu de son cache, QLC+ cherche `<dossier du .qxw>/<Fabricant>-<Modèle>.qxf`
+(`Fixture::loadXML`, présent dans le moteur 4.14.3 installé) : **aucune copie
+n'est nécessaire**, il suffit de garder les `.qxf` à côté du `.qxw`. Pour les
+réutiliser dans d'autres projets, les copier dans le dossier de l'utilisateur,
+`%USERPROFILE%\QLC+\Fixtures` (dossier plat, vérifié sur la machine). Le panneau
+affiche le dossier d'export et un bouton pour l'ouvrir.
+
+Contrat de `core/qlc.py` (aucune dépendance à Blender) :
+
+- `PatchedFixture(name, fixture_id, mode, universe, address, group, pan_tilt=None,
+  rest_bytes=())` : univers et adresse **à base 1** (15.1) ; `pan_tilt` =
+  `(pan gros, pan fin, tilt gros, tilt fin)`, octets de 13.9 ; `rest_bytes` =
+  couples `(offset, octet)` des autres canaux au repos (15.2), offsets à base 1.
+- `export_workspace(patched, library, out_dir, qlc_fixture_dirs=()) ->
+  ExportResult(workspace, written_qxf, reused_qxf, warnings)` : écrit les
+  fichiers ; `warnings` en français (appareil ou fiche ignoré, recouvrement,
+  hors limites, définition QLC+ non réutilisable).
+- `workspace_xml(patched, library, qlc_fixture_dirs=())` et
+  `fixture_definition_xml(fixture, model=None)` rendent le texte, sans écrire.
+- Sortie déterministe : ordre du patch, pas d'horodatage, fins de ligne LF.
 
 ### 16.2 Contenu du `.qxw`
 
 Squelette et conventions du fichier de projet QLC+ (adresses et indices de
-canal à base 0, univers `ID = u − 1`) :
+canal à base 0, univers `ID = u − 1`), vérifiés dans les sources de QLC+
+(`app.cpp`, `doc.cpp`, `fixture.cpp`, `fixturegroup.cpp`, `qlcpalette.cpp`,
+`scene.cpp`) et par un chargement du fichier dans `qlcplus.exe` 4.14.3 :
 
-- `Creator` : `Q Light Controller Plus`, auteur `theatre_stage`.
-- `InputOutputMap` : un `Universe` par univers patché, `Name="Univers u"`,
-  sans plugin de sortie (l'utilisateur règle E1.31 / sACN dans QLC+).
+- Prologue `<!DOCTYPE Workspace>` (le chargeur le contrôle) ; `Creator` :
+  `Q Light Controller Plus`, auteur `theatre_stage`.
+- `InputOutputMap` : un `Universe` de 1 jusqu'au plus grand univers patché
+  (sans trou : QLC+ comble les trous sans nom), `Name="Univers u"`, sans
+  plugin de sortie (l'utilisateur règle E1.31 / sACN dans QLC+).
 - Un `Fixture` par appareil patché : `Manufacturer`, `Model`, `Mode`
   (définition QLC+ ou `.qxf` exporté), `ID` de 0 à n dans l'ordre du patch
-  (15.1), `Name` = nom de la racine, `Universe`, `Address = a − 1`,
-  `Channels = footprint`.
-- Un `FixtureGroup` par circuit et par famille de mobiles (15.1) :
-  `Name`, `Size X="n" Y="1"`, un `Head X="i" Y="0" Fixture="id"` par appareil,
-  contenu `0` (indice de tête).
+  (15.1), `Name` = nom de la racine, `Universe = u − 1`, `Address = a − 1`,
+  `Channels = footprint`. Un appareil hors de 1–512, recouvrant un autre, ou
+  dont la fiche ou le mode manque, n'est pas écrit (QLC+ le déplacerait ou le
+  refuserait sans le dire) et donne une alerte.
+- Un `FixtureGroup ID="g"` par circuit et par famille de mobiles (15.1), le
+  nom dans un **élément** `<Name>` : `Size X="n" Y="1"`, un
+  `Head X="i" Y="0" Fixture="id"` par appareil, contenu `0` (indice de tête).
 - Deux scènes (`Function Type="Scene"`) : `Repos - positions` (pan, pan fin,
   tilt, tilt fin de chaque mobile, octets de 12.4) et `Repos - plein feu`
-  (tous les canaux patchés à la valeur de repos, 15.2). Format
-  `FixtureVal ID="f"` : paires `indice,valeur`.
-- **Palette de position** : une palette `PanTilt` par mobile, nommée
-  `Repos_<racine>`, valeur `pan,tilt` (entiers 16 bits, 0–65535) *(à vérifier)*.
-  Une palette porte une seule valeur pour tous les appareils sélectionnés :
-  la visée de chaque mobile étant individuelle, c'est la scène
-  `Repos - positions` qui rappelle l'ensemble, les palettes servent à
-  rappeler un appareil seul *(choix)*.
+  (tous les canaux de `rest_bytes`, pan et tilt compris). Une scène sans
+  contenu n'est pas écrite. Format `FixtureVal ID="f"` : paires
+  `indice,valeur`, indices triés.
+- **Palettes de position** : un élément `<Palette ID="p" Type="PanTilt"
+  Name="Repos_<racine>" Value="pan,tilt"/>` par mobile, enfant de `Engine`
+  après les groupes (`qlcpalette.cpp`, `Doc::saveXML`). **`Value` est en degrés
+  entiers depuis le zéro DMX** (`Fixture::positionToValues` : `DMX = degrés ·
+  65535 / PanMax`, `PanMax` et `TiltMax` du bloc `Focus` de la définition ;
+  360 et 270 si 0), et non en entiers 16 bits : `Value="422,91"`, jamais
+  `51217,25855`. Précision limitée au demi-degré : la scène `Repos - positions`
+  reste la référence exacte, les palettes rappellent un appareil seul
+  *(choix)*. Le moteur 4.14.3 les charge et les réécrit ; seule l'interface
+  QML (QLC+ 5) les expose, l'interface classique 4.x les conserve sans les
+  afficher.
 - `VirtualConsole` : cadre racine vide, `SimpleDesk` vide.
-
-**Vérification de la grammaire avant d'écrire le code** (règle du projet de
-QLC+) : `FixtureGroup`, `Size`, `Head` et `Palette` (attributs `Type`, `Name`,
-`Value`) viennent de `fixturegroup.cpp` et `qlcpalette.cpp` ; le nom de
-l'élément `Palette`, son parent dans `Engine` et la plage des valeurs
-pan/tilt se confirment par un aller-retour dans l'interface de QLC+ (créer
-une palette, enregistrer, lire le fichier). Un nom d'élément faux est ignoré
-sans erreur.
 
 ### 16.3 `.qxf` écrit depuis la fiche
 
-Un `.qxf` par fiche, structure des définitions de QLC+ : `Creator`,
-`Manufacturer`, `Model`, `Type`, des `Channel`, un `Mode` par mode de la
-fiche, `Physical`.
+Un `.qxf` par fiche (tous ses modes), structure des définitions de QLC+ :
+`Creator`, `Manufacturer`, `Model`, `Type`, des `Channel`, un `Mode` par mode
+de la fiche, `Physical`.
 
 - `Type` : `Moving Head` (familles `moving_*`), `Color Changer` (`pc`,
-  `profile`), `Smoke` (`hazer`).
+  `profile`), `Hazer` (`hazer` ; `Smoke` existe aussi mais `Hazer` est le type
+  propre de QLC+).
 - `Channel` : un par offset ; un canal 16 bits donne deux canaux QLC+
-  (`<Nom>` et `<Nom> Fine`). Préréglages QLC+ employés quand ils existent :
-  `IntensityDimmer`, `IntensityRed`, `IntensityGreen`, `IntensityBlue`,
-  `PositionPan`, `PositionPanFine`, `PositionTilt`, `PositionTiltFine`,
-  `BeamZoomBigSmall`. Les autres (et tout attribut inconnu) : canal sans
-  préréglage, capacité unique `Min="0" Max="255"`, nom = attribut ; plages
-  du `strobe` et des `gobo` reprises de la fiche.
-- `Mode` : `Channel Number="n"` avec `n = offset − 1` (et celui du canal fin),
-  un seul `Head` listant tous les canaux.
+  (`<Nom>` et `<Nom> fin`). Noms en français, uniques dans un mode (un canal
+  ne peut figurer deux fois dans un mode) ; un nom déjà pris avec un autre
+  contenu reçoit un numéro. Préréglages QLC+ : `IntensityDimmer`,
+  `IntensityRed/Green/Blue/White`, `IntensityCyan/Magenta/Yellow`,
+  `PositionPan`, `PositionTilt` (et leurs `…Fine`), `BeamZoomSmallBig`
+  (`BeamZoomBigSmall` si `zoom_invert`) et `BeamZoomFine`,
+  `ShutterIrisMaxToMin`, `GoboIndex`, `ColorCTOMixer`. Les autres canaux sont
+  écrits sans préréglage dans leur groupe QLC+ (`cct`, `emitter_N` : `Colour` ;
+  `strobe` : `Shutter` ; `gobo1/2` : `Gobo` ; lames : `Beam` ; hazer :
+  `Effect` ; attribut inconnu : `Nothing`, capacité unique `0–255` nommée
+  d'après l'attribut). Un émetteur n'est **jamais** dans le groupe
+  `Intensity` : un canal d'intensité sans couleur y serait pris pour le
+  gradateur général de l'appareil.
+- Capacités : `strobe` reprend `open` (`ShutterOpen`), `closed`
+  (`ShutterClose`) et la rampe (`StrobeFreqRange`, `Res1`/`Res2` = Hz) ; une
+  roue de gobos donne une capacité par fente ; les trous de 0–255 sont comblés
+  par « Inutilisé » (QLC+ refuse les capacités qui se recouvrent). Les courbes
+  de canal ne sont pas exportées.
+- `Mode` : `Channel Number="n"` pour **tous** les offsets de 0 à
+  `footprint − 1` ; un offset que la fiche ne décrit pas reçoit un canal
+  `Inutilisé <offset>` (préréglage `NoFunction`), car l'adresse et le nombre
+  de canaux de QLC+ viennent du mode. **Pas d'élément `Head`** : sans lui QLC+
+  crée une tête qui porte tous les canaux et reconnaît le gradateur général
+  (`Fixture::setFixtureDefinition`) ; avec un `Head` explicite il ne le
+  reconnaît plus.
 - `Physical` : `Bulb` (`Lumens` = `optics.flux`), `Dimensions` (`Weight` en
   kg ; `Width`, `Height`, `Depth` en mm d'après `physical.dimensions`),
-  `Lens` (`DegreesMin`, `DegreesMax` d'après `field_angle`), `Focus` (`PanMax`,
-  `TiltMax` d'après les courses).
+  `Lens` (`DegreesMin`, `DegreesMax` d'après `field_angle`, ou les tubes),
+  `Focus` (`PanMax` = `pan.max − pan.min`, `TiltMax` de même : QLC+ compte
+  depuis le zéro DMX), `Technical`.
 
 ### 16.4 MAC Aura : contrôle contre QLC+
 
@@ -1866,6 +1906,17 @@ sans clé `qlc`, l'export écrit son propre `.qxf` ; il n'emploie jamais une
 définition de QLC+ qui n'a pas été vérifiée. Le patch par défaut de la
 famille `backlight` utilise le mode de la fiche qui correspond à `Standard`
 *(choix)*.
+
+L'export (`qlc_fixture_dirs` : `C:\QLC+\Fixtures`, puis `%USERPROFILE%\QLC+\Fixtures`)
+cherche la définition dans `<dossier>/<Fabricant_X>/<Fabricant-X>-<Modèle>.qxf`
+puis à plat, et la réutilise si la fiche a `qlc.verified`, si son mode figure
+dans `qlc.modes`, si la définition contient ce mode avec le même nombre de
+canaux ; sinon alerte et `.qxf` généré. Dans ce dernier cas, si QLC+ possède
+une définition de même fabricant et de même modèle, le modèle exporté est
+suffixé « (theatre_stage) » : QLC+ ignore une définition en double et ne
+retrouverait pas le mode de la fiche. Contrôle fait sur
+`C:\QLC+\Fixtures\Martin\Martin-MAC-Aura.qxf` : `Standard` 14 canaux,
+`Extended` 25, `Focus PanMax="539" TiltMax="231"`.
 
 ## 17. Hors périmètre v1
 

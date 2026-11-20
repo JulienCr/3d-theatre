@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE FixtureDefinition>
+<FixtureDefinition xmlns="http://www.qlcplus.org/FixtureDefinition">
+ <Creator>
+  <Name>Q Light Controller Plus</Name>
+  <Version>4.13.1 GIT</Version>
+  <Author>Test copy, trimmed from the QLC+ definition</Author>
+ </Creator>
+ <Manufacturer>Martin</Manufacturer>
+ <Model>MAC Aura</Model>
+ <Type>Moving Head</Type>
+ <Channel Name="Beam dimmer" Preset="IntensityDimmer"/>
+ <Channel Name="Pan" Preset="PositionPan"/>
+ <Channel Name="Tilt" Preset="PositionTilt"/>
+ <Mode Name="Standard">
+  <Channel Number="0">Beam dimmer</Channel>
+  <Channel Number="1">Pan</Channel>
+  <Channel Number="2">Tilt</Channel>
+ </Mode>
+ <Physical>
+  <Bulb Type="LED" Lumens="3850" ColourTemperature="9999"/>
+  <Dimensions Weight="5.6" Width="302" Height="302" Depth="361"/>
+  <Lens Name="Other" DegreesMin="11" DegreesMax="58"/>
+  <Focus Type="Head" PanMax="539" TiltMax="231"/>
+  <Technical PowerConsumption="245" DmxConnector="5-pin"/>
+ </Physical>
+</FixtureDefinition>
