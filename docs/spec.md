@@ -1572,7 +1572,12 @@ matériaux cherchés par nom.
   retenu), `pan_min`, `pan_max`, `tilt_min`, `tilt_max`, `cct_min`, `cct_max`,
   `cto_r`, `cto_g`, `cto_b`, `blade_open`, `blade_closed`, `blade_half_span`,
   `blade_rot_min`, `blade_rot_max`, `pan_invert`, `tilt_invert`, `blade_rot_invert`
-  (0 ou 1), `iris_min_ratio`.
+  (0 ou 1), `iris_min_ratio`, ainsi que `zoom_invert` (0 ou 1),
+  `blade_angle_limit`, `theatre_universe` et `theatre_address`. Trois valeurs
+  **pilotées** par des drivers qui ne lisent que la scène partagent leur
+  calcul entre plusieurs drivers : `level` (`dimmer · obturateur`, 14.7),
+  `field_now` et `beam_now` (champ et faisceau courants, 14.7). Une expression
+  de driver est limitée à 255 caractères : ces valeurs la tiennent.
 - Les drivers lisent la **scène** (`dmx_<u>_<c>`) et la **racine** (réglages
   ci-dessus) ; les objets ne se lisent jamais eux-mêmes.
 
@@ -1623,8 +1628,13 @@ un gobo, un iris ou `cct`. EEVEE ne le lit pas.
   lumières spot et surfaciques est à confirmer au premier rendu (11).*
 - Gobo : rotation de `p` par `β = gobo1_rot`, coordonnées image
   `0,5 + 0,5·p`, une `Image Texture` par fente (`CLIP`, linéaire, images de
-  `gobos/`). Nœud `Value` `GoboIndex` : somme des `Compare(index, k, 0,5)·
-  texture_k`. Fente sans image : 1.
+  `gobos/`). Chaque roue (`gobo1`, `gobo2`) est un **groupe de nœuds**
+  `TSN_<id>_<roue>` (entrées `Vector`, `Angle`, `Byte`, sortie `Color`), créé
+  une fois et réutilisé : somme des `Compare(octet, milieu_k, demi-largeur_k)·
+  texture_k`, l'octet étant borné à la dernière fente. Fente sans image : 1.
+  Le nœud de groupe de la lumière porte le nom de la roue ; ses entrées `Byte`
+  (`round(255·v)`) et `Angle` sont pilotées. Un profil IES est un texte interne
+  `TSF_<id>_<fichier>.ies`, relu une fois.
 - Iris : `Value` `IrisRadius = 1 − v·(1 − iris_min_ratio)` ; masque
   `Less Than(|p|, rayon)`.
 - Couleur blanche variable : nœud `Blackbody` de température `K` (attribut
@@ -1681,6 +1691,20 @@ colonne « Sans canal ».
     rendue.
 - Les drivers de nœuds sont portés par l'arbre de nœuds de la lumière : ce
   n'est pas l'objet, donc pas de cycle avec la racine.
+- `level = dimmer · shut` et, si le mode a `zoom`, `field_now = F(z)` et
+  `beam_now = B(z)` sont des propriétés de la racine pilotées par la scène (les
+  constantes de la fiche y sont écrites en clair). `Light.energy` vaut
+  `max_energy · level`, `spot_size` ou `spread` lit `field_now` ou `beam_now`.
+  Pour un spot à zoom, `energy` est multipliée par `(1 − cos(F_retenu/2)) /
+  (1 − cos(F/2))` : le flux reste constant quand le champ se resserre.
+- Un octet de strobe hors des plages `closed` et `strobe` de la fiche laisse
+  l'obturateur ouvert. Un mode qui a des lames motorisées et `blade_K_rot` lit
+  l'inclinaison de la lame K sur ce canal (`angle_limit·(1 − 2v)`) et n'utilise
+  `blade_Ka` que pour l'insertion.
+- Les lentilles partagent le seul `TS_Lens` : son émission lit les propriétés
+  `lens_level`, `lens_rgb` et `lens_kelvin` de l'objet `_Lens` (nœuds `Attribute`
+  de type objet), que des drivers pilotent comme la lumière. Un mode qui a `cct`
+  et des canaux RVB à zéro par défaut ajoute le RVB au blanc, normalisé à 1.
 
 ### 14.8 Lumens vers puissance Blender
 

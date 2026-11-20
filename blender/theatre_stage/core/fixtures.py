@@ -1081,3 +1081,19 @@ def cct_to_rgb(kelvin: float) -> tuple[float, float, float]:
     rgb = tuple(max(c, 0.0) for c in rgb)
     top = max(rgb)
     return tuple(c / top for c in rgb)
+
+
+# ------------------------------------------------------------- photometry
+
+# Starting values of spec 14.8, to be replaced by the Cycles calibration.
+W_PER_CD_SPOT = 4 * math.pi**2 / 683
+W_PER_LM_AREA = math.pi / 683
+EXPOSURE_GAIN = 1.0
+
+
+def max_energy(beam_type: str, flux: float, field_angle: float) -> float:
+    """Blender light power in W at full dimmer: spot from intensity over the field, area from flux."""
+    if beam_type == "profile":
+        solid_angle = 2 * math.pi * (1 - math.cos(math.radians(field_angle) / 2))
+        return EXPOSURE_GAIN * W_PER_CD_SPOT * flux / solid_angle
+    return EXPOSURE_GAIN * W_PER_LM_AREA * flux

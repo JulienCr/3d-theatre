@@ -10,7 +10,7 @@ import bpy
 import numpy as np
 from mathutils import Vector
 
-from . import atmosphere, materials
+from . import atmosphere, materials, rigbuild
 from .core.layout import Layout, compute_layout
 from .core.meshes import Mesh, build_mesh, pleated_mesh
 from .core.primitives import Light, PleatedSurface, Tube
@@ -26,7 +26,7 @@ FABRIC_THICKNESS = 0.003
 
 ROUGHNESS = {
     "TS_StageFloor": 0.35, "TS_Masking": 0.95, "TS_MainCurtain": 0.9, "TS_Cyclorama": 0.8,
-    "TS_Enclosure": 0.85, "TS_HouseFloor": 0.7,
+    "TS_Enclosure": 0.85, "TS_HouseFloor": 0.7, "TS_Fixture": 0.55, "TS_Lens": 0.05,
 }
 
 _layout_cache: tuple[str, Layout] | None = None
@@ -153,7 +153,8 @@ def _upgrade_haze_material(mat: bpy.types.Material, scene: bpy.types.Scene) -> N
         _setup_haze_material(mat, scene)
 
 
-MATERIAL_SETUP = {"TS_HouseCeiling": _setup_ceiling_material, "TS_Haze": _setup_haze_material}
+MATERIAL_SETUP = {"TS_HouseCeiling": _setup_ceiling_material, "TS_Haze": _setup_haze_material,
+                  "TS_Lens": rigbuild.setup_lens_material}
 MATERIAL_UPGRADE = {"TS_Haze": _upgrade_haze_material}
 
 
@@ -339,6 +340,8 @@ def _rebuild(scene: bpy.types.Scene, params: dict) -> Layout:
         _make_geometry(primitive, scene, collections, slot_materials)
     for spec in layout.lights:
         _make_light(spec, collections)
+    rigbuild.build_rig(scene, layout, collections, _new_mesh,
+                       lambda name: chosen.get(name) or get_material(name, layout.materials, scene))
     cameras = {spec.name: _make_camera(spec, collections) for spec in layout.cameras}
     atmosphere.apply(scene, params, layout)
 

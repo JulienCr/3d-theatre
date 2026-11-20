@@ -1,4 +1,5 @@
 import copy
+import math
 import shutil
 from pathlib import Path
 
@@ -436,3 +437,11 @@ def test_etc_fixtures_expose_per_tube_optics_and_the_stepped_cct_table():
         assert cct.physical(165 / 255) == pytest.approx(6000, abs=0.01)
         assert cct.physical(254 / 255) == pytest.approx(10450, abs=0.01)
         assert fixture.channel("cct", "Studio 16bit").curve == cct.curve
+
+
+def test_max_energy_takes_the_spot_from_intensity_and_the_wash_from_flux():
+    omega = 2 * math.pi * (1 - math.cos(math.radians(30) / 2))
+    assert F.max_energy("profile", 10000, 30) == pytest.approx(F.EXPOSURE_GAIN * F.W_PER_CD_SPOT * 10000 / omega)
+    assert F.max_energy("wash", 10000, 30) == pytest.approx(F.EXPOSURE_GAIN * F.W_PER_LM_AREA * 10000)
+    assert F.max_energy("profile", 10000, 15) > F.max_energy("profile", 10000, 30)
+    assert F.max_energy("wash", 10000, 15) == F.max_energy("wash", 10000, 30)
