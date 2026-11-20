@@ -1,5 +1,9 @@
 # Backlog
 
+- **Générateur de plan de feu.** Produire le plan de feu de l'implantation :
+  perches, porteuses et pylônes, chaque projecteur à sa place avec son nom,
+  son circuit, son univers et son adresse DMX.
+
 - **Projecteurs en perroquet.** Accrocher des appareils aux porteuses de
   pendrillonnage et en des points libres (perroquet), en plus de
   l'implantation fixe de la section 13 de `docs/spec.md`.
