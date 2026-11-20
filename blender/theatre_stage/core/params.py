@@ -333,7 +333,7 @@ SCHEMA: tuple[Group, ...] = (
                   ("auto", "Calculée", "La plus haute hauteur dont aucun faisceau ne rencontre un appareil."),
                   ("manual", "Manuelle", "Hauteur imposée par « Hauteur de la perche des mobiles »."),
               )),
-        _length("movers_z", 6.75, 2.0, 15.0, "Hauteur manuelle",
+        _length("movers_z", 6.80, 2.0, 15.0, "Hauteur manuelle",
                 "Hauteur de la seconde perche, mode manuel.",
                 shown_when=("movers_height_mode", "manual")),
     )),

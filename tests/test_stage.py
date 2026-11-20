@@ -188,8 +188,9 @@ def test_light_battens_exist_and_are_numbered_without_gaps():
         assert tube.start[0] == pytest.approx(-6.9) and tube.end[0] == pytest.approx(6.9)
         assert tube.start[2] == pytest.approx(1.2 + 6.1 - 0.5) and tube.radius == pytest.approx(0.024)
     last_plane = lay.find("MaskingBatten_03").start[1]
-    assert ys == pytest.approx([2.1, 3.1, (last_plane + lay.derived.backdrop_y) / 2])
-    assert "Batten_04" not in lay.names()
+    front = lay.find("MaskingBatten_00").start[1]
+    assert ys == pytest.approx([2.1, front + 0.30, 3.1, (last_plane + lay.derived.backdrop_y) / 2])
+    assert "Batten_05" not in lay.names()
 
 
 def test_light_battens_without_any_neighbour_follow_spacing_and_back_margin():

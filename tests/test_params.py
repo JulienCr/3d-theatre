@@ -137,7 +137,7 @@ def test_lighting_defaults_match_the_spec_tables():
     d = P.default_params()
     assert d["rig"] == {"enabled": True, "aim_height": 1.7, "site": 45.0, "area_depth": 6.0}
     assert d["rig_front"] == {"ceiling_gap": 0.3, "auto_position": True, "y": -1.4, "movers_offset": 1.5,
-                              "movers_height_mode": "auto", "movers_z": 6.75}
+                              "movers_height_mode": "auto", "movers_z": 6.8}
     assert d["backlight"] == {"enabled": True, "fixture": "martin_mac_aura", "mode": "default",
                               "count": 6, "position": "upstage", "distance": 3.1}
     assert (d["front_movers"]["fixture"], d["front_movers"]["count"]) == ("robe_robin_esprite", 4)

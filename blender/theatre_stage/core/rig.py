@@ -19,11 +19,12 @@ from .fixtures import (
 )
 from .fixture_models import fixture_model
 from .layout import (
-    BATTEN_RADIUS, EPS, PROSCENIUM_RECESS, Ctx, Part, _metres, _nn, _polys_overlap,
-    _side_stair,
+    BATTEN_CLEARANCE, BATTEN_RADIUS, EPS, PLEAT_AMPLITUDE, PROSCENIUM_RECESS, Ctx, Part, _masking,
+    _metres, _nn, _polys_overlap, _side_stair,
 )
+from .meshes import MAX_DEPTH_FACTOR
 from .params import FIXTURE, GROUPS, PATCH_FAMILIES, side_sets
-from .primitives import Truss, Tube
+from .primitives import PleatedSurface, Truss, Tube
 
 RIG_COLLECTION = "Theatre_Rig"
 FIXTURES_COLLECTION = "Theatre_Fixtures"
@@ -48,7 +49,7 @@ LISTED_NAMES = 4
 MAX_PATCH_ALERTS = 8
 MAX_CHANNEL = 512
 AZIMUTH_STEP = 0.5
-AZIMUTH_SEARCH = 10.0
+AZIMUTH_SEARCH = 30.0
 FOOTPRINT_MARGIN = 0.02
 PIPE2_NAME = "FrontPipe_02"
 HEIGHT_STEP = 0.05
@@ -59,6 +60,12 @@ BEAM_NEAR = 0.50
 MAX_BEAM_ALERTS = 8
 GRID_X = (-0.5, 0.0, 0.5)
 GRID_Y = (0.0, 0.5, 1.0)
+WALL_TILE = 1.0
+WALL_STEP = 0.15
+LEG_GRAZE = 0.30
+MASK_CONE = 0.5
+GOLDEN = 0.6180339887498949
+GOLDEN_STEPS = 24
 _MODEL_ERRORS = (OSError, ValueError, KeyError, IndexError, struct.error)
 
 FAMILY_LABELS = {
@@ -210,8 +217,9 @@ class HazeLink:
 class RigDims:
     """Panel values of spec 13.10; `profiles` is (name, tube, field), `patch_ranges` (family, u, first, last).
 
-    `pc_azimuths` is the crossing azimuth used by each hung PC row. The `movers_*` fields are
-    None without a second pipe; `beam_clearance` is the smallest beam gap found (spec 13.11).
+    `pc_azimuths` is the crossing azimuth used by each hung PC row, `pc_supports` its (tube, site).
+    The `movers_*` fields are None without a second pipe; `beam_clearance` and `masking_clearance`
+    are the smallest beam gaps to a fixture and to a border or leg (spec 13.11).
     """
 
     pipe_y: float
@@ -225,6 +233,8 @@ class RigDims:
     movers_pipe_z: float | None = None
     mover_radius: float | None = None
     beam_clearance: float | None = None
+    pc_supports: tuple[tuple[str, float], ...] = ()
+    masking_clearance: float | None = None
 
 
 @dataclass(frozen=True)
@@ -358,10 +368,12 @@ class _Work:
         self.objects: list = []
         self.zones, self.za, self.ya = zones, za, ya
         self.azimuths: list[float] = []
+        self.row_supports: list[tuple[str, float]] = []
         self.models: dict = {}
         self.boxes: dict = {}
         self.envelopes: dict = {}
         self.mover_radius: float | None = None
+        self.walls: tuple[_Wall, ...] = ()
         self.uncovered: list[tuple[str, float, float]] = []
         self.too_wide: list[tuple[str, float, float]] = []
 
@@ -661,6 +673,53 @@ def _row_azimuth(w: _Work, tube: _Support, yr: float, nominal: float, sheet: _Sh
     return None
 
 
+def _site(w: _Work, tube: _Support, yr: float, azimuth: float) -> float:
+    """Site (elevation, degrees) of a row hung on `tube` for the crossing azimuth (spec 13.2)."""
+    return math.degrees(math.atan2(tube.z - w.za, (yr - tube.y) / math.cos(math.radians(azimuth))))
+
+
+def _pc_beam(w: _Work, sheet: _Sheet, name: str, tube: _Support, x: float, zone: tuple[float, float]) -> _Beam:
+    """Beam of a face PC hung at `x` on `tube` and aimed at `zone`, as `_build_fixture` will make it."""
+    optics, mount = sheet.optics, sheet.mount
+    pivot = (x, tube.y, tube.z - mount.hook_height - mount.tilt_axis_height)
+    target = (zone[0], zone[1], w.za)
+    axis = _unit(_sub(target, pivot))
+    lens, field_angle, _ = _fit_field(optics, _wash_required(w, zone, w.za, pivot, axis), 1.0)
+    source_z = _source(optics, lens, field_angle)[1]
+    return _make_beam(name, target, _add(pivot, _mul(axis, source_z)), axis, field_angle,
+                      optics.lens_offset - source_z)
+
+
+def _row_gap(w: _Work, sheet: _Sheet, tube: _Support, yr: float, azimuth: float) -> float:
+    """Smallest gap between the beams of a PC row and the borders and legs (inf when far from all)."""
+    zones, beams = w.zones, []
+    for tag, i, x in _row_x(zones, yr - tube.y, azimuth):
+        x = math.copysign(min(abs(x), tube.limit), x)
+        beams.append(_pc_beam(w, sheet, f"{tag}{i}", tube, x, (zones.xs[i], yr)))
+    return min((g for *_, g in _wall_gaps(beams, w.walls)), default=math.inf)
+
+
+def _row_tube(w: _Work, j: int, yr: float, drop_auto: float, sheet: _Sheet,
+              on_tube: dict[str, list[tuple[float, float]]]) -> _Support | None:
+    """Hang line of row `j >= 1` (spec 13.7), among the light battens short of the zone. A batten
+    that fits (an azimuth exists, the beams clear the masking) beats one that does not; then one
+    upstage of the front border beats one downstage; then the nearest to the nominal site.
+    With no batten short of the zone, the nearest to the ADEC drop."""
+    c, nominal = w.c, w.c.p["front_pc"]["azimuth"]
+    floor = c.plan.front_plane + BATTEN_CLEARANCE - EPS if c.p["masking"]["front_border"] else -math.inf
+    options = [_batten(c, i) for i, y in enumerate(c.light_batten_ys) if yr - y >= MIN_ROW_DROP - EPS]
+    if not options:
+        index = 0 if j == 1 and c.light_batten_ys else _nearest_batten(c, yr - drop_auto)
+        return None if index is None else _batten(c, index)
+    scored = []
+    for tube in options:
+        azimuth = _row_azimuth(w, tube, yr, nominal, sheet, on_tube.get(tube.name, []))
+        site = abs(_site(w, tube, yr, nominal if azimuth is None else azimuth) - c.p["rig"]["site"])
+        fits = azimuth is not None and _row_gap(w, sheet, tube, yr, azimuth) >= BEAM_MARGIN
+        scored.append((not fits, tube.y < floor, site, tube))
+    return min(scored, key=lambda t: t[:3])[3]
+
+
 def _plan_front_pc(w: _Work, zones: Zones, za: float, pipe: _Support, drop_auto: float) -> None:
     c, node = w.c, w.c.p["front_pc"]
     if not node["enabled"] or (sheet := w.sheet("front_pc", node)) is None:
@@ -669,12 +728,9 @@ def _plan_front_pc(w: _Work, zones: Zones, za: float, pipe: _Support, drop_auto:
     for j, yr in enumerate(zones.ys):
         if j == 0:
             tube = pipe
-        else:
-            index = 0 if j == 1 and c.light_batten_ys else _nearest_batten(c, yr - drop_auto)
-            if index is None:
-                w.warn(f"Rang {j + 1} : aucune porteuse lumière, rang non posé.")
-                continue
-            tube = _batten(c, index)
+        elif (tube := _row_tube(w, j, yr, drop_auto, sheet, on_tube)) is None:
+            w.warn(f"Rang {j + 1} : aucune porteuse lumière, rang non posé.")
+            continue
         drop = yr - tube.y
         if drop < MIN_ROW_DROP - EPS:
             w.warn(f"Rang {j + 1} : porteuse trop en arrière de la zone.")
@@ -686,6 +742,7 @@ def _plan_front_pc(w: _Work, zones: Zones, za: float, pipe: _Support, drop_auto:
             w.warn(f"Rang {j + 1} : aucun azimut à ±{AZIMUTH_SEARCH:g}° de {azimuth:g}° n'évite "
                    f"que des PC se touchent sur {tube.label} ou sortent de leur champ.")
         w.azimuths.append(azimuth)
+        w.row_supports.append((tube.name, _site(w, tube, yr, azimuth)))
         for tag, i, x in _row_x(zones, drop, azimuth):
             name = f"FrontPC_{tag}_{_nn(j * zones.nx + i + 1)}"
             x = _clamp_x(w, name, x, tube)
@@ -1383,9 +1440,14 @@ def _body_gap(beam: _Beam, body: _Body) -> float | None:
     A body farther than `BEAM_NEAR` from the cone is skipped (`_cone_gap` is 1-Lipschitz)."""
     if _cone_gap(beam, body.centre) - body.radius >= BEAM_NEAR:
         return None
+    return _min_gap(beam, body.points)
+
+
+def _min_gap(beam: _Beam, points) -> float | None:
+    """Smallest cone gap of the points that lie between the lens and the end of the beam."""
     (ox, oy, oz), (ax, ay, az), cos, sin = beam.apex, beam.axis, beam.cos, beam.sin
     best = None
-    for x, y, z in body.points:
+    for x, y, z in points:
         x, y, z = x - ox, y - oy, z - oz
         a = x * ax + y * ay + z * az
         if a <= beam.start or a > beam.length:
@@ -1394,6 +1456,152 @@ def _body_gap(beam: _Beam, body: _Body) -> float | None:
         if best is None or gap < best:
             best = gap
     return best
+
+
+@dataclass(frozen=True)
+class _Tile:
+    """A piece of a border: the sphere around it and sample `points` of its mid surface."""
+
+    centre: Vec3
+    radius: float
+    points: tuple[Vec3, ...]
+
+
+@dataclass(frozen=True)
+class _Wall:
+    """A border (cut into `tiles`, pleat depth as thickness) or a leg (path `a` inner end to `b`, flat,
+    no tiles) as a vertical wall between `z0` and `z1`; `low` and `high` bound it (spec 13.11)."""
+
+    name: str
+    a: tuple[float, float]
+    b: tuple[float, float]
+    z0: float
+    z1: float
+    half: float
+    low: Vec3
+    high: Vec3
+    tiles: tuple[_Tile, ...] = ()
+
+    @property
+    def is_leg(self) -> bool:
+        return self.name.startswith("Leg_")
+
+
+def _walls(c: Ctx) -> tuple[_Wall, ...]:
+    """The borders and legs drawn by the masking; borders are cut into tiles of `WALL_TILE` metres."""
+    walls = []
+    for o in _masking(c).objects:
+        if not isinstance(o, PleatedSurface) or not o.name.startswith(("Border_", "Leg_")):
+            continue
+        half = PLEAT_AMPLITUDE * MAX_DEPTH_FACTOR if o.name.startswith("Border_") else 0.0
+        (x0, y0), (x1, y1) = o.state.p0, o.state.p1
+        tiles = []
+        if o.name.startswith("Border_"):
+            nu = max(1, math.ceil(math.hypot(x1 - x0, y1 - y0) / WALL_TILE - EPS))
+            nz = max(1, math.ceil((o.z1 - o.z0) / WALL_TILE - EPS))
+            for i in range(nu):
+                a = (x0 + (x1 - x0) * i / nu, y0 + (y1 - y0) * i / nu)
+                b = (x0 + (x1 - x0) * (i + 1) / nu, y0 + (y1 - y0) * (i + 1) / nu)
+                for k in range(nz):
+                    z0, z1 = o.z0 + (o.z1 - o.z0) * k / nz, o.z0 + (o.z1 - o.z0) * (k + 1) / nz
+                    centre = ((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (z0 + z1) / 2)
+                    tiles.append(_Tile(centre, math.hypot(math.dist(a, b) / 2, (z1 - z0) / 2, half),
+                                       tuple(_tile_points(a, b, z0, z1))))
+        low = (min(x0, x1) - half, min(y0, y1) - half, o.z0)
+        high = (max(x0, x1) + half, max(y0, y1) + half, o.z1)
+        walls.append(_Wall(o.name, (x0, y0), (x1, y1), o.z0, o.z1, half, low, high, tuple(tiles)))
+    return tuple(walls)
+
+
+def _tile_points(a, b, z0: float, z1: float):
+    """Samples of a tile's mid surface, every `WALL_STEP` along the path and in height."""
+    length = math.dist(a, b)
+    nu = max(1, math.ceil(length / WALL_STEP - EPS))
+    nz = max(1, math.ceil((z1 - z0) / WALL_STEP - EPS))
+    for i in range(nu + 1):
+        for k in range(nz + 1):
+            yield (a[0] + (b[0] - a[0]) * i / nu, a[1] + (b[1] - a[1]) * i / nu, z0 + (z1 - z0) * k / nz)
+
+
+def _core(beam: _Beam) -> _Beam:
+    """The beam narrowed to `MASK_CONE` of its half angle: the bright core met by a border."""
+    half = math.atan2(beam.sin, beam.cos) * MASK_CONE
+    return replace(beam, cos=math.cos(half), sin=math.sin(half))
+
+
+def _border_gap(beam: _Beam, wall: _Wall) -> float | None:
+    """Cone gap to the mid surface of a border, less its half thickness."""
+    best = None
+    for tile in wall.tiles:
+        if _cone_gap(beam, tile.centre) - tile.radius >= BEAM_NEAR:
+            continue
+        gap = _min_gap(beam, tile.points)
+        if gap is not None and (best is None or gap < best):
+            best = gap
+    return None if best is None else best - wall.half
+
+
+def _leg_gap(beam: _Beam, wall: _Wall) -> float:
+    """Signed distance (negative inside) from the aim line to a leg whose inner end is pulled back
+    by `LEG_GRAZE`. The distance to a box is convex along a line: golden-section search."""
+    (x0, y0), (x1, y1) = wall.a, wall.b
+    length = math.hypot(x1 - x0, y1 - y0)
+    ux, uy = (x1 - x0) / length, (y1 - y0) / length
+    ax, ay, az = _add(beam.apex, _mul(beam.axis, beam.start))
+    span = beam.length - beam.start
+    dx, dy, dz = (c * span for c in beam.axis)
+
+    def gap(t: float) -> float:
+        px, py, pz = ax + dx * t - x0, ay + dy * t - y0, az + dz * t
+        u, v = px * ux + py * uy, abs(-px * uy + py * ux)
+        du, dz_ = max(LEG_GRAZE - u, u - length), max(wall.z0 - pz, pz - wall.z1)
+        if du < 0 and v < 0 and dz_ < 0:
+            return max(du, v, dz_)
+        return math.hypot(max(du, 0.0), v, max(dz_, 0.0))
+
+    lo, hi = 0.0, 1.0
+    t1, t2 = hi - GOLDEN * (hi - lo), lo + GOLDEN * (hi - lo)
+    g1, g2 = gap(t1), gap(t2)
+    for _ in range(GOLDEN_STEPS):
+        if g1 < g2:
+            hi, t2, g2 = t2, t1, g1
+            t1 = hi - GOLDEN * (hi - lo)
+            g1 = gap(t1)
+        else:
+            lo, t1, g1 = t1, t2, g2
+            t2 = lo + GOLDEN * (hi - lo)
+            g2 = gap(t2)
+    return min(g1, g2, gap(0.0), gap(1.0))
+
+
+def _masked_by(leg: _Wall, target: Vec3) -> bool:
+    """Whether the target lies on the wing side of the leg's inner end, out of the visible stage."""
+    inner = min(abs(leg.a[0]), abs(leg.b[0]))
+    return target[0] * leg.a[0] > 0 and abs(target[0]) >= inner
+
+
+def _wall_gap(beam: _Beam, wall: _Wall) -> float | None:
+    """Gap of a beam to a border (bright core cone) or a leg (aim line), None when `BEAM_NEAR` away."""
+    if wall.is_leg and _masked_by(wall, beam.target):
+        return None
+    beam = beam if wall.is_leg else _core(beam)
+    length = max(beam.length, 0.0)
+    end = _add(beam.apex, _mul(beam.axis, length))
+    reach = (0.0 if wall.is_leg else length * beam.sin / beam.cos) + BEAM_NEAR
+    for i in range(3):
+        if (max(beam.apex[i], end[i]) + reach < wall.low[i]
+                or min(beam.apex[i], end[i]) - reach > wall.high[i]):
+            return None
+    return _leg_gap(beam, wall) if wall.is_leg else _border_gap(beam, wall)
+
+
+def _wall_gaps(beams: list[_Beam], walls) -> list[tuple[_Beam, str, float]]:
+    return [(beam, wall.name, gap) for beam in beams for wall in walls
+            if (gap := _wall_gap(beam, wall)) is not None]
+
+
+def _wall_label(name: str) -> str:
+    return f"{'le pendrillon' if name.startswith('Leg_') else 'la frise'} {name}"
 
 
 def _gaps(beams: list[_Beam], bodies: list[_Body]) -> list[tuple[_Beam, _Body, float]]:
@@ -1443,11 +1651,12 @@ def _movers_height(w: _Work, pipe: _Support, slots, built: Mapping[str, RigFixtu
         for s in movers:
             s.z = z
         beams, bodies = _scene(w, movers, built)
-        gaps = _gaps(beams, fixed + bodies) + _gaps(fixed_beams, bodies)
-        failed = len(_reach_hits(bodies, fixed + bodies)) + sum(g < BEAM_MARGIN for *_, g in gaps)
+        gaps = [g for *_, g in _gaps(beams, fixed + bodies) + _gaps(fixed_beams, bodies)]
+        gaps += [g for *_, g in _wall_gaps(beams, w.walls)]
+        failed = len(_reach_hits(bodies, fixed + bodies)) + sum(g < BEAM_MARGIN for g in gaps)
         if not failed:
             return z
-        score = (failed, -min((g for *_, g in gaps), default=0.0))
+        score = (failed, -min(gaps, default=0.0))
         if score < best_score:
             best_score, best_z = score, z
     w.warn(f"Perche des mobiles de face : aucune hauteur de {_metres(pipe.z)} à {_metres(low)} ne "
@@ -1459,20 +1668,27 @@ def _point(p: Vec3) -> str:
     return "(" + " ; ".join(f"{v:.2f}".replace(".", ",") for v in p) + ")"
 
 
-def _clearance_alerts(w: _Work, slots, built: Mapping[str, RigFixture]) -> float | None:
-    """Alert on every beam closer than the margin to a body and on every envelope that meets one
-    (spec 13.11); returns the smallest beam gap found."""
-    beams, bodies = _scene(w, slots, built)
-    gaps = _gaps(beams, bodies)
-    failing = sorted((g for g in gaps if g[2] < BEAM_MARGIN), key=lambda g: g[2])
-    for beam, body, gap in failing[:MAX_BEAM_ALERTS]:
-        w.warn(f"Faisceau de {beam.owner} vers {_point(beam.target)} gêné par {body.name} : jeu "
+def _beam_alerts(w: _Work, hits, noun: str) -> None:
+    """One alert per beam closer than the margin (the worst `MAX_BEAM_ALERTS`, then a count)."""
+    failing = sorted((h for h in hits if h[2] < BEAM_MARGIN), key=lambda h: h[2])
+    for beam, name, gap in failing[:MAX_BEAM_ALERTS]:
+        w.warn(f"Faisceau de {beam.owner} vers {_point(beam.target)} gêné par {name} : jeu "
                f"{_metres(gap)} pour {_metres(BEAM_MARGIN)} minimum.")
     if len(failing) > MAX_BEAM_ALERTS:
-        w.warn(f"Faisceaux : {len(failing) - MAX_BEAM_ALERTS} autres gênés par un appareil.")
+        w.warn(f"Faisceaux : {len(failing) - MAX_BEAM_ALERTS} autres gênés par {noun}.")
+
+
+def _clearance_alerts(w: _Work, slots, built: Mapping[str, RigFixture]) -> tuple[float | None, float | None]:
+    """Alert on every beam closer than the margin to a body, a border or a leg, and on every
+    envelope that meets a body (spec 13.11); returns the smallest gap to a body and to the masking."""
+    beams, bodies = _scene(w, slots, built)
+    gaps = _gaps(beams, bodies)
+    _beam_alerts(w, [(b, body.name, g) for b, body, g in gaps], "un appareil")
+    walls = _wall_gaps(beams, w.walls)
+    _beam_alerts(w, [(b, _wall_label(name), g) for b, name, g in walls], "une frise ou un pendrillon")
     for a, b in _reach_hits(bodies, bodies):
         w.warn(f"Débattement de pan et tilt : {a.name} et {b.name} se touchent.")
-    return min((g for *_, g in gaps), default=None)
+    return (min((g for *_, g in gaps), default=None), min((g for *_, g in walls), default=None))
 
 
 # ----------------------------------------------------------- patch and totals
@@ -1572,6 +1788,7 @@ def compute_rig(c: Ctx, library: Library) -> tuple[Rig, Part]:
     ya = min(rg["area_depth"], c.plan.yb)
     zones = _zones(c, ya)
     w = _Work(c, library, zones, za, ya)
+    w.walls = _walls(c)
     if rg["area_depth"] > c.plan.yb + EPS:
         w.warn(f"Zone de jeu raccourcie : {_metres(rg['area_depth'])} demandés, le fond est à "
                f"{_metres(c.plan.yb)}.")
@@ -1600,7 +1817,7 @@ def compute_rig(c: Ctx, library: Library) -> tuple[Rig, Part]:
                 s.z = pipe2.z
     built.update({s.name: _build_fixture(w, s, levels, done) for s in slots if s.family == "front_movers"})
     fixtures = [built[s.name] for s in slots]
-    clearance = _clearance_alerts(w, slots, built)
+    clearance, masking_clearance = _clearance_alerts(w, slots, built)
     _field_alerts(w)
     entries = [PatchEntry(f.name, f.family, f.universe, f.address, f.footprint) for f in fixtures]
     _check_patch(w, entries)
@@ -1616,7 +1833,8 @@ def compute_rig(c: Ctx, library: Library) -> tuple[Rig, Part]:
     profiles = tuple((f.name, f.tube, f.field_angle) for f in fixtures
                      if f.family == "profiles" and f.field_angle is not None)
     dims = RigDims(pipe.y, pipe.z, ya, drop, profiles, ranges, tuple(w.azimuths),
-                   pipe2.y if pipe2 else None, pipe2.z if pipe2 else None, w.mover_radius, clearance)
+                   pipe2.y if pipe2 else None, pipe2.z if pipe2 else None, w.mover_radius, clearance,
+                   tuple(w.row_supports), masking_clearance)
     rig = Rig(True, zones, tuple(fixtures), tuple(entries), _rest_map(fixtures), _loads(fixtures),
               tuple((k, tuple(v)) for k, v in circuits.items()), _haze_link(w, fixtures), dims,
               tuple(w.warnings))

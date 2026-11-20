@@ -11,7 +11,8 @@ from core.fixtures import EMPTY_LIBRARY, Range, cct_to_rgb, discover
 from core.layout import _make_context, compute_layout
 from core.presets import read_preset, shipped_presets
 from core.rig import (
-    BEAM_MARGIN, FOOTPRINT_MARGIN, HEIGHT_STEP, _Boxes, _cloud, _gaps, _make_beam, aim_angles, compute_rig,
+    AZIMUTH_SEARCH, BEAM_MARGIN, FOOTPRINT_MARGIN, HEIGHT_STEP, _Boxes, _cloud, _gaps, _make_beam, _walls, _wall_gaps,
+    aim_angles, compute_rig,
     default_library, head_frame, posed_points, spread,
 )
 from core.params import default_params
@@ -179,7 +180,7 @@ def test_pc_cross_at_azimuth_with_parallel_beams():
         heading = math.degrees(math.atan2(f.aim[0] - f.pivot[0], f.aim[1] - f.pivot[1]))
         assert heading == pytest.approx(-side * azimuth)
         assert f.aim == pytest.approx((z.xs[col], z.ys[row], 2.9))
-    assert {f.support for f in pcs(rig)} == {"FrontPipe", "Batten_01"}
+    assert {f.support for f in pcs(rig)} == {"FrontPipe", "Batten_02"}
     first = rig.find("FrontPC_L_01")
     assert first.hang[0] == pytest.approx(-3.75 - 2.90, abs=0.01)
 
@@ -225,13 +226,13 @@ def overlapping(rig, library):
 
 
 def test_row_azimuth_moves_off_the_nominal_to_free_the_shared_tube():
-    # At the nominal 45 degrees, FrontPC_L_07 and FrontPC_R_05 hang 0.2 m apart on Batten_01.
+    # At the nominal 45 degrees, FrontPC_L_06 and FrontPC_R_05 hang too close on Batten_02.
     nominal = 45.0
-    rig = rig_of(front_pc={"azimuth": nominal})
+    rig = compute_layout(make(front_pc={"azimuth": nominal})).rig
     assert rig.dims.pc_azimuths[0] == nominal
-    assert rig.dims.pc_azimuths[1] != nominal and abs(rig.dims.pc_azimuths[1] - nominal) <= 10.0
-    assert not overlapping(rig, LIB)[0] and not has(rig.warnings, "se touchent")
-    row = [f for f in pcs(rig) if f.support == "Batten_01"]
+    assert rig.dims.pc_azimuths[1] != nominal and abs(rig.dims.pc_azimuths[1] - nominal) <= AZIMUTH_SEARCH
+    assert not overlapping(rig, default_library())[0] and not has(rig.warnings, "se touchent")
+    row = [f for f in pcs(rig) if f.support == "Batten_02"]
     for side in "LR":
         headings = {round(math.degrees(math.atan2(f.aim[0] - f.pivot[0], f.aim[1] - f.pivot[1])), 6)
                     for f in row if f"_{side}_" in f.name}
@@ -240,9 +241,9 @@ def test_row_azimuth_moves_off_the_nominal_to_free_the_shared_tube():
 
 def test_row_azimuth_alerts_and_keeps_the_nominal_when_nothing_fits():
     pc = LIB.get("rig_pc")
-    body = replace(pc.model3d.body, width=2.4)
+    body = replace(pc.model3d.body, width=6.0)
     wide = replace(pc, model3d=replace(pc.model3d, body=body),
-                   physical=replace(pc.physical, dimensions=replace(pc.physical.dimensions, width=2.4)))
+                   physical=replace(pc.physical, dimensions=replace(pc.physical.dimensions, width=6.0)))
     lib = replace(LIB, fixtures={**LIB.fixtures, "rig_pc": wide})
     rig = rig_layout(library=lib, front_pc={"azimuth": 45.0}).rig
     assert has(rig.warnings, "Rang", "aucun azimut")
@@ -284,11 +285,12 @@ def test_pc_rows_behind_the_zone_are_not_hung():
     assert len(pcs(lay.rig)) < 2 * 3 * 4
 
 
-def test_hang_point_off_the_tube_is_clamped_with_an_alert():
+def test_hang_point_off_the_tube_is_clamped_with_an_alert(monkeypatch):
+    monkeypatch.setattr("core.rig.AZIMUTH_SEARCH", 0.0)
     lay = rig_layout(front_pc={"azimuth": 80.0})
     assert has(lay.warnings, "Point d'accroche hors de")
-    limit = lay.find("Batten_01").end[0]
-    assert all(abs(f.hang[0]) <= limit + 1e-9 for f in pcs(lay.rig) if f.support == "Batten_01")
+    limit = lay.find("Batten_02").end[0]
+    assert all(abs(f.hang[0]) <= limit + 1e-9 for f in pcs(lay.rig) if f.support == "Batten_02")
 
 
 # ------------------------------------------------------------------ backlight
@@ -802,7 +804,10 @@ def test_shipped_presets_raise_no_rig_alert():
     for name, path in presets.items():
         params, messages = read_preset(path)
         assert not messages, name
-        assert compute_layout(params).rig.warnings == (), name
+        rig = compute_layout(params).rig
+        assert (rig.warnings == ()) == (name != "open_space"), name
+    # Its first rue is 0.20 m deep: no pipe fits behind the front border, row 2 cannot be covered.
+    assert has(shipped_rigs()["open_space"].rig.warnings, "Zone non couverte")
 
 
 def shipped_rigs():
@@ -812,7 +817,7 @@ def shipped_rigs():
     return out
 
 
-@pytest.mark.parametrize("name", ["default", "reference_with_modules", "open_space"])
+@pytest.mark.parametrize("name", ["default", "reference_with_modules"])
 def test_no_two_fixtures_overlap_on_a_support_once_posed(name):
     lay = shipped_rigs()[name]
     pairs, gaps = overlapping(lay.rig, default_library())
@@ -923,7 +928,7 @@ def test_manual_height_is_taken_as_given_and_blocked_beams_are_named():
     assert lay.rig.dims.movers_pipe_z == 7.0
     assert has(lay.warnings, "Faisceau de FrontMover_01 vers (5,00 ; 6,00 ; 2,90) gêné par FrontPC_")
     assert not has(lay.warnings, "aucune hauteur")
-    assert manual_movers(6.75).rig.warnings == ()
+    assert manual_movers(6.8).rig.warnings == ()
 
 
 def test_no_clear_height_keeps_the_best_one_and_reports_the_blocked_targets():
@@ -989,6 +994,82 @@ def test_beam_gap_is_a_signed_distance_to_the_cone_between_lens_and_target():
 
 def test_default_and_shipped_presets_keep_every_beam_clear():
     for name, lay in shipped_rigs().items():
+        if name == "open_space":
+            continue
         dims = lay.rig.dims
         assert lay.rig.warnings == () and dims.beam_clearance >= BEAM_MARGIN, name
-        assert dims.movers_pipe_z == pytest.approx(6.75) and dims.movers_pipe_y == pytest.approx(dims.pipe_y - 1.5)
+        assert dims.masking_clearance >= BEAM_MARGIN, name
+        assert dims.movers_pipe_z == pytest.approx(6.8) and dims.movers_pipe_y == pytest.approx(dims.pipe_y - 1.5)
+
+
+# ------------------------------------------- borders and legs in the beam checks
+
+def masking_alerts(warnings):
+    return has(warnings, "Faisceau de", "gêné par la frise") + has(warnings, "Faisceau de", "gêné par le pendrillon")
+
+
+def test_row_two_pcs_hang_on_the_mantle_batten_behind_the_front_border():
+    lay = compute_layout(make())
+    front = lay.find("MaskingBatten_00").start[1]
+    row = [f for f in pcs(lay.rig) if f.circuit.startswith("FrontPC_Row2")]
+    assert len(row) == 8 and {f.support for f in row} == {"Batten_02"}
+    assert all(f.hang[1] == pytest.approx(front + 0.30) for f in row)
+    (_, site), = [r for r in lay.rig.dims.pc_supports if r[0] == "Batten_02"]
+    assert abs(site - 45.0) < 5.0
+    assert lay.rig.warnings == () and lay.rig.dims.masking_clearance >= BEAM_MARGIN
+
+
+def test_row_two_keeps_the_site_nearest_battens_when_there_is_no_front_border():
+    rig = compute_layout(make(masking={"front_border": False})).rig
+    assert [name for name, _ in rig.dims.pc_supports] == ["FrontPipe", "Batten_01"]
+    assert rig.warnings == ()
+
+
+def test_row_without_a_fitting_batten_keeps_the_nearest_site_and_alerts():
+    lay = shipped_rigs()["open_space"]
+    assert [name for name, _ in lay.rig.dims.pc_supports] == ["FrontPipe", "Batten_02"]
+    assert has(lay.rig.warnings, "Rang 2", "aucun azimut") and has(lay.rig.warnings, "Zone non couverte")
+
+
+def test_a_low_border_makes_the_beam_checks_alert_and_names_beam_target_and_border():
+    lay = compute_layout(make(masking={"borders_mode": "manual", "border_bottom": 4.0}))
+    hits = has(lay.warnings, "Faisceau de Backlight_", "vers (", "gêné par la frise Border_03")
+    assert hits and lay.rig.dims.masking_clearance < 0
+    assert not has(lay.warnings, "Faisceau de FrontMover_", "gêné par la frise")
+
+
+def test_auto_height_goes_down_to_keep_the_movers_beams_under_the_front_border():
+    high = compute_layout(make()).rig.dims.movers_pipe_z
+    low = compute_layout(make(masking={"borders_mode": "manual", "border_bottom": 4.0}))
+    assert low.rig.dims.movers_pipe_z < high
+    assert not has(low.warnings, "Faisceau de FrontMover_", "gêné par la frise")
+    raised = compute_layout(make(masking={"borders_mode": "manual", "border_bottom": 4.0},
+                                 rig_front={"movers_height_mode": "manual", "movers_z": high}))
+    assert has(raised.warnings, "Faisceau de FrontMover_", "gêné par la frise Border_00")
+
+
+def aimed(target, source, field=20.0, owner="B"):
+    d = tuple(t - o for t, o in zip(target, source))
+    n = math.sqrt(sum(v * v for v in d))
+    return _make_beam(owner, target, source, tuple(v / n for v in d), field, 0.0)
+
+
+def test_a_beam_against_a_border_uses_the_bright_core_of_its_cone():
+    border = {w.name: w for w in _walls(_make_context(make())[0])}["Border_00"]
+    # Border_00 hangs at Y 2.355 from Z 5.49 to 6.80; the aim line passes 0.60 m under its bottom.
+    under = lambda field: aimed((0.0, 4.0, 4.89), (0.0, 0.0, 4.89), field)
+    assert _wall_gaps([under(2.0)], [border]) == []
+    assert _wall_gaps([under(20.0)], [border])[0][2] >= BEAM_MARGIN
+    # The core is half the half angle, and the fabric counts 0.09 m thick: 60 degrees reaches it.
+    assert _wall_gaps([under(60.0)], [border])[0][2] < 0
+    assert _wall_gaps([aimed((0.0, 4.0, 6.0), (0.0, 0.0, 6.0), 2.0)], [border])[0][2] < BEAM_MARGIN
+
+
+def test_a_beam_crossing_a_leg_is_blocked_unless_it_grazes_the_edge_or_aims_behind_it():
+    leg = {w.name: w for w in _walls(_make_context(make())[0])}["Leg_L_01"]
+    # Leg_L_01 spans X -7 to -4 at Y 4.25; its inner end counts as pulled back by 0.30 m.
+    deep = _wall_gaps([aimed((-3.9, 4.5, 2.9), (-9.0, 2.9, 6.8))], [leg])
+    assert deep and deep[0][2] < BEAM_MARGIN
+    graze = _wall_gaps([aimed((-3.9, 4.5, 2.9), (-5.0, 2.9, 6.8))], [leg])
+    assert not graze or graze[0][2] >= BEAM_MARGIN
+    assert _wall_gaps([aimed((-4.6, 4.5, 2.9), (-9.0, 2.9, 6.8))], [leg]) == []

@@ -17,7 +17,7 @@ def rig():
 def test_dimension_lines_cover_the_spec_list(rig):
     text = "\n".join(dimension_lines(rig))
     for expected in ("Perche de face : Y =", "Zone de jeu Ya", "Zones : ", "Azimut du rang 1", "Découpe Profile_L : tube",
-                     "Charge FrontPipe :", "Charge FrontPipe_02", "Perche des mobiles de face : Y = -2,90 m, Z = 6,75 m",
+                     "Charge FrontPipe :", "Charge FrontPipe_02", "Perche des mobiles de face : Y = -2,90 m, Z = 6,80 m",
                      "Débattement des mobiles de face : rayon 0,37 m", "Jeu minimal des faisceaux : 0,06 m",
                      "Patch contre : 1 :", "Patch hazer : 6 :"):
         assert expected in text

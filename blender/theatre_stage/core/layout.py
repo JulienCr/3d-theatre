@@ -638,7 +638,17 @@ def _light_battens(p, Yc, D, plan):
                             "aucune porteuse au fond de scène.")
         else:
             ys.append((lo + hi) / 2)
-    return tuple(ys), warnings
+    if p["masking"]["front_border"]:
+        ys.extend(_mantle_batten(plan, ys))
+    return tuple(sorted(ys)), warnings
+
+
+def _mantle_batten(plan, ys) -> list[float]:
+    """The "perche de manteau" just upstage of the front border, unless a light batten is there."""
+    lo, hi = plan.front_plane + BATTEN_CLEARANCE, plan.planes[0] - BATTEN_CLEARANCE
+    if hi < lo - EPS or any(lo - EPS <= y <= min(lo + BATTEN_CLEARANCE, hi) + EPS for y in ys):
+        return []
+    return [(lo + hi) / 2 if hi - lo < BATTEN_CLEARANCE else lo]
 
 
 def _box(name, material, collection, lo, hi, origin=(0.0, 0.0, 0.0), yaw=0.0):

@@ -186,10 +186,10 @@ def test_the_last_rue_gets_a_light_batten_in_the_middle_of_its_free_interval():
     lay = layout()
     last_plane, back = plane_y(lay, "MaskingBatten_03"), plane_y(lay, "MaskingBatten_Back")
     ys = battens(lay)
-    assert ys[:2] == pytest.approx([2.1, 3.1]) and len(ys) == 3
-    assert ys[2] == pytest.approx(((last_plane + 0.30) + (back - 0.30)) / 2)
-    assert all(abs(ys[2] - plane_y(lay, f"MaskingBatten_{k}")) >= 0.30 for k in ("03", "Back"))
-    assert lay.find("Batten_03").start[2] == pytest.approx(ZB)
+    assert ys[:3] == pytest.approx([2.1, plane_y(lay, "MaskingBatten_00") + 0.30, 3.1]) and len(ys) == 4
+    assert ys[3] == pytest.approx(((last_plane + 0.30) + (back - 0.30)) / 2)
+    assert all(abs(ys[3] - plane_y(lay, f"MaskingBatten_{k}")) >= 0.30 for k in ("03", "Back"))
+    assert lay.find("Batten_04").start[2] == pytest.approx(ZB)
 
 
 def test_a_regular_light_batten_in_the_last_rue_is_kept_without_an_addition():
@@ -448,3 +448,51 @@ def test_first_plane_closes_the_first_lane_and_nothing_hugs_the_backdrop():
     assert planes[0] == pytest.approx(lay.derived.masking_y0)
     assert lay.derived.backdrop_y - planes[-1] == pytest.approx(lay.derived.lane_width)
     assert lay.derived.lane_width == pytest.approx((6.6 - 4.25) / 3)
+
+
+def mantle_free_interval(lay):
+    front, first = plane_y(lay, "MaskingBatten_00"), plane_y(lay, "MaskingBatten_01")
+    return front + 0.30, first - 0.30
+
+
+def test_the_mantle_batten_sits_0_30_behind_the_front_border_when_none_is_close_enough():
+    lay = layout(grid={"batten_spacing": 2.0})
+    lo, hi = mantle_free_interval(lay)
+    assert battens(lay) == pytest.approx([2.1, lo, battens(lay)[2]]) and lo < hi
+    assert lay.find("Batten_02").start[2] == pytest.approx(ZB)
+    assert lo == pytest.approx(plane_y(lay, "MaskingBatten_00") + 0.30)
+    default = battens(layout())
+    assert default[1] == pytest.approx(lo) and default[2] == pytest.approx(3.1)
+
+
+def test_a_regular_batten_just_behind_the_front_border_replaces_the_mantle_batten():
+    lay = layout(grid={"batten_spacing": 0.9})
+    lo, hi = mantle_free_interval(lay)
+    assert battens(lay)[:3] == pytest.approx([2.1, 3.0, 3.9])
+    assert lo < 3.0 < lo + 0.30 and not [y for y in battens(lay) if abs(y - lo) < 1e-6]
+
+
+def test_no_mantle_batten_without_a_front_border_or_a_free_interval():
+    assert battens(layout(masking={"front_border": False})) == pytest.approx([2.1, 3.1, battens(layout())[3]])
+    narrow = no_modules()
+    assert mantle_free_interval(narrow)[1] < mantle_free_interval(narrow)[0]
+    assert battens(narrow)[:2] == pytest.approx([2.1, 3.1]) and len(battens(narrow)) == 3
+    assert not any("Première rue" in w or "manteau" in w for w in narrow.warnings)
+
+
+def test_a_narrow_free_interval_gets_its_mantle_batten_in_the_middle():
+    lay = layout(modules={"left": {"depth": 1.0}, "right": {"depth": 1.0}})
+    front, first = plane_y(lay, "MaskingBatten_00"), plane_y(lay, "MaskingBatten_01")
+    lo, hi = front + 0.30, first - 0.30
+    assert 0 <= hi - lo < 0.30
+    assert battens(lay)[1] == pytest.approx((lo + hi) / 2)
+
+
+@pytest.mark.parametrize("spacing", [1.0, 2.0])
+def test_light_battens_stay_hidden_from_the_reference_seat_with_the_mantle_batten(spacing):
+    computed = layout(grid={"batten_spacing": spacing})
+    lowest = min(height for _, height in computed.derived.border_bottoms)
+    manual = layout(grid={"batten_spacing": spacing},
+                    masking={"borders_mode": "manual", "border_bottom": lowest})
+    seen = [w for w in manual.warnings if "Découverte verticale" in w]
+    assert all("Batten_01" in w for w in seen)

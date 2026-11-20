@@ -235,7 +235,7 @@ section 13). `enabled` décoché : aucun objet de la section 13, aucun patch.
 | `y` | Position en Y, mode manuel | −1,40 | −30 – 5 |
 | `movers_offset` | Recul de la seconde perche, celle des mobiles de face *(choix)* | 1,50 | 0,50 – 10 |
 | `movers_height_mode` | Hauteur de la seconde perche | `auto` | énumération (1) |
-| `movers_z` | Hauteur de la seconde perche, mode manuel | 6,75 | 2 – 15 |
+| `movers_z` | Hauteur de la seconde perche, mode manuel | 6,80 | 2 – 15 |
 
 (1) `auto` (« Calculée ») : la plus haute hauteur dont aucun faisceau ne
 rencontre un appareil (13.2 bis) ; `manual` (« Manuelle ») : `movers_z`. Le
@@ -318,7 +318,7 @@ Chaque jeu :
 
 `overlap` : fraction de la taille d'une zone ajoutée au champ couvert (section
 13.7). Azimut 45° : fiche ADEC 6-3, nominal : 13.7 le règle rang par rang
-dans ±10°. `zone_width` est un plafond : le nombre de zones est arrondi au
+dans ±30°. `zone_width` est un plafond : le nombre de zones est arrondi au
 supérieur (13.1).
 
 ### 3.16 Découpes — `profiles`
@@ -473,10 +473,23 @@ murs de cage 0,20 ; parement de plancher 0,03 ; liseré du nez 0,05 ;
   libre** de la rue, `[plan_N + 0,30 ; Yb − 0,30]` *(choix : 0,30, comme le
   retrait ci-dessus)*, donc à 0,30 m au moins de toute porteuse de
   pendrillonnage. C'est une porteuse lumière ordinaire, numérotée par Y avec
-  les autres (par défaut Y = 6,21, `Batten_03`). Rue trop étroite (intervalle
+  les autres (par défaut Y = 6,21, `Batten_04`). Rue trop étroite (intervalle
   vide) : pas de porteuse et l'alerte « Dernière rue trop étroite pour une
   porteuse lumière : aucune porteuse au fond de scène ». Avec la porteuse
   de la dernière rue, le contre (13.4) a une perche de fond.
+- **Perche de manteau** : dans un théâtre à l'italienne, la première porteuse
+  lumière est juste derrière le manteau, cachée par la frise de face ; les PC
+  de face des rangs du fond y sont accrochés (13.7). Avec une frise de face
+  (`front_border`), soit `Yf` son plan de porteuse (`MaskingBatten_00`, 8.1),
+  `lo = Yf + 0,30` et `hi = plan_1 − 0,30` (même retrait que ci-dessus). Si
+  aucune porteuse restante n'est dans `[lo ; lo + 0,30]` *(choix : 0,30)* et
+  que `lo ≤ hi`, on en ajoute une à `lo`, ou au milieu de `[lo ; hi]` quand cet
+  intervalle fait moins de 0,30. Intervalle vide (rue de manteau de moins de
+  0,60 m, comme `open_space`) : pas de porteuse, pas d'alerte. Sans frise de
+  face : aucune règle. C'est une porteuse lumière ordinaire, numérotée par Y.
+  Par défaut `Yf = 2,46` : porteuses `Batten_01` à 2,10, `Batten_02` (manteau)
+  à 2,76, `Batten_03` à 3,10 et `Batten_04` à 6,21. Avec un espacement
+  de 0,90, une porteuse régulière tombe à 3,00 : aucune porteuse n'est ajoutée.
 
 ### 5.6 Escaliers latéraux (`TS_Stairs`)
 
@@ -905,6 +918,11 @@ Calculée dans `core`, testée, sans rien dessiner dans la scène.
   Bas calculé sous `Hp + 2,20` *(choix : passage d'un comédien et d'un
   décor)* → alerte « Frise … très basse ». La frise de face et le linteau
   participent ; le linteau est fixe.
+- **Porteuse de manteau** (5.5) : une porteuse lumière comme les autres pour
+  ce calcul. Plus proche du plan de la frise de face que les porteuses
+  suivantes, elle impose un bas plus **haut** : avec les défauts, le bas de la
+  frise de face reste à `Hp + 4,29` avant et après l'ajout, et la porteuse est
+  cachée du fauteuil de référence.
 - **Mode manuel** : mêmes calculs, mais en contrôle seulement ; alerte
   « Découverte verticale : porteuse … visible depuis le premier rang ».
 - **En plan** : pour chaque rue `k` et chaque côté, la ligne qui part du
@@ -968,8 +986,9 @@ Calculées dans `core`, rédigées en français, affichées dans le panneau :
   pylône trop bas, sur un escalier ou hors de la salle (13.6) ; rang de PC
   dont la porteuse est trop en arrière (13.7) ; appareils qui se touchent sur
   un tube (13.10) ; seconde perche hors de la salle, ou sans hauteur qui
-  dégage les faisceaux (13.2 bis) ; faisceau gêné par un appareil, débattement
-  de pan et tilt qui touche un appareil d'un autre support (13.11) ;
+  dégage les faisceaux (13.2 bis) ; faisceau gêné par un appareil, par une
+  frise ou par un pendrillon, débattement de pan et tilt qui touche un
+  appareil d'un autre support (13.11) ;
 - photométrie : zone non couverte ou champ trop large, hors de la plage de
   zoom (13.7) ; découpe sans tube assez large, lame hors course ou lames non
   adaptées (13.8) ; pan/tilt hors course (13.9) ; température de couleur de
@@ -1001,13 +1020,17 @@ Calculées dans `core`, rédigées en français, affichées dans le panneau :
     valides, outil GDTF sur un petit GDTF construit dans le test (offsets
     multiples → 16 bits, attributs inconnus gardés) ;
   - implantation : `Yp = −1,40` avec les défauts ; 16 PC et 4 circuits, aucune alerte avec
-    les trois préréglages livrés ; `Y2 = −2,90`, `Z2 = 6,75`, mobiles sur
+    le défaut et `reference_with_modules` (`open_space` : rang 2 non couvert,
+    13.7) ; `Y2 = −2,90`, `Z2 = 6,80`, mobiles sur
     `FrontPipe_02` ; hauteur automatique : la plus haute qui dégage, et
     `Zp` quand rien ne gêne ; rayon de l'enveloppe contre les sommets des
     modèles ; faisceau gêné par un obstacle, débattement qui touche ; azimut par rang ; coupe haute (comédien ou linteau) ;
+    rang 2 sur la perche de manteau (5.5) derrière la frise de face, frise basse
+    qui fait alerter les contrôles de faisceaux, hauteur de `FrontPipe_02`
+    qui descend sous une frise de face abaissée ;
     décalage en X `ΔY·tan(azimut)` et faisceaux parallèles en plan par
     direction ; champ requis, bornage au zoom et alerte ; accroche par Y
-    (première porteuse, retrait d'une porteuse qui renumérote, contre à plus de
+    (porteuse de manteau, retrait d'une porteuse qui renumérote, contre à plus de
     0,50 m) ; pylônes miroirs et empilement ; zones à 1, 2 et 4 rangs ;
   - visée : pour chaque mobile, le faisceau recalculé depuis les octets
     16 bits arrondis passe à moins de 1 cm de la visée ; seconde solution
@@ -1375,9 +1398,10 @@ sans), et leurs faisceaux doivent passer entre les corps.
   ne convient : alerte « Perche des mobiles de face : aucune hauteur de … à …
   ne dégage … » ; la hauteur retenue est celle qui laisse le moins de cas
   bloqués (à égalité, le jeu le moins mauvais), et les cas bloqués sont
-  rapportés un à un par les alertes de 13.11. Valeur avec les défauts :
-  `Z2 = 6,75`, soit 0,25 m sous `Zp` : à `Zp`, le faisceau d'un mobile visant
-  le fond cour ou jardin frôle le corps des PC de la première perche.
+  rapportés un à un par les alertes de 13.11, frises et pendrillons compris.
+  Valeur avec les défauts : `Z2 = 6,80`, soit 0,20 m sous `Zp` : au-dessus, le
+  faisceau d'un mobile visant le fond cour ou jardin frôle `Profile_C` et le
+  corps des PC de la porteuse de manteau.
 - Les calculs de la perche, `Zh`, l'accroche et le rangement sont ceux de
   13.3 et 13.10 avec `(Y2, Z2)` ; la visée de repos des mobiles ne change pas
   (13.5).
@@ -1444,23 +1468,38 @@ Deux appareils par zone, un par direction `d` : `L` (accroché côté jardin,
 `s_d = −1`) et `R` (côté cour, `s_d = +1`). `NN = j·nx + i + 1`. Total
 `2·nx·nr` (16 par défaut).
 
-- **Accroche en Y** : rang 0 sur la perche de face `(Yp, Zp)` ; rang 1 sur la
-  **première porteuse lumière** `(Y, Zb)` (méthode ADEC) ; rang `j ≥ 2` sur
-  `nearest_batten(yr_j − ΔYp)` *(choix)*. `ΔY = yr_j − Y_accroche`. Si
-  `ΔY < 0,10` : rang non posé, alerte « Rang j : porteuse trop en arrière de
-  la zone ».
+- **Accroche en Y** : rang 0 sur la perche de face `(Yp, Zp)`. Rang `j ≥ 1` :
+  sur une porteuse lumière `(Y, Zb)` avec `ΔY = yr_j − Y ≥ 0,10`. Candidates :
+  toutes celles-là. Une candidate **convient** si un azimut existe (ci-dessous)
+  et si les faisceaux de tous les PC du rang dégagent les frises et les
+  pendrillons de 0,05 m (13.11). On retient, dans l'ordre : celle qui convient
+  plutôt que celle qui ne convient pas ; celle **derrière la frise de face**
+  (`Y ≥ Yf + 0,30`, la perche de manteau de 5.5 en fait partie) plutôt que
+  devant ; celle dont le site (`atan((Zb − Za)/(ΔY/cos az_j))`, 13.2) est le
+  plus proche de `rig.site`. Quand aucune ne convient, on garde donc la plus
+  proche de 45° derrière la frise, et les alertes de l'azimut et de 13.11 disent
+  pourquoi. Sans porteuse à `ΔY ≥ 0,10` : l'ancienne règle (première porteuse
+  pour le rang 1, `nearest_batten(yr_j − ΔYp)` au-delà) et l'alerte « Rang j :
+  porteuse trop en arrière de la zone ». Raison *(choix)* : depuis la porteuse
+  devant la frise de face, les faisceaux du rang 2 traversent la frise (taches
+  claires sur le tissu).
+  Avec les défauts, le rang 2 est sur la perche de manteau (`Batten_02`,
+  `Y = 2,76`), site 48,2°. `open_space` n'a pas de perche de manteau (première
+  rue de 0,20 m) : le rang 2 reste sur `Batten_02` (`Y = 3,10`, site 63°), qui
+  ne couvre pas ses zones ; les alertes « aucun azimut », « Zone non couverte »
+  et celle d'un pendrillon le disent.
 - **Accroche en X** (croisement) : `X = xc_i + s_d·ΔY·tan(az_j)`. Même
   azimut `az_j` pour tous les appareils d'une direction d'un rang : faisceaux
   parallèles en plan ; le site varie avec le rang.
 - **Azimut par rang** *(choix)* : avec 4 colonnes, le croisement place sur un même
-  tube des PC de directions opposées proches l'un de l'autre
-  (`FrontPC_L_07` et `FrontPC_R_05` sur `Batten_01`, 0,34 m) et, panotés de
+  tube des PC de directions opposées proches l'un de l'autre et, panotés de
   ±132°, leurs têtes s'entrecoupent. Pour chaque rang,
   `az_j` est l'azimut le plus proche de `azimuth` (pas de 0,5°, en alternant
-  + et −, jusqu'à ±10°) tel que les **empreintes posées** (13.10) de deux PC du
+  + et −, jusqu'à ±30°) tel que les **empreintes posées** (13.10) de deux PC du
   tube ne se recouvrent jamais, que les points d'accroche restent sur le tube et
   que chaque zone tienne dans le champ le plus large de la fiche. Par défaut :
-  45° au rang 1, 50° au rang 2. Les deux
+  45° au rang 1, 60° au rang 2 : depuis la perche de manteau, une zone du rang 2
+  demande 64,9° de champ à 45° (54,4° au plus), 54,0° à 60°. Les deux
   directions du rang utilisent ce même `az_j`. Aucun azimut ne convient :
   alerte « Rang j : aucun azimut … » et azimut nominal conservé. L'azimut de
   chaque rang est affiché dans « Cotes calculées ». Le rangement des autres
@@ -1644,6 +1683,9 @@ Récapitulatif des visées de repos :
   `nx × nr` et `zw × zd`, rayon `R` des mobiles de face, jeu minimal des
   faisceaux (13.11), azimut `az_j` de chaque rang de PC, tube et champ de chaque découpe, charges, plages de patch par
   famille (15.1), pan et tilt (angles et valeurs DMX) de chaque mobile.
+  `RigDims` porte aussi le tube et le site de chaque rang de PC (`pc_supports`)
+  et le jeu minimal aux frises et aux pendrillons (`masking_clearance`) ; le
+  panneau ne les affiche pas encore.
 
 ### 13.11 Faisceaux et débattement
 
@@ -1653,6 +1695,20 @@ valeur par défaut du canal de zoom *(choix)*). Il va de la lentille au point
 visé : un appareil derrière le point visé ne coupe pas la lumière qui y arrive
 *(choix)*, et la portée est de 30 m au plus.
 
+- **Frises et pendrillons** : obstacles des mêmes contrôles, pris dans le
+  dessin du pendrillonnage (8.3, 8.4). Une frise `Border_NN` est un mur du bas
+  de la frise à `Zb`, de mur de cage à mur de cage, épaisse de deux fois l'écart
+  des plis (`PLEAT_AMPLITUDE × MAX_DEPTH_FACTOR`, 0,09 de chaque côté) *(choix)*,
+  échantillonné tous les 0,15 m ; elle est testée avec le **cœur** du faisceau,
+  le cône réduit à la moitié de son demi-angle *(choix : avec le cône entier, les
+  découpes, les mobiles de face et ceux des pylônes touchent la frise de face
+  dans le préréglage par défaut)*. Un pendrillon `Leg_*_NN` est un mur plat de
+  son bord intérieur au mur de cage, de `Hp` à `Zb` ; il n'est testé qu'avec
+  la **ligne de visée**, son bord intérieur reculé de 0,30 m *(choix : avec une
+  ouverture de 8 m, les zones de 10 m de large frôlent toujours le bord)*. Une
+  visée dont la cible est du côté coulisse du bord intérieur d'un pendrillon
+  (hors de la scène visible) n'est pas contrôlée contre lui : coins
+  `X = ±Wc/2` de la grille des mobiles.
 - **Corps rencontrés** : pour tout autre appareil, les 27 points (coins,
   milieux d'arêtes, centres de faces, centre) de la boîte englobante de chaque
   pièce, posée avec le pan et le tilt de repos (13.10) ; pour un appareil à
@@ -1660,7 +1716,8 @@ visé : un appareil derrière le point visé ne coupe pas la lumière qui y arri
   ailleurs. Hazer exclu.
 - **Jeu** d'un faisceau : plus petite distance signée des points entre la
   lentille et le point visé au bord du cône, négative dedans. Le faisceau est
-  **gêné** si ce jeu est inférieur à 0,05 m *(choix)*.
+  **gêné** si ce jeu est inférieur à 0,05 m *(choix)*, contre un appareil, une
+  frise ou un pendrillon.
 - **Visées contrôlées** : la visée de repos de chaque appareil ; de plus, pour
   chaque mobile de face, les neuf points `X ∈ {−Wc/2, 0, Wc/2}`,
   `Y ∈ {0, Ya/2, Ya}`, `Z = Za`. Pan et tilt sont ceux de ces visées, ramenés
@@ -1672,13 +1729,18 @@ visé : un appareil derrière le point visé ne coupe pas la lumière qui y arri
   cylindres se recouvrent.
 - **Alertes** : « Faisceau de `A` vers (X ; Y ; Z) gêné par `B` : jeu … pour
   0,05 m minimum. » (les huit plus mauvais, puis le nombre des autres) ;
-  « Débattement de pan et tilt : `A` et `B` se touchent. ». Le préréglage par
-  défaut et les deux préréglages livrés n'en lèvent aucune ; jeu minimal avec
-  les défauts : 0,06 m (visée `(±5,00 ; 6,00 ; 2,90)` d'un mobile de face,
-  corps d'un PC de la première perche).
+  « Débattement de pan et tilt : `A` et `B` se touchent. » ; `B` est « la frise
+  `Border_NN` » ou « le pendrillon `Leg_L_NN` » pour le pendrillonnage (le
+  même plafond de huit, puis « Faisceaux : n autres gênés par une frise ou un
+  pendrillon »). Le préréglage par défaut et `reference_with_modules` n'en
+  lèvent aucune ; `open_space` en lève (13.7). Jeu minimal avec les défauts :
+  0,06 m aux appareils (visée `(±5,00 ; 6,00 ; 2,90)` d'un mobile de face,
+  corps d'un PC de la perche de manteau), 0,14 m aux frises (mobile de face
+  contre `Border_00`), 0,06 m aux pendrillons (ligne de visée de
+  `FrontPC_L_05` contre `Leg_L_01`).
 - Limites : le cône est celui du champ de la fiche, sans les lames d'une
-  découpe ni le gobo ; seuls les appareils sont des obstacles, pas les
-  tubes, le cadre ni les pylônes.
+  découpe ni le gobo ; les autres obstacles sont les appareils, les frises et
+  les pendrillons, pas les tubes, le cadre, le rideau de scène ni les pylônes.
 
 ## 14. Appareils dans Blender
 
