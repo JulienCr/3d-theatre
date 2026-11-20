@@ -403,6 +403,8 @@ SCHEMA: tuple[Group, ...] = (
                "Angle en plan entre l'axe de la salle et chaque faisceau (45° : fiche ADEC 6-3)."),
         _float("overlap", 0.20, 0.0, 1.0, "Recouvrement",
                "Fraction de la taille d'une zone ajoutée au champ couvert, pour les zones voisines."),
+        _float("min_mean_ratio", 0.85, 0.5, 1.0, "Moyenne minimale de l'égalisation",
+               "Part de l'éclairement moyen du rig plein que l'égalisation de la face doit conserver."),
         _enum("barn_doors", "auto", "Volets", "Volets (coupe-flux) des PC dont la fiche en porte.", (
             ("none", "Aucun", "Pas de volets."),
             ("auto", "Automatique", "Volets fermés sur la limite à ne pas éclairer."),

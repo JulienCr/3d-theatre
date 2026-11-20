@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import re
 
-from .layout import _metres
+from datetime import datetime
+
+from .layout import Layout, _metres
 from .rig import FAMILY_LABELS, Rig, RigFixture
 
 NO_CIRCUIT = "-"
@@ -76,3 +78,34 @@ def patch_rows(rig: Rig) -> list[tuple[str, str, str, str]]:
     """(fixture, `universe.address`, `mode · footprint`, circuit) in patch order (15.1)."""
     return [(f.name, f"{f.universe}.{f.address}", f"{f.mode} · {f.footprint} c", f.circuit or NO_CIRCUIT)
             for f in rig.fixtures]
+
+
+FACE_GROUPS = (("L", "Jardin"), ("R", "Cour"), ("sum", "Somme"))
+
+
+def _date_text(iso: str) -> str:
+    try:
+        return datetime.fromisoformat(iso).strftime("%d/%m/%Y à %H:%M")
+    except ValueError:
+        return iso
+
+
+def face_eq_lines(layout: Layout) -> list[str]:
+    """Panel lines of the stored face equalisation: date, U and CV per direction and sum, before to after (13.13)."""
+    eq = layout.face_eq
+    if eq is None:
+        return []
+    head = "Face égalisée" if layout.face_eq_state == "applied" else "Égalisation de la face périmée"
+    lines = [f"{head} le {_date_text(eq.date)}."]
+    if layout.face_eq_state != "applied":
+        return lines
+    for key, label in FACE_GROUPS:
+        if key in eq.before and key in eq.after:
+            b, a = eq.before[key], eq.after[key]
+            lines.append(f"{label} : U {_number(b.uniformity, 2)} → {_number(a.uniformity, 2)}, "
+                         f"CV {_number(b.cv, 2)} → {_number(a.cv, 2)}")
+    total = eq.after.get("sum")
+    if total is not None:
+        lines.append(f"Éclairement moyen (somme) : {_number(eq.before['sum'].mean, 0)} → "
+                     f"{_number(total.mean, 0)} lx, niveau moyen {_number(eq.mean_level, 2)}")
+    return lines

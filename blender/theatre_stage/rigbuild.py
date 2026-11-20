@@ -18,10 +18,12 @@ from mathutils import Matrix
 from . import materials
 from .core.fixture_models import fixture_model
 from .core.fixtures import (
-    DEFAULT_EXPOSURE_EV, IES_FAC_PER_CD, Blades, Fixture, LensTube, Library, Optics, Strobe, cct_to_rgb,
-    ies_axis_candela, max_energy,
+    DEFAULT_EXPOSURE_EV, IES_FAC_PER_CD, Blades, Fixture, LensTube, Library, Optics, Strobe, area_ies_divisor,
+    cct_to_rgb, ies_axis_candela, max_energy,
 )
+from .core import face_rig
 from .core.barndoors import BarnDoorSet
+from .core.ies import bake_ies
 from .core.meshes import Mesh
 from .core import rigpanel
 from .core.rig import FIXTURES_COLLECTION, BladeSet, ChannelValue, Rig, RigFixture, default_library
@@ -36,9 +38,9 @@ LENS_SEGMENTS = 32
 LENS_GAIN = 8.0
 SPOT_BLEND = 0.02
 EMPTY_SIZE = 0.03
+LEAF_THICKNESS = 0.002
 CTO_KEYS = ("cto_r", "cto_g", "cto_b")
 
-LEAF_THICKNESS = 0.002
 warnings: list[str] = []
 _models: dict = {}
 
@@ -85,6 +87,11 @@ class _FixtureBuild(_Build):
 
     def expr(self) -> _Expr:
         return _Expr(self)
+
+    @property
+    def area_ies(self) -> str | None:
+        """IES file shaping an area light (wash, PC): the file replaces the `spread` narrowing (spec 14.3)."""
+        return self.fx.ies_for(self.field_angle, self.tube) if self.f.source_kind == "AREA" else None
 
 
 class _Expr:
@@ -240,13 +247,6 @@ def _disc(radius: float, z: float) -> Mesh:
     return Mesh(((0.0, 0.0, z), *ring), faces)
 
 
-def _blade_plane(diameter: float, half_width: float) -> Mesh:
-    return Mesh(((0.0, -half_width, 0.0), (2 * diameter, -half_width, 0.0),
-                 (2 * diameter, half_width, 0.0), (0.0, half_width, 0.0)), ((0, 1, 2, 3),))
-
-
-def _object(ctx: _Build, name: str, data=None, parent=None, location=(0.0, 0.0, 0.0),
-            rotation=(0.0, 0.0, 0.0), category: str | None = None):
 def _leaf_box(length: float, width: float) -> Mesh:
     """A barn door leaf: `width` along X, `LEAF_THICKNESS` along Y, `length` along Z from the hinge line."""
     hx, hy = width / 2, LEAF_THICKNESS / 2
@@ -254,6 +254,13 @@ def _leaf_box(length: float, width: float) -> Mesh:
     return Mesh(corners, ((0, 2, 3, 1), (4, 5, 7, 6), (0, 1, 5, 4), (2, 6, 7, 3), (0, 4, 6, 2), (1, 3, 7, 5)))
 
 
+def _blade_plane(diameter: float, half_width: float) -> Mesh:
+    return Mesh(((0.0, -half_width, 0.0), (2 * diameter, -half_width, 0.0),
+                 (2 * diameter, half_width, 0.0), (0.0, half_width, 0.0)), ((0, 1, 2, 3),))
+
+
+def _object(ctx: _Build, name: str, data=None, parent=None, location=(0.0, 0.0, 0.0),
+            rotation=(0.0, 0.0, 0.0), category: str | None = None):
     obj = bpy.data.objects.new(name, data)
     obj[TAG] = True
     if category:
@@ -285,6 +292,20 @@ def _image(fx: Fixture, relative: str):
         image.use_fake_user = True
         image.colorspace_settings.name = "Non-Color"
     return image
+
+
+def _baked_ies_text(ctx: _FixtureBuild):
+    """IES text of the area light of a PC at its field (spec 14.8): the engine's profile of 13.13 at that
+    field, divided by the cosine of the Lambert disc. Named by field, shared by the PCs that have it."""
+    field = round(ctx.field_angle, 1)
+    name = f"TSF_{ctx.fx.id}_f{field:g}.ies"
+    text = bpy.data.texts.get(name)
+    if text is None:
+        profile = face_rig.photometry_of(ctx.fx, ctx.f).profile(field, ctx.f.beam_angle or field)
+        text = bpy.data.texts.new(name)
+        text.write(bake_ies(profile))
+        text.use_fake_user = True
+    return text
 
 
 def _ies_text(fx: Fixture, relative: str):
@@ -403,7 +424,8 @@ def _make_light(ctx: _FixtureBuild, tilt):
     else:
         data.shape = "DISK"
         data.size = ctx.aperture
-        data.spread = math.radians(f.beam_angle if f.beam_angle is not None else ctx.field_angle)
+        data.spread = math.pi if ctx.area_ies else math.radians(
+            f.beam_angle if f.beam_angle is not None else ctx.field_angle)
     return _object(ctx, f"{f.name}_Light", data, tilt, (0.0, 0.0, f.source_z), (math.pi, 0.0, 0.0))
 
 
@@ -421,7 +443,7 @@ def _drive_light(ctx: _FixtureBuild, light) -> None:
         ex = ctx.expr()
         if (expression := _colour_expr(ex, i)):
             ex.drive(data, "color", expression, i)
-    if zoomed:
+    if zoomed and (spot or not ctx.area_ies):
         ex = ctx.expr()
         ex.drive(data, "spot_size" if spot else "spread", f"radians({ex.cfg('field_now' if spot else 'beam_now')})")
 
@@ -467,6 +489,17 @@ def _drive_blade(ctx: _FixtureBuild, plane, k: int) -> None:
                  f"atan(({edge(ex, a)}-{edge(ex, b)})/(2*{ex.cfg('blade_half_span')}))", 2)
 
 
+# ------------------------------------------------------------------ barn doors
+
+def _make_barn_doors(ctx: _FixtureBuild, tilt, doors: BarnDoorSet) -> None:
+    """One thin box per leaf, parented to `_Tilt` at its hinge, in the leaf frame of spec 13.12."""
+    mesh = _mesh(ctx, f"TSF_{ctx.fx.id}_leaf", _leaf_box(doors.length, doors.width), "TS_Fixture")
+    for leaf in doors.leaves:
+        rotation = Matrix(leaf.axes).transposed().to_euler()
+        _object(ctx, f"{ctx.f.name}_Leaf_{leaf.index}", mesh, tilt, leaf.hinge, tuple(rotation),
+                category="TS_Fixture")
+
+
 # ------------------------------------------------------------------ Cycles nodes
 
 def _node(tree, kind: str, name: str | None = None, **settings):
@@ -487,17 +520,6 @@ def _vector_math(tree, operation: str, *inputs):
         else:
             node.inputs[slot].default_value = value
     return node
-
-
-# ------------------------------------------------------------------ barn doors
-
-def _make_barn_doors(ctx: _FixtureBuild, tilt, doors: BarnDoorSet) -> None:
-    """One thin box per leaf, parented to `_Tilt` at its hinge, in the leaf frame of spec 13.12."""
-    mesh = _mesh(ctx, f"TSF_{ctx.fx.id}_leaf", _leaf_box(doors.length, doors.width), "TS_Fixture")
-    for leaf in doors.leaves:
-        rotation = Matrix(leaf.axes).transposed().to_euler()
-        _object(ctx, f"{ctx.f.name}_Leaf_{leaf.index}", mesh, tilt, leaf.hinge, tuple(rotation),
-                category="TS_Fixture")
 
 
 def _math(tree, operation: str, *inputs):
@@ -574,9 +596,15 @@ def _build_tree(ctx: _FixtureBuild, light) -> None:
     emission = next(n for n in tree.nodes if n.bl_idname == "ShaderNodeEmission")
     colour = plane = None
     if ies:
-        text = _ies_text(fx, ies)
-        texture = _node(tree, "ShaderNodeTexIES", mode="INTERNAL", ies=text)
-        unit = _math(tree, "MULTIPLY", texture.outputs["Fac"], 1 / (ies_axis_candela(text.as_string()) * IES_FAC_PER_CD))
+        texture = _node(tree, "ShaderNodeTexIES", mode="INTERNAL")
+        if ctx.area_ies:
+            texture.ies = _baked_ies_text(ctx)
+            gain = 1 / area_ies_divisor(ctx.optics.flux)
+        else:
+            text = _ies_text(fx, ies)
+            texture.ies = text
+            gain = 1 / (ies_axis_candela(text.as_string()) * IES_FAC_PER_CD)
+        unit = _math(tree, "MULTIPLY", texture.outputs["Fac"], gain)
         tree.links.new(unit.outputs[0], emission.inputs["Strength"])
     if cct:
         colour = _node(tree, "ShaderNodeBlackbody", "Blackbody").outputs["Color"]
@@ -648,6 +676,8 @@ def _build_fixture(base: _Build, f: RigFixture) -> bpy.types.Object:
     lens = _make_lens(ctx, tilt, model.lens_radius, model.lens_offset)
     if f.blades is not None and fx.blades is not None:
         _make_blades(ctx, tilt, fx.blades, f.blades)
+    if f.barn_doors is not None:
+        _make_barn_doors(ctx, tilt, f.barn_doors)
     if f.moving:
         _drive_pose(ctx, pan, tilt)
     _drive_root(ctx)
@@ -676,8 +706,6 @@ def ensure_default_exposure(scene) -> bool:
     if scene.view_settings.exposure != 0.0:
         return False
     scene.view_settings.exposure = DEFAULT_EXPOSURE_EV
-    if f.barn_doors is not None:
-        _make_barn_doors(ctx, tilt, f.barn_doors)
     return True
 
 

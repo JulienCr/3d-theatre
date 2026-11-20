@@ -23,9 +23,12 @@ from .primitives import (
 )
 
 if TYPE_CHECKING:
+    from .face_rig import FaceEq
     from .fixtures import Library
     from .rig import Rig
 
+STALE_FACE_EQ = ("Face non égalisée depuis la dernière modification de l'implantation : "
+                 "relancer « Égaliser la face ».")
 ROOT_COLLECTION = "Theatre"
 ARCHITECTURE = "Theatre_Architecture"
 STAIRS = "Theatre_Stairs"
@@ -167,6 +170,8 @@ class Layout:
     root_collection: str = ROOT_COLLECTION
     materials: Mapping = field(default_factory=lambda: dict(MATERIAL_COLORS))
     rig: Rig | None = None
+    face_eq_state: str = ""
+    face_eq: FaceEq | None = None
 
     def find(self, name: str):
         for item in self.objects + self.lights + self.cameras:
@@ -981,10 +986,13 @@ def haze_view_range(layout: Layout) -> tuple[float, float] | None:
     return max(min(depths), 0.1), max(max(depths), 0.2)
 
 
-def compute_layout(params: Mapping | None = None, library: Library | None = None) -> Layout:
+def compute_layout(params: Mapping | None = None, library: Library | None = None,
+                   face_eq: FaceEq | None = None) -> Layout:
     """Full scene description for `params` (nested dict, validated and clamped).
 
-    `library` supplies the fiches of the lighting rig; None reads the shipped library.
+    `library` supplies the fiches of the lighting rig; None reads the shipped library. `face_eq` is a
+    stored face equalisation (spec 13.13): applied to the face PCs when it matches the rig, else ignored
+    with an alert.
     """
     from .rig import compute_rig, default_library  # rig.py imports this module
 
@@ -997,7 +1005,16 @@ def compute_layout(params: Mapping | None = None, library: Library | None = None
         cameras.extend(part.cameras)
         clearances.extend(part.clearances)
         warnings.extend(part.warnings)
-    rig, rig_part = compute_rig(ctx, default_library() if library is None else library)
+    library = default_library() if library is None else library
+    rig, rig_part = compute_rig(ctx, library)
+    face_state = ""
+    if face_eq is not None and rig.enabled:
+        if face_eq.matches(rig, ctx.p["front_pc"]["min_mean_ratio"]):
+            rig, rig_part = compute_rig(ctx, library, face_eq.by_name())
+            face_state = "applied"
+        else:
+            face_state = "stale"
+            warnings.append(STALE_FACE_EQ)
     objects.extend(rig_part.objects)
     warnings.extend(rig_part.warnings)
     masking_battens = sum(1 for o in objects if o.name.startswith("MaskingBatten_"))
@@ -1010,4 +1027,5 @@ def compute_layout(params: Mapping | None = None, library: Library | None = None
         border_bottoms=ctx.sight.derived_bottoms, visible_depths=ctx.sight.depths,
     )
     return Layout(tuple(objects), tuple(lights), tuple(cameras), derived, tuple(warnings),
-                  clearances=tuple(clearances), rig=rig)
+                  clearances=tuple(clearances), rig=rig, face_eq_state=face_state,
+                  face_eq=face_eq if face_state else None)

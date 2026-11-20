@@ -8,8 +8,9 @@ from pathlib import Path
 import bpy
 from bpy.props import StringProperty
 
-from . import materials, props, rigbuild
-from .core import presets, qlc
+from . import build, materials, props, rigbuild
+from .core import face_rig, presets, qlc
+from .core.layout import compute_layout
 
 SHIPPED = "shipped"
 USER = "user"
@@ -154,6 +155,32 @@ class THEATRE_OT_rest_full(bpy.types.Operator):
         return {"FINISHED"}
 
 
+class THEATRE_OT_equalize_face(bpy.types.Operator):
+    bl_idname = "theatre.equalize_face"
+    bl_label = "Égaliser la face"
+    bl_description = ("Cherche pour chaque PC de face la visée, le zoom et le niveau qui rendent l'éclairement "
+                      "vertical le plus homogène, l'enregistre dans la scène et reconstruit")
+
+    def execute(self, context):
+        scene = context.scene
+        params = props.scene_params(scene)
+        plain = compute_layout(params, props.library()).rig
+        if plain is None or not plain.enabled or not plain.by_family(face_rig.FAMILY):
+            self.report({"ERROR"}, "Pas de PC de face à égaliser.")
+            return {"CANCELLED"}
+        try:
+            result = face_rig.equalise_rig(plain, props.library(), params["front_pc"]["min_mean_ratio"])
+        except ValueError as error:
+            self.report({"ERROR"}, str(error))
+            return {"CANCELLED"}
+        scene[build.FACE_EQ_KEY] = result.to_json()
+        props.rebuild_scene(scene)
+        total = result.after["sum"]
+        self.report({"INFO"}, f"Face égalisée : U somme {result.before['sum'].uniformity:.2f} → "
+                              f"{total.uniformity:.2f}, CV {result.before['sum'].cv:.2f} → {total.cv:.2f}.")
+        return {"FINISHED"}
+
+
 class THEATRE_OT_blackout(bpy.types.Operator):
     bl_idname = "theatre.blackout"
     bl_label = "Noir général"
@@ -214,7 +241,7 @@ class THEATRE_OT_export_qlc(bpy.types.Operator):
 
 
 CLASSES = (THEATRE_OT_rebuild, THEATRE_OT_load_preset, THEATRE_OT_save_preset,
-           THEATRE_OT_reset_material, THEATRE_OT_rest_full, THEATRE_OT_blackout, THEATRE_OT_reload_library,
+           THEATRE_OT_reset_material, THEATRE_OT_rest_full, THEATRE_OT_equalize_face, THEATRE_OT_blackout, THEATRE_OT_reload_library,
            THEATRE_OT_export_qlc)
 
 

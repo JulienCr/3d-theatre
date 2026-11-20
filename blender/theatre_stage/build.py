@@ -11,12 +11,14 @@ import numpy as np
 from mathutils import Vector
 
 from . import atmosphere, materials, rigbuild
+from .core.face_rig import FaceEq
 from .core.layout import Layout, compute_layout
 from .core.meshes import Mesh, build_mesh, pleated_mesh
 from .core.primitives import Light, PleatedSurface, Tube
 
 TAG = materials.TAG
 OPEN_KEY = "Open"
+FACE_EQ_KEY = "theatre_face_eq"
 OPENING_PATH = "theatre.curtains.main_opening"
 HAZE_NODE = "Haze Scatter"
 HAZE_DENSITY = "Haze Density"
@@ -34,12 +36,12 @@ foreign_names: list[str] = []
 rebuilding = False
 
 
-def cached_layout(params: dict, library=None) -> Layout:
-    """`compute_layout` memoised on the last params and library (the panel calls it per redraw)."""
+def cached_layout(params: dict, library=None, face_eq: str | None = None) -> Layout:
+    """`compute_layout` memoised on the last params, library and stored face equalisation (JSON text)."""
     global _layout_cache
-    key = (repr(params), id(library))
+    key = (repr(params), id(library), face_eq)
     if _layout_cache is None or _layout_cache[0] != key:
-        _layout_cache = (key, compute_layout(params, library))
+        _layout_cache = (key, compute_layout(params, library, FaceEq.from_json(face_eq)))
     return _layout_cache[1]
 
 
@@ -337,7 +339,7 @@ def rebuild(scene: bpy.types.Scene, params: dict, library=None) -> Layout:
 def _rebuild(scene: bpy.types.Scene, params: dict, library) -> Layout:
     materials.ensure_items(scene)
     materials.detect(scene)
-    layout = cached_layout(params, library)
+    layout = cached_layout(params, library, scene.get(FACE_EQ_KEY))
     collections = ensure_collections(scene, layout)
 
     active = scene.camera

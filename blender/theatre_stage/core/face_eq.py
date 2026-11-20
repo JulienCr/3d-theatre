@@ -33,6 +33,16 @@ class Probe:
 
 
 @dataclass(frozen=True)
+class CutEdge:
+    """Free edge of a barn door leaf: a point `tip` on the edge line, its unit `direction`, and `normal`,
+    the unit normal toward the lit side of the plane through the lens centre and the edge."""
+
+    tip: Vec3
+    direction: Vec3
+    normal: Vec3
+
+
+@dataclass(frozen=True)
 class Emitter:
     """One face PC as the equaliser sees it, at its current setting.
 
@@ -41,7 +51,9 @@ class Emitter:
     `beam_of_field`: 50 % angle at a field, a callable or `((field, beam), ...)` ascending; read by the
     fallback profile only. `cut_planes`: `(point, normal)` through the lens centre, normal toward the
     lit side; a probe behind any plane gets 0. `aim_z`: height of the plane where aim offsets apply
-    (None: the plane of the probes).
+    (None: the plane of the probes). `cut_edges` and `lens_radius`: leaf edges seen by a lens disc of that
+    radius; a probe sees the part of the disc not hidden by the leaf, so the cut has a penumbra
+    (`lens_radius` 0 gives a sharp plane).
     """
 
     name: str
@@ -57,6 +69,8 @@ class Emitter:
     level: float = 1.0
     cut_planes: tuple[tuple[Vec3, Vec3], ...] = ()
     aim_z: float | None = None
+    cut_edges: tuple[CutEdge, ...] = ()
+    lens_radius: float = 0.0
 
     def beam_at(self, field: float) -> float:
         """50 % angle at `field`; a table is read linearly and held at its ends."""
@@ -160,6 +174,32 @@ def _aim_point(em: Emitter, axis: Vec3, aim_z: float) -> Vec3:
 
 # ------------------------------------------------------------- illuminance
 
+def _edge_visibility(em: Emitter, edge: CutEdge, u: Vec3) -> float:
+    """Share of the lens disc a probe in direction `u` sees past a leaf edge (half-plane through the edge line).
+
+    The disc point `delta` sees the probe when it is on the lit side of the plane through the edge
+    parallel to `u`: `n_u . delta >= n_u . (tip - source)`. The visible part is a disc segment.
+    """
+    normal = _cross(edge.direction, u)
+    length = math.sqrt(_dot(normal, normal))
+    if length < 1e-9:
+        return 1.0 if _dot(edge.normal, u) >= 0.0 else 0.0
+    normal = (normal[0] / length, normal[1] / length, normal[2] / length)
+    if _dot(normal, edge.normal) < 0.0:
+        normal = (-normal[0], -normal[1], -normal[2])
+    offset = _dot(normal, (edge.tip[0] - em.source[0], edge.tip[1] - em.source[1], edge.tip[2] - em.source[2]))
+    axis = _unit(em.axis)
+    in_disc = math.sqrt(max(0.0, 1.0 - _dot(normal, axis) ** 2))
+    if em.lens_radius <= 0.0 or in_disc < 1e-9:
+        return 1.0 if offset <= 0.0 else 0.0
+    x = offset / (in_disc * em.lens_radius)
+    if x >= 1.0:
+        return 0.0
+    if x <= -1.0:
+        return 1.0
+    return (math.acos(x) - x * math.sqrt(1.0 - x * x)) / math.pi
+
+
 def _probe_geometry(em: Emitter, probe: Probe) -> tuple[float, float, float, float] | None:
     """Unit direction source to probe and `max(0, s.n) / d^2`; None when the probe gets no light."""
     sx, sy, sz = em.source
@@ -175,7 +215,12 @@ def _probe_geometry(em: Emitter, probe: Probe) -> tuple[float, float, float, flo
     for point, normal in em.cut_planes:
         if (px - point[0]) * normal[0] + (py - point[1]) * normal[1] + (pz - point[2]) * normal[2] < 0.0:
             return None
-    return vx / d, vy / d, vz / d, cosine / d2
+    seen = 1.0
+    for edge in em.cut_edges:
+        seen *= _edge_visibility(em, edge, (vx / d, vy / d, vz / d))
+        if seen <= 0.0:
+            return None
+    return vx / d, vy / d, vz / d, cosine / d2 * seen
 
 
 def _fill(geometry, count: int, profile: Profile, axis: Vec3, up: Vec3) -> list[float]:

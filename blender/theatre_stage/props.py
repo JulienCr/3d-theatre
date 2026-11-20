@@ -112,7 +112,7 @@ def _run_deferred():
 
 def current_layout(scene):
     """The computed layout of the scene parameters with the loaded fixture library (memoised)."""
-    return build.cached_layout(scene_params(scene), library())
+    return build.cached_layout(scene_params(scene), library(), scene.get(build.FACE_EQ_KEY))
 
 
 def rebuild_scene(scene) -> None:

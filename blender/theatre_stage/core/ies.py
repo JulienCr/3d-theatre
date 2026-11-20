@@ -275,3 +275,29 @@ class Photometry:
         if self.profiles is not None:
             return self.profiles.at(field)
         return fallback_profile(round(beam, 3), round(field, 3), self.flux)
+
+
+# -------------------------------------------------------------------- bake
+
+BAKE_STEP = 0.25
+BAKE_PLANES = 9
+COSINE_FLOOR = 0.05
+
+
+def bake_ies(profile: Profile, *, step: float = BAKE_STEP) -> str:
+    """LM-63 text of `profile` over the front hemisphere, each candela divided by `cos(theta)`.
+
+    Cycles multiplies an IES by the cosine of a Lambert area light: dividing it out here makes the
+    light radiate the profile itself. The cosine is floored at `COSINE_FLOOR`; `theta` stops at 90 degrees.
+    """
+    count = round(90.0 / step) + 1
+    vertical = [90.0 * i / (count - 1) for i in range(count)]
+    horizontal = [0.0] if profile.symmetric else [360.0 * i / (BAKE_PLANES - 1) for i in range(BAKE_PLANES)]
+    rows = []
+    for phi in horizontal:
+        rows.append(" ".join(f"{profile.intensity(t, phi) / max(math.cos(math.radians(t)), COSINE_FLOOR):.6g}"
+                             for t in vertical[:-1]) + " 0")
+    return "\n".join([
+        "IESNA:LM-63-2002", "[TEST] baked from the zoom profile", "TILT=NONE",
+        f"1 -1 1 {count} {len(horizontal)} 1 2 0 0 0", "1 1 0",
+        " ".join(f"{t:.6g}" for t in vertical), " ".join(f"{p:.6g}" for p in horizontal), *rows, ""])

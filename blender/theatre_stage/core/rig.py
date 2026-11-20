@@ -14,6 +14,7 @@ from functools import lru_cache
 from collections.abc import Mapping
 
 from .barndoors import BarnDoorSet, auto_set, cut_normal, envelope_points, manual_set
+from .face_eq import Adjustment
 from .fixtures import (
     SHIPPED_DIR, Blades, Channel, Dimensions, Fixture, Library, LensTube, Mode, Mount, Optics, Range,
     cct_to_rgb, discover, encode,
@@ -247,8 +248,24 @@ class RigDims:
 
 
 @dataclass(frozen=True)
+class FaceSetup:
+    """Measuring plane of the face equalisation (spec 13.13): nose and frame widths, forestage and
+    area depths, height of the probes."""
+
+    nose_width: float
+    frame_width: float
+    forestage_depth: float
+    area_depth: float
+    z: float
+
+
+@dataclass(frozen=True)
 class Rig:
-    """`rest` maps `(universe, channel)` to the scene property value (`byte / 255`)."""
+    """`rest` maps `(universe, channel)` to the scene property value (`byte / 255`).
+
+    `face` is the probe plane of the equalisation; `equalised` is True when the face PCs carry a
+    stored equalisation (spec 13.13).
+    """
 
     enabled: bool = False
     zones: Zones | None = None
@@ -260,6 +277,8 @@ class Rig:
     haze: HazeLink | None = None
     dims: RigDims | None = None
     warnings: tuple[str, ...] = ()
+    face: FaceSetup | None = None
+    equalised: bool = False
 
     def find(self, name: str) -> RigFixture:
         for item in self.fixtures:
@@ -361,6 +380,7 @@ class _Work:
         self.nez_missed: list[str] = []
         self.doors_short: list[str] = []
         self.doors_misfit: list[str] = []
+        self.adjust: Mapping[str, Adjustment] = {}
 
     def warn(self, message: str) -> None:
         if message not in self.warnings:
@@ -994,6 +1014,15 @@ def _source(optics, tube, f_ref: float) -> tuple[str, float, float]:
     return "AREA", optics.lens_offset, 0.0
 
 
+def _adjusted_field(optics: Optics, field_angle: float) -> tuple[LensTube | None, float]:
+    """Lens tube and field of an equalised PC: the nearest tube, or the zoom field held in its range."""
+    if optics.lens_tubes:
+        tube = min(optics.lens_tubes, key=lambda t: abs(t.field_angle - field_angle))
+        return tube, tube.field_angle
+    zoom = optics.field_angle
+    return None, field_angle if zoom is None else min(max(field_angle, zoom.min), zoom.max)
+
+
 def _front_row(w: _Work, zone: tuple[float, float]) -> bool:
     return abs(zone[1] - w.zones.ys[0]) < EPS
 
@@ -1134,19 +1163,20 @@ def _wash_required(w: _Work, zone: tuple[float, float], za: float, pivot: Vec3, 
     return 2 * max(_angle_between(axis, _sub(c, pivot)) for c in _coverage(w, zone, za))
 
 
-def _wash_field(w: _Work, s: _Slot, pivot: Vec3, axis: Vec3):
-    """Field of a face PC covering its zone plus overlap (spec 13.7); row 0 takes the zoom of its focus."""
+def _wash_field(w: _Work, s: _Slot, pivot: Vec3, axis: Vec3, alert: bool = True):
+    """Field of a face PC covering its zone plus overlap (spec 13.7); row 0 takes the zoom of its focus.
+    `alert` False keeps the coverage and nez alerts quiet (an equalised aim and field are chosen for evenness)."""
     optics = s.sheet.fixture.optics
     f_req = _wash_required(w, s.meta["zone"], s.target[2], pivot, axis)
     tube, value, status = _fit_field(optics, f_req, 1.0)
-    if status == "uncovered":
+    if alert and status == "uncovered":
         w.uncovered.append((s.name, f_req, value))
-    elif status == "wide":
+    elif alert and status == "wide":
         w.too_wide.append((s.name, f_req, value))
     if s.meta["row"] == 0:
         focus = _focus(w, s.sheet, s.meta["zone"], s.meta["side"], pivot)
         w.nez_reach.append((s.name, focus.reach))
-        if not focus.in_beam:
+        if alert and not focus.in_beam:
             w.nez_missed.append(s.name)
         if status != "uncovered":
             tube, value = focus.tube, focus.field
@@ -1423,10 +1453,13 @@ def _build_fixture(w: _Work, s: _Slot, levels, done: set) -> RigFixture:
     optics, mount = s.sheet.optics, s.sheet.mount
     root = (s.x, s.y, s.z - mount.hook_height)
     pivot = (s.x, s.y, root[2] - mount.tilt_axis_height)
+    adj = w.adjust.get(s.name) if s.family == "front_pc" else None
+    if adj is not None:
+        s.target = _add(pivot, _mul(adj.axis, (pivot[2] - s.target[2]) / -adj.axis[2]))
     pan, tilt = _solve_pan_tilt(w, s.name, fx, _unit(_sub(s.target, pivot)))
     ranges = fx.pan_tilt
     moving = ranges is not None
-    over: dict[str, float] = {"dimmer": levels[s.family]}
+    over: dict[str, float] = {"dimmer": levels[s.family] * (1.0 if adj is None else adj.level)}
     pan_data = tilt_data = None
     if ranges is not None:
         pan, pan_data, pv = _angle_dmx(mode, "pan", ranges[0], pan)
@@ -1438,7 +1471,9 @@ def _build_fixture(w: _Work, s: _Slot, levels, done: set) -> RigFixture:
     source = pivot
     kelvin = None
     if s.family == "front_pc":
-        tube, field_angle = _wash_field(w, s, pivot, axis)
+        tube, field_angle = _wash_field(w, s, pivot, axis, adj is None)
+        if adj is not None:
+            tube, field_angle = _adjusted_field(optics, adj.zoom_field)
         kind, source_z, _ = _source(optics, tube, field_angle)
         source = _add(pivot, _mul(axis, source_z))
         doors = _pc_doors(w, s, pivot, frame, field_angle)
@@ -1995,8 +2030,11 @@ def _pipe_part(w: _Work, pipe: _Support, index: int) -> None:
                                  (pipe.limit, pipe.y, pipe.z), BATTEN_RADIUS))
 
 
-def compute_rig(c: Ctx, library: Library) -> tuple[Rig, Part]:
-    """The whole rig for the context `c` and the fiches of `library` (spec 13 and 15)."""
+def compute_rig(c: Ctx, library: Library, adjust: Mapping[str, Adjustment] | None = None) -> tuple[Rig, Part]:
+    """The whole rig for the context `c` and the fiches of `library` (spec 13 and 15).
+
+    `adjust` maps face PC names to their equalisation (spec 13.13): aim, zoom field and level.
+    """
     if not c.p["rig"]["enabled"]:
         return Rig(), Part()
     rg = c.p["rig"]
@@ -2004,6 +2042,7 @@ def compute_rig(c: Ctx, library: Library) -> tuple[Rig, Part]:
     ya = min(rg["area_depth"], c.plan.yb)
     zones = _zones(c, ya)
     w = _Work(c, library, zones, za, ya)
+    w.adjust = adjust or {}
     w.walls = _walls(c)
     if rg["area_depth"] > c.plan.yb + EPS:
         w.warn(f"Zone de jeu raccourcie : {_metres(rg['area_depth'])} demandés, le fond est à "
@@ -2053,5 +2092,5 @@ def compute_rig(c: Ctx, library: Library) -> tuple[Rig, Part]:
                    tuple(w.row_supports), masking_clearance, tuple(w.nez_reach))
     rig = Rig(True, zones, tuple(fixtures), tuple(entries), _rest_map(fixtures), _loads(fixtures),
               tuple((k, tuple(v)) for k, v in circuits.items()), _haze_link(w, fixtures), dims,
-              tuple(w.warnings))
+              tuple(w.warnings), FaceSetup(c.W, c.Wc, c.Ys, ya, za), bool(w.adjust))
     return rig, Part(tuple(w.objects), warnings=tuple(w.warnings))

@@ -6,7 +6,7 @@ from dataclasses import replace
 import pytest
 
 from core.face_eq import (
-    AUDIENCE, Bounds, Emitter, Probe, equalise, evaluate, face_grid, illuminance,
+    AUDIENCE, Bounds, CutEdge, Emitter, Probe, equalise, evaluate, face_grid, illuminance,
 )
 from core.fixtures import SHIPPED_DIR
 from core.ies import Photometry, ZoomSet, fallback_profile, load_ies, parse_ies
@@ -180,3 +180,24 @@ def test_beam_table_is_interpolated_and_held():
     assert e.beam_at(50.0) == pytest.approx(25.0)
     assert e.beam_at(10.0) == 10.0 and e.beam_at(100.0) == 40.0
     assert replace(e, beam_of_field=lambda f: f / 2).beam_at(30.0) == 15.0
+
+
+def edge_emitter(radius):
+    """Source at the origin of a level beam; a leaf edge 0.2 m ahead and 0.15 m up, lit side below."""
+    edge = CutEdge((0.0, -4.8, GRID_Z + 0.15), (1.0, 0.0, 0.0), (0.0, 0.6, -0.8))
+    return emitter(cut_edges=(edge,), lens_radius=radius)
+
+
+@pytest.mark.parametrize(("target", "share"), [((0.0, 8.0, 6.0), 0.5), ((0.0, 10.0, -5.0), 1.0), ((0.0, 10.0, 20.0), 0.0)])
+def test_leaf_edge_hides_part_of_the_lens_disc_from_a_probe(target, share):
+    """On the plane through the lens centre and the edge: half the disc (spec 13.13); well inside, all; behind, none."""
+    base = emitter()
+    probe = Probe(tuple(c + o for c, o in zip(base.source, target)))
+    assert illuminance(edge_emitter(0.1), probe) == pytest.approx(share * illuminance(base, probe), abs=0.01 * illuminance(base, probe))
+
+
+def test_leaf_edge_penumbra_widens_with_the_lens_and_vanishes_for_a_point():
+    base = emitter()
+    near = Probe(tuple(c + o for c, o in zip(base.source, (0.0, 8.0, 5.0))))
+    sharp, soft = illuminance(edge_emitter(0.0), near), illuminance(edge_emitter(0.1), near)
+    assert 0.0 < soft < illuminance(base, near) and sharp in (0.0, illuminance(base, near))

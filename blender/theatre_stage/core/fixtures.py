@@ -1191,7 +1191,8 @@ def cct_to_rgb(kelvin: float) -> tuple[float, float, float]:
 
 # Cycles calibration of spec 14.8: pixel = albedo * lux / 683 * EXPOSURE_GAIN on a diffuse plane.
 W_PER_CD_SPOT = 4 * math.pi**2 / 683
-W_PER_LM_AREA = 0.366 * math.pi / 683
+AREA_LM_COEFF = 0.366
+W_PER_LM_AREA = AREA_LM_COEFF * math.pi / 683
 IES_FAC_PER_CD = 0.0705
 EXPOSURE_GAIN = 1.0
 # Scene exposure written once by the first rig build: ISO 400, f/2.8, 1/50 s, i.e. 683 / 2**1.5 = 241 lx for a white card at 1.0.
@@ -1217,6 +1218,15 @@ def ies_axis_candela(text: str) -> float:
     except (IndexError, ValueError) as error:
         raise ValueError("fichier IES illisible") from error
     return first * multiplier
+
+
+def area_ies_divisor(flux: float) -> float:
+    """Divisor of the IES texture output that gives the file's candela on a Lambert area light of `max_energy`.
+
+    On the axis such a light radiates `AREA_LM_COEFF * flux / pi` candela at strength 1 (measured, spec
+    14.8); the texture returns `IES_FAC_PER_CD` per candela.
+    """
+    return IES_FAC_PER_CD * AREA_LM_COEFF * flux / math.pi
 
 
 def max_energy(beam_type: str, flux: float, field_angle: float) -> float:

@@ -66,6 +66,7 @@ def _draw_set(layout, node, params, group: Group) -> None:
 def _draw_rig_buttons(layout) -> None:
     column = layout.column(align=True)
     column.operator("theatre.rest_full", icon="LIGHT_SUN")
+    column.operator("theatre.equalize_face", icon="LIGHT_AREA")
     column.operator("theatre.blackout", icon="LIGHT_SUN")
     column.operator("theatre.export_qlc", icon="EXPORT")
     column.operator("theatre.reload_library", icon="FILE_REFRESH")
@@ -75,12 +76,21 @@ def _draw_rig_buttons(layout) -> None:
             box.label(text=line)
 
 
+def _draw_face_eq(layout, context) -> None:
+    lines = rigpanel.face_eq_lines(_layout(context))
+    if lines:
+        box = layout.box()
+        for line in lines:
+            _wrap(box, context, line)
+
+
 def _draw_group(self, context):
     group: Group = self.group
     node = getattr(getattr(context.scene, props.SCENE_ATTR), group.key)
     _draw_set(self.layout, node, group.params, group)
     if group.key == "rig":
         _draw_rig_buttons(self.layout)
+        _draw_face_eq(self.layout, context)
     if not group.side_params:
         return
     if node.symmetric:

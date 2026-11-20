@@ -6,7 +6,7 @@ import pytest
 
 from core.fixtures import SHIPPED_DIR, ies_axis_candela
 from core.ies import (
-    IesTable, Photometry, ZoomSet, fallback_profile, load_ies, parse_ies,
+    IesTable, Photometry, ZoomSet, bake_ies, fallback_profile, load_ies, parse_ies,
 )
 
 PC_DIR = SHIPPED_DIR / "generic_pc_led" / "ies"
@@ -156,3 +156,18 @@ def test_photometry_picks_ies_else_fallback():
 
 def test_table_type():
     assert isinstance(load_ies(PC_DIR / "t15_pc_zoom_0.ies"), IesTable)
+
+
+@pytest.mark.parametrize("name", ["t15_pc_zoom_128.ies", "t15_pc_zoom_0.ies"])
+def test_bake_returns_the_profile_once_the_lambert_cosine_is_divided_out(name):
+    profile = ZoomSet.of([(30.0, load_ies(PC_DIR / name))]).at(30.0)
+    baked = parse_ies(bake_ies(profile))
+    for theta in (0.0, 5.0, 12.5, 20.0, 35.0, 60.0):
+        assert baked.intensity(theta) * math.cos(math.radians(theta)) == pytest.approx(profile.intensity(theta), rel=2e-3, abs=1.0)
+    assert baked.intensity(90.0) == 0.0 and baked.vertical[-1] == 90.0
+
+
+def test_bake_keeps_the_planes_of_an_asymmetric_profile():
+    table = parse_ies(ies_text([0.0, 90.0], [0.0, 180.0], [[100.0, 0.0], [50.0, 0.0]]))
+    baked = parse_ies(bake_ies(ZoomSet.of([(40.0, table)]).at(40.0)))
+    assert len(baked.horizontal) > 1 and baked.intensity(0.0, 0.0) > baked.intensity(0.0, 180.0)

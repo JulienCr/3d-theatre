@@ -322,6 +322,7 @@ Chaque jeu :
 | `barn_doors` | Volets | automatique | aucun / automatique / manuel |
 | `row<j>_<d>_leaf_<k>` | Volet `k` (rang `j`, direction `d`) | 0° | 0 – 80° |
 | `row<j>_<d>_rotation` | Rotation des volets (rang `j`, direction `d`) | 0° | −90 – 90° |
+| `min_mean_ratio` | Moyenne minimale de l'égalisation | 0,85 *(choix)* | 0,5 – 1 |
 
 `fixture` et `mode` servent le rang 0, sur la perche de face ; `fixture_far`
 et `mode_far` servent tous les rangs accrochés à une porteuse de la scène
@@ -335,7 +336,9 @@ prennent la fiche de `fixture`, avec une alerte (jamais d'arrêt).
 à ne pas éclairer, `manuel` lit les clés `row<j>_<d>_…` (`j` de 1 à 4, `d` = `l`
 jardin ou `r` cour ; `leaf_1` à `leaf_4` dans l'ordre de `barn_doors.sides` de la
 fiche, rotation de l'ensemble en degrés), bornées par la fiche. Panneau :
-les clés `row…` ne s'affichent qu'en mode manuel.
+les clés `row…` ne s'affichent qu'en mode manuel (`shown_when` du schéma).
+`min_mean_ratio` est le plancher de moyenne de l'égalisation de la face (13.13) ;
+le changer rend l'égalisation enregistrée périmée (13.14).
 
 `overlap` : fraction de la taille d'une zone ajoutée au champ couvert (section
 13.7). Azimut 45° : fiche ADEC 6-3, nominal : 13.7 le règle rang par rang
@@ -1918,7 +1921,8 @@ sans fiche ou avec `front_pc.barn_doors = none`). Même idée que les lames
 Régler la face, c'est la rendre le plus homogène possible : le moteur calcule,
 pour chaque PC de face, un **décalage de visée**, un **zoom** et un **niveau**.
 Python pur, sans `bpy` ni `RigFixture` : l'appelant construit des `Emitter` et
-des `Probe` depuis le plan de feux (13.7). Pas encore branché au rig.
+des `Probe` depuis le plan de feux (13.7). `core/face_rig.py` fait ce travail pour le
+rig et range le résultat dans la scène (13.14).
 
 **Photométrie** (`core/ies.py`).
 
@@ -1949,9 +1953,20 @@ des `Probe` depuis le plan de feux (13.7). Pas encore branché au rig.
 - Éclairement vertical `E = niveau · I(θ, φ) · max(0, s·n) / d²` (lux), `s`
   unitaire vers la source. Ni ombre, ni réflexion, ni brume.
 - **Lames** : `cut_planes` donne des plans `(point, normale)` par le centre de
-  la lentille ; une sonde du côté sombre d'un plan reçoit 0 *(choix : coupure
-  franche, sans pénombre)*. Les plans restent fixes dans le repère de la scène :
-  ils ne suivent pas un décalage de visée *(choix)*.
+  la lentille ; une sonde du côté sombre d'un plan reçoit 0 (coupure franche).
+  Les plans restent fixes dans le repère de la scène : ils ne suivent pas un
+  décalage de visée *(choix)*.
+- **Bords de feuilles** : `cut_edges` (`CutEdge(tip, direction, normal)`) et
+  `lens_radius` remplacent la coupure franche par la pénombre réelle. Une feuille est
+  un demi-plan borné par son bord libre ; une sonde voit la part du disque de la
+  lentille que ce demi-plan ne cache pas : segment de disque, 50 % sur le plan
+  par le centre de la lentille, 1 et 0 au-delà de `±r·√(1 − (n·a)²)` de décalage
+  (`n` normale du plan entre le bord et la direction de la sonde, `a` l'axe).
+  La pénombre est large (le bord est à 0,15 à 0,3 m devant un disque de 0,2 m) :
+  une sonde à 9° du plan ne reçoit que 70 % de la lumière. **Les feuilles ouvertes
+  comptent** : elles rognent déjà le disque vu de biais (5 % de moins en moyenne).
+  Sans ce modèle, la corrélation avec Cycles tombait à 0,91 et l'uniformité
+  calculée s'écartait de 0,18 de la mesurée (13.14).
 
 **Critère.** Pour chaque direction seule (jardin, cour) et pour leur somme,
 `U = Emin / Emoy` (à maximiser) et `CV = σ / Emoy` (à minimiser). Les deux
@@ -1998,8 +2013,65 @@ Les sondes les plus sombres avant sont les coins du nez (`X = ±5,55 ; Y = 0,25`
 - Limites : les niveaux sont par appareil, alors que le plan de feux (13.7)
   groupe les PC en 4 circuits (rang, direction) ; les écrire demande un
   réglage de niveau par appareil dans le patch (15.1). Le sens de `φ` des IES
-  asymétriques (Fresnel : 9 plans, quasi symétriques) reste à vérifier dans
-  Cycles ; les profils du T15 sont de révolution.
+  asymétriques n'est pas vérifié dans Cycles : les profils du T15 et ceux du
+  Fresnel (9 plans de 45°, identiques à 1 % près) sont de révolution.
+- `U = Emin / Emoy` est dominé par les quelques sondes que les volets laissent dans
+  l'ombre (coins du nez hors cadre : 0,3 lx pour 220 lx de moyenne par direction) :
+  avec les volets automatiques `U` reste de l'ordre de 0,02 par direction et 0,15 en
+  somme, c'est `CV` qui descend (0,48 → 0,37 en somme).
+
+### 13.14 Égalisation de la face dans le rig
+
+Opérateur « Égaliser la face » (`theatre.equalize_face`) : calcule le rig **sans**
+égalisation, lance le moteur (13.13) sur ses PC de face et range le résultat dans
+la scène, propriété `theatre_face_eq` (JSON : `signature`, `date`, par PC la visée
+`axis`/`aim`, le champ `zoom_field` et le `level`, statistiques avant/après de
+`L`, `R` et `sum`). Puis reconstruit.
+
+- **Adaptateur** (`core/face_rig.py`, `emitters_of`) : un `Emitter` par PC de face.
+  `source`, `axis` du `RigFixture` ; direction (`L`/`R`) du nom, rang du circuit ;
+  `up = head_frame(*aim_angles(axis))[0]` ; plage de zoom `optics.field_angle`, **réduite au champ
+  du rig si le mode n'a pas de canal `zoom`** ; table faisceau/champ de la fiche ;
+  `Photometry` des IES de la fiche (ou du tube), repli sans IES ; `aim_z` du plan de
+  visée ; `cut_edges` : le bord libre de chaque feuille (`hinge + λ·z`, direction `x`
+  de `axes`, tournés dans le monde par `head_frame`), normale côté éclairé = `−normal`
+  de la feuille ; `lens_radius = aperture/2`. Sondes : `face_grid` sur `Rig.face`
+  (`FaceSetup` : `W`, `Wc`, `Ys`, `Ya`, `Za`) ; bornes `Bounds.for_zone(zones.width,
+  zones.depth, min_mean_ratio=front_pc.min_mean_ratio)`.
+- **Signature** : empreinte (SHA-1 tronqué) des entrées du moteur lues sur le rig
+  **non égalisé** : par PC, nom, fiche, mode, support, point d'accroche, axe, champ,
+  tube, volets (rotation, coupe, angle, normale) ; zones ; `FaceSetup` ; `min_mean_ratio` ;
+  version du format. Valeurs arrondies à 10⁻⁴. Ni niveaux ni couleurs.
+- **`compute_layout(params, library, face_eq)`** : calcule le rig, puis si `face_eq` est
+  donné et que sa signature convient, le recalcule avec les réglages (état `applied`) :
+  chaque PC de face prend l'axe égalisé (pan et tilt exacts, appareil statique), le champ
+  `zoom_field` (le tube le plus proche pour une lentille fixe), ses volets
+  automatiques recalculés pour ce nouvel axe (les plans ne sont donc exacts qu'à la
+  coupe près, 13.13) et son niveau. Sinon l'implantation garde la visée de 13.7 et
+  l'alerte « Face non égalisée depuis la dernière modification de l'implantation :
+  relancer « Égaliser la face ». » s'affiche (état `stale`). Aucun résultat enregistré :
+  rien (état vide). `Layout.face_eq_state` et `Layout.face_eq` les portent.
+- **Niveaux** : le niveau de repos du PC est `rest.pc_level × level` (15.2).
+- **Panneau** (groupe « Implantation lumière », sous les boutons) : date, puis par
+  direction et en somme `U` et `CV` avant → après, éclairement moyen et niveau moyen ;
+  une ligne « périmée » quand l'état est `stale`.
+- **Vérification dans Cycles** (2026-11-20, copie de la scène de l'utilisateur, PC de
+  face seuls à `pc_level` 0,7, blanc neutre 6 500 K, sans brume ni architecture,
+  rebonds 0, vue Standard) : 246 cartes diffuses verticales de 0,20 × 0,30 m
+  (albédo 0,8) aux sondes, caméra orthographique inclinée de 40°, 256 échantillons
+  sans débruitage (bruit médian 0,2 %), valeur moyenne du cœur de chaque carte. Mesuré
+  contre calculé (`pixel = ρ·niveau·E/683` attendu) :
+
+  | Série | Corrélation | Pente mesuré/attendu | `U` mesuré / calculé | `CV` mesuré / calculé |
+  |---|---|---|---|---|
+  | avant, jardin (cour : identique) | 0,9992 | 0,95 | 0,023 / 0,025 | 0,534 / 0,515 |
+  | avant, somme | | | 0,180 / 0,190 | 0,498 / 0,482 |
+  | après, jardin | 0,9991 | 0,96 | 0,028 / 0,030 | 0,402 / 0,392 |
+  | après, somme | | | 0,152 / 0,161 | 0,374 / 0,368 |
+
+  La pente vaut 0,95 et non 1 : le demi-plan d'une feuille surestime d'environ 5 %
+  la lumière que les feuilles laissent passer. Un PC seul, volets retirés : pente
+  1,000 et corrélation 1,000 sur toute la plage d'angles (0 à 50° de l'axe).
 
 ## 14. Appareils dans Blender
 
@@ -2081,7 +2153,11 @@ matériaux cherchés par nom.
 - **Wash et PC** (`beam_type: wash`) : lumière `AREA`, forme `DISK`, `size =
   lens_diameter`, placée dans le plan de la lentille (`z = lens_offset`),
   `spread` = angle de faisceau courant (constant ou piloté par `zoom`),
-  même rotation de 180° autour de X.
+  même rotation de 180° autour de X. **Avec un profil IES** (les deux PC livrés),
+  `spread = 180°` : le profil donne seul la forme du faisceau (14.8), le `spread`
+  du faisceau le rétrécissait une seconde fois (corrélation 0,67 avec le moteur 13.13).
+  Le zoom DMX n'agit alors plus sur la lumière : elle prend le champ du plan de feux
+  (ou de l'égalisation, 13.14).
 - `_Lens` : disque de verre `TS_Lens` dans le plan de la lentille, tiré de
   0,005 vers l'avant. Il ne projette pas d'ombre, de même que `_Base`, `_Pan`
   et `_Tilt` *(choix)* : l'approximation de la source n'a pas à être ombrée
@@ -2219,7 +2295,15 @@ driver.
   `IES_FAC_PER_CD · candela` sur l'axe, soit des milliers de fois la valeur
   sans IES. Le nœud `Math` (multiplication) placé après la texture IES
   divise donc par `IES_FAC_PER_CD · ies_axis_candela(fichier)` : l'axe vaut 1,
-  comme sans IES, et le fichier ne donne que la **forme** du faisceau.
+  comme sans IES, et le fichier ne donne que la **forme** du faisceau (spots).
+- **PC et wash à IES** : l'IES est un texte `TSF_<id>_f<champ>.ies` **cuit** depuis le
+  profil du moteur (`ZoomSet.at(champ)`, 13.13) à 0,25° près, chaque candela divisée par
+  `cos θ` (le disque surfacique est lambertien, Cycles multiplie le profil par ce
+  cosinus), nul à 90°. Le nœud `Math` divise par `area_ies_divisor(flux) =
+  IES_FAC_PER_CD · 0,366 · flux / π` : la lumière rend les candelas du fichier,
+  mesuré à 1,000 sur l'axe d'un PC seul (pente 0,820·10⁻³ attendue pour `ρ·0,7/683`).
+  Le facteur `1/π` complète le 0,366 mesuré à `spread` étroit (un disque à 180°
+  rend `0,366·flux/π` cd sur l'axe, pas `0,366·flux`).
 - **Constantes étalonnées** (Cycles 5.3) : `W_PER_CD_SPOT = 4π²/683`,
   `W_PER_LM_AREA = 0,366·π/683`, `IES_FAC_PER_CD = 0,0705`,
   `EXPOSURE_GAIN = 1`. Définition du niveau : sur un plan diffus d'albédo
@@ -2327,7 +2411,7 @@ par appareil patché et par canal, en valeur normalisée puis écrite selon
 
 | Attribut | Valeur de repos |
 |---|---|
-| `dimmer` | `pc_level` (PC de face), `profile_level` (découpes), `mover_level` (mobiles et contre), `haze_level` pour `haze_density` |
+| `dimmer` | `pc_level` (PC de face, fois le `level` de l'égalisation si elle est appliquée, 13.14), `profile_level` (découpes), `mover_level` (mobiles et contre), `haze_level` pour `haze_density` |
 | `pan`, `tilt` | angles de 13.9 pour la visée de repos, convertis en valeur normalisée |
 | `cct` | `K` de `rest.cct_left` / `cct_right` (PC par direction) ou `cct_profile` (découpes), converti sur `colour.cct_range` ; hors plage : ramené et signalé |
 | `color_r/g/b/w`, `cyan/magenta/yellow`, `emitter_N` | couleur de `cct_to_rgb(K)` pour les PC et les découpes, **seulement si le mode n'a pas de canal `cct`** : `rgbw` → `(r, g, b)`, `w = 0` ; `cmy` → `(1 − r, 1 − g, 1 − b)` ; `emitters` → poids dans [0, 1] des émetteurs dont le mélange approche `(r, g, b)` (moindres carrés non négatifs) ; mobiles : valeur par défaut de la fiche |
