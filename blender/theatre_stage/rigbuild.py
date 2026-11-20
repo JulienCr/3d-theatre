@@ -17,7 +17,8 @@ import bpy
 from . import materials
 from .core.fixture_models import fixture_model
 from .core.fixtures import (
-    IES_FAC_PER_CD, Blades, Fixture, LensTube, Library, Optics, Strobe, cct_to_rgb, ies_axis_candela, max_energy,
+    DEFAULT_EXPOSURE_EV, IES_FAC_PER_CD, Blades, Fixture, LensTube, Library, Optics, Strobe, cct_to_rgb,
+    ies_axis_candela, max_energy,
 )
 from .core.meshes import Mesh
 from .core import rigpanel
@@ -27,6 +28,7 @@ TAG = materials.TAG
 MAX_CHANNEL = 512
 MAX_EXPRESSION = 255
 WORLD_HAZE = "DMX_Haze"
+EXPOSURE_MARK = "theatre_exposure_set"
 LENS_ADVANCE = 0.005
 LENS_SEGMENTS = 32
 LENS_GAIN = 8.0
@@ -645,6 +647,17 @@ def ensure_dmx_props(scene, rig: Rig) -> int:
     return created
 
 
+def ensure_default_exposure(scene) -> bool:
+    """Write `DEFAULT_EXPOSURE_EV` on the first rig build of a scene still at 0 EV; never touched again (spec 14.8)."""
+    if EXPOSURE_MARK in scene:
+        return False
+    scene[EXPOSURE_MARK] = True
+    if scene.view_settings.exposure != 0.0:
+        return False
+    scene.view_settings.exposure = DEFAULT_EXPOSURE_EV
+    return True
+
+
 def rest_full(scene, rig: Rig) -> int:
     """Overwrite every patched channel with its rest value (spec 15.2); returns the channel count."""
     for (universe, channel), value in rig.rest.items():
@@ -698,6 +711,7 @@ def build_rig(scene, layout, collections, new_mesh: Callable, material: Callable
         warnings.append("Brume DMX Visualizer (World, « DMX_Haze ») active : la brume serait comptée deux fois.")
     if rig is None or not rig.enabled:
         return {}
+    ensure_default_exposure(scene)
     if ensure_dmx_props(scene, rig):
         scene.update_tag()
         bpy.context.view_layer.update()

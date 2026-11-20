@@ -1787,13 +1787,36 @@ colonne « Sans canal ».
   trop sombre, 40 % à 5°.
 - Seule la photométrie **relative** des fiches est garantie ; `EXPOSURE_GAIN`
   et l'exposition de la scène règlent le niveau absolu.
-- **Niveau par défaut** : `EXPOSURE_GAIN = 1`, exposition de scène 0 EV (AgX).
-  Préréglage `reference_with_modules` en plein feu de repos, rendu Cycles
-  depuis `Cam_Face` : valeur affichée moyenne 0,23, visage 0,58, aucun pixel
-  proche du blanc ; avec brume (densité 0,02), moyenne 0,24 et faisceaux
-  lisibles. En vue « Standard », 0,16 % des pixels saturent (les lentilles
-  des appareils vus de face), 0,14 % avec brume. Aucun réglage d'exposition
-  n'est donc posé par l'extension.
+- **Niveau par défaut** : `EXPOSURE_GAIN = 1` (la photométrie des fiches reste
+  celle du tableau ci-dessus) et exposition de scène `DEFAULT_EXPOSURE_EV = +1,5 EV`
+  (AgX), soit un appareil réglé à ISO 400, f/2,8, 1/50 s : une carte blanche
+  à `683 / 2^1,5 = 241 lx` y vaut 1. La première reconstruction d'une scène
+  dont l'exposition vaut 0 écrit cette valeur, puis marque la scène
+  (propriété `theatre_exposure_set`) ; une exposition déjà modifiée n'est pas
+  touchée, et une exposition réglée ensuite par l'utilisateur n'est jamais
+  réécrite.
+- **Pourquoi** (diagnostic du 2026-11-20, scène de l'utilisateur, Cycles,
+  matériaux BlenderKit, brume 0,01, vue AgX) : « trop sombre » n'était pas
+  un défaut de puissance. Pilotes vérifiés (`energy = max_energy · niveau`,
+  obturateur à 255 = ouvert), puis mesures sur plan blanc d'albédo 0,8, monde
+  noir, 5 m, mesuré / attendu : MAC Aura 3 850 lm à 41,7° 342 lx pour
+  374 (0,91) ; PC T15 9 566 lm à 26,8° 1 988 lx pour 2 600 (0,76, le profil
+  IES retire la lumière hors du cône d'étalement). Seize PC à fond donnent
+  en moyenne 440 lx au plateau (630 à 680 lx sur l'acteur, 1 250 au
+  maximum) : un niveau de face réaliste, mais vu à 0 EV avec un sol d'albédo
+  0,01 à 0,03 et des pendrillons à 0,01, la valeur affichée moyenne vaut
+  0,017 et l'acteur 0,18. Une Aura seule en grand champ éclaire à 150 lx à
+  8 m (calcul) ; son faisceau, vu de côté dans une brume de 0,01 par mètre,
+  vaut environ 0,002 en valeur linéaire (estimation).
+  Le préréglage de repos, à 0 EV, affiche l'acteur à 0,47 (0,58 à +1 EV,
+  la valeur du préréglage sur les matériaux de base) sans pixel saturé
+  jusqu'à +2 EV.
+- **Avec +1,5 EV**, même vue `Cam_Face`, mêmes consignes DMX : seize PC à
+  fond, moyenne 0,048 et acteur 0,35 (0,019 et 0,21 avant) ; repos, moyenne
+  0,141 et acteur 0,63, 0,01 % de pixels au-dessus de 0,95.
+- Pas de balance des blancs : une consigne `cct` à 0 donne 2 700 K, rendu
+  tel quel en orange (le nœud `Blackbody` de Cycles conserve la luminance,
+  environ 1,1) ; monter le canal `cct` pour un blanc neutre.
 
 ## 15. Patch DMX, repos et brume
 

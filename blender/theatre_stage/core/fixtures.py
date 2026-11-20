@@ -1134,6 +1134,8 @@ W_PER_CD_SPOT = 4 * math.pi**2 / 683
 W_PER_LM_AREA = 0.366 * math.pi / 683
 IES_FAC_PER_CD = 0.0705
 EXPOSURE_GAIN = 1.0
+# Scene exposure written once by the first rig build: ISO 400, f/2.8, 1/50 s, i.e. 683 / 2**1.5 = 241 lx for a white card at 1.0.
+DEFAULT_EXPOSURE_EV = 1.5
 
 
 def ies_axis_candela(text: str) -> float:
