@@ -2,7 +2,7 @@ import math
 
 import pytest
 
-from core.layout import compute_layout
+from core.layout import HAZE_INSET, compute_layout
 from core.meshes import build_mesh
 from helpers import approx_bounds, bounds, layout, make, modules_off
 
@@ -48,7 +48,8 @@ def test_side_zone_widens_with_a_warning_only_when_stairs_need_it():
                for w in lay.warnings)
     quiet = layout(stairs={"side_angle": 0.0})
     assert not any("Zone latérale" in w for w in quiet.warnings)
-    wide = layout(stairs={"side_angle": 0.0}, advanced={"side_zone_width": 3.0})
+    wide = layout(stairs={"side_angle": 0.0}, advanced={"side_zone_width": 3.0},
+                  rig={"enabled": False})
     assert wide.derived.side_zone == pytest.approx(3.0) and not wide.warnings
 
 
@@ -186,8 +187,10 @@ def test_light_battens_exist_and_are_numbered_without_gaps():
         ys.append(tube.start[1])
         assert tube.start[0] == pytest.approx(-6.9) and tube.end[0] == pytest.approx(6.9)
         assert tube.start[2] == pytest.approx(1.2 + 6.1 - 0.5) and tube.radius == pytest.approx(0.024)
-    assert ys == pytest.approx([2.1, 3.1])
-    assert "Batten_03" not in lay.names()
+    last_plane = lay.find("MaskingBatten_03").start[1]
+    front = lay.find("MaskingBatten_00").start[1]
+    assert ys == pytest.approx([2.1, front + 0.30, 3.1, (last_plane + lay.derived.backdrop_y) / 2])
+    assert "Batten_05" not in lay.names()
 
 
 def test_light_battens_without_any_neighbour_follow_spacing_and_back_margin():
@@ -284,16 +287,17 @@ def test_haze_volume_is_a_single_box_only_when_enabled():
 
 @pytest.mark.parametrize("stairs,stage", [({}, {}), ({"side_angle": 0.0}, {}),
                                           ({}, {"wings": 5.0}), ({}, {"wings": 0.0})])
-def test_house_haze_box_ends_on_walls_floor_and_ceiling(stairs, stage):
+def test_house_haze_box_ends_inside_walls_floor_back_wall_and_under_ceiling(stairs, stage):
     lay = layout(haze={"enabled": True}, stairs=stairs, stage=stage)
     (x0, x1), (y0, y1), (z0, z1) = bounds(lay, "Haze_Volume")
     floor, ceiling = bounds(lay, "House_Floor"), bounds(lay, "House_Ceiling")
     wall_l, wall_r = bounds(lay, "Cage_Wall_L"), bounds(lay, "Cage_Wall_R")
-    assert x0 == pytest.approx(min(floor[0][0], wall_l[0][1]))
-    assert x1 == pytest.approx(max(floor[0][1], wall_r[0][0]))
-    assert y0 == pytest.approx(floor[1][0]) and y1 == pytest.approx(bounds(lay, "Cage_Back")[1][0])
-    assert z0 == pytest.approx(floor[2][1])
-    assert z1 == pytest.approx(max(ceiling[2][0], lay.find("Grid_Deck").z_min))
+    e = HAZE_INSET
+    assert x0 == pytest.approx(min(floor[0][0], wall_l[0][1]) - e)
+    assert x1 == pytest.approx(max(floor[0][1], wall_r[0][0]) + e)
+    assert y0 == pytest.approx(floor[1][0] - e) and y1 == pytest.approx(bounds(lay, "Cage_Back")[1][0] + e)
+    assert z0 == pytest.approx(floor[2][1] - e)
+    assert z1 == pytest.approx(max(ceiling[2][0], lay.find("Grid_Deck").z_min) - e)
 
 
 def test_stage_haze_fades_toward_the_house_and_keeps_every_side_on_a_wall():

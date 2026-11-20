@@ -1,0 +1,74 @@
+version: 1
+id: test_mover
+manufacturer: Test
+model: Mover
+family: moving_profile
+sources:
+  - {kind: datasheet, url: "https://example.org/mover.pdf", note: synthetic}
+  - {kind: other, url: gobos/g1.png}
+physical:
+  weight: 20.5
+  dimensions: {width: 0.4, depth: 0.3, height: 0.7}
+  mount: {hook_height: 0.12, tilt_axis_height: 0.35}
+optics:
+  beam_type: profile
+  lens_diameter: 0.12
+  lens_offset: 0.2
+  flux: 12000
+  field_angle: {min: 6, max: 50}
+  zoom_invert: true
+colour:
+  systems: [cmy, cto, cct]
+  cct_range: {min: 2700, max: 8000}
+  cto_kelvin: 3200
+motion:
+  type: moving
+  pan: {min: -270, max: 270}
+  tilt: {min: -130, max: 130}
+blades:
+  count: 4
+  mode: motorised
+  gate_from_lens: 0.18
+  span: 0.12
+  travel: {open: 0.07, closed: -0.02}
+  sides: [180, 270, 0, 90]
+  angle_limit: 30
+  rotation: {min: -60, max: 60}
+gobos:
+  wheels:
+    - name: gobo1
+      rotation_range: 360
+      slots:
+        - {name: Open, image: null, dmx: [0, 9]}
+        - {name: Dots, image: gobos/g1.png, dmx: [10, 19]}
+iris:
+  min_ratio: 0.1
+strobe:
+  open: [0, 31]
+  closed: [32, 63]
+  strobe: {from: 64, to: 127, hz_min: 0.5, hz_max: 20}
+modes:
+  - name: Standard
+    footprint: 12
+    channels:
+      - {offset: 1, attribute: pan, bits: 16, default: 32768, fine: 2}
+      - {offset: 3, attribute: tilt, bits: 16, default: 32768}
+      - {offset: 5, attribute: dimmer, bits: 8, default: 0}
+      - {offset: 6, attribute: zoom, bits: 8, default: 128}
+      - {offset: 7, attribute: cyan, bits: 8, default: 0}
+      - {offset: 8, attribute: blade_1a, bits: 8, default: 0}
+      - {offset: 9, attribute: prism1, bits: 8, default: 0}
+      - {offset: 10, attribute: prism2, bits: 8, default: 0}
+  - name: Basic
+    footprint: 4
+    channels:
+      - {offset: 1, attribute: pan, bits: 8, default: 128}
+      - {offset: 2, attribute: tilt, bits: 8, default: 128}
+      - {offset: 4, attribute: dimmer, bits: 8, default: 0}
+default_mode: Standard
+model3d:
+  kind: procedural
+  shape: profile
+  body: {width: 0.25, depth: 0.25, height: 0.3}
+  barrel: {diameter: 0.14, length: 0.3}
+  yoke: {gap: 0.28, height: 0.3}

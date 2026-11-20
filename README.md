@@ -9,11 +9,6 @@ presets, and rebuilds without losing your materials.
 
 ![Cam_Face view with haze and the lighting rig at rest values](docs/images/hero-haze.jpg)
 
-> **Branches.** `master` holds the stage generator. The lighting rig (fixture
-> library, DMX, QLC+ export, `tools/gdtf_to_fiche.py`) lives on
-> **`feat/lighting-rig`** until it is merged. The renders in this README were
-> made with the rig branch.
->
 > **Language.** The panel UI and `docs/spec.md` are in French. Code,
 > identifiers and this README are in English; French stage terms are given in
 > parentheses where useful.
@@ -57,7 +52,7 @@ presets, and rebuilds without losing your materials.
   user-saved. The panel, the property group and the presets all derive from one
   schema (`core/params.py`).
 
-### Lighting rig (branch `feat/lighting-rig`)
+### Lighting rig
 - **Fixture library.** A fixture is a YAML fiche (`library/fixtures/<id>/`),
   never code, built from a GDTF file where one exists. Seven fiches ship:
   Martin MAC Aura, Robe Robin Esprite, ETC Source Four LED Series 3 (Lustr X8
@@ -176,7 +171,7 @@ See `blender/theatre_stage/library/fixtures/README.md` and spec section 12.
 
 - [`docs/spec.md`](docs/spec.md) (French): parameters, geometry, masking,
   presets, fixture library, rig layout, DMX, QLC+ export.
-- [`BACKLOG.md`](BACKLOG.md) (French): known gaps and ideas.
+- [Issues](https://github.com/JulienCr/3d-theatre/issues) (French): known gaps and ideas.
 
 ## License
 

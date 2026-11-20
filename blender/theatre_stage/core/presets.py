@@ -31,8 +31,11 @@ def params_to_yaml(params: dict) -> str:
     return yaml.safe_dump(document, sort_keys=False, allow_unicode=True)
 
 
-def params_from_yaml(text: str) -> tuple[dict, list[str]]:
-    """Parse preset text. Returns (params, French warnings)."""
+def params_from_yaml(text: str, catalog=None) -> tuple[dict, list[str]]:
+    """Parse preset text. Returns (params, French warnings).
+
+    With a fixture `catalog`, unknown fiche ids and modes revert to the default (spec 9).
+    """
     try:
         document = yaml.safe_load(text)
     except yaml.YAMLError as error:
@@ -45,12 +48,12 @@ def params_from_yaml(text: str) -> tuple[dict, list[str]]:
     version = document.get("version", SCHEMA_VERSION)
     if version != SCHEMA_VERSION:
         warnings.append(f"Version de préréglage {version!r} inconnue (attendue : {SCHEMA_VERSION}).")
-    params, issues = validate_params(document)
+    params, issues = validate_params(document, catalog)
     return params, warnings + issues
 
 
-def read_preset(path) -> tuple[dict, list[str]]:
-    return params_from_yaml(Path(path).read_text(encoding="utf-8"))
+def read_preset(path, catalog=None) -> tuple[dict, list[str]]:
+    return params_from_yaml(Path(path).read_text(encoding="utf-8"), catalog)
 
 
 def write_preset(path, params: dict) -> None:

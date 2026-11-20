@@ -65,3 +65,44 @@ def test_shipped_presets_are_in_sync_with_the_schema():
 def test_open_space_preset_builds_no_module():
     params, _ = presets.read_preset(presets.shipped_presets()["open_space"])
     assert not [n for n in compute_layout(params).names() if n.startswith("Module_")]
+
+
+def test_roundtrip_of_the_lighting_groups():
+    params = make(rig={"site": 40.0, "enabled": False}, rig_front={"auto_position": False, "y": -2.0},
+                  backlight={"count": 8, "fixture": "some_wash", "mode": "Extended"},
+                  profiles={"blades_mode": "manual", "l_blade_2_insertion": 0.5,
+                            "c_blade_1_angle": -12.5, "r_rotation": 30.0},
+                  rest={"cct_left": 2800}, patch={"profiles_universe": 9, "hazer_address": 17},
+                  haze={"dmx_driven": True})
+    params["towers"]["symmetric"] = False
+    params["towers"]["right"].update(count=2, height=6.0)
+    loaded, warnings = presets.params_from_yaml(presets.params_to_yaml(params))
+    assert warnings == [] and loaded == params
+
+
+def test_an_older_preset_without_lighting_groups_takes_the_defaults_silently():
+    params, warnings = presets.params_from_yaml("version: 1\nstage:\n  width: 12\n")
+    assert warnings == []
+    assert params["patch"] == default_params()["patch"] and params["towers"] == default_params()["towers"]
+
+
+def test_shipped_presets_carry_every_lighting_group_with_the_defaults():
+    import yaml
+    for path in presets.shipped_presets().values():
+        document = yaml.safe_load(path.read_text(encoding="utf-8"))
+        for key in ("rig", "rig_front", "backlight", "front_movers", "towers", "front_pc",
+                    "profiles", "rest", "patch"):
+            assert document[key] == default_params()[key], (path.name, key)
+        assert document["haze"]["dmx_driven"] is False
+        assert document["haze"]["fixture"] == "generic_hazer"
+
+
+def test_unknown_fixture_in_a_preset_reverts_to_the_default_with_a_warning():
+    from pathlib import Path
+    from core import fixtures
+    library = fixtures.discover([Path(__file__).parent / "data" / "fixtures"])
+    text = "version: 1\nfront_movers:\n  fixture: ghost\n  count: 2\nprofiles:\n  fixture: test_mover\n"
+    params, warnings = presets.params_from_yaml(text, catalog=library)
+    assert params["front_movers"]["fixture"] == "robe_robin_esprite" and params["front_movers"]["count"] == 2
+    assert params["profiles"]["fixture"] == "etc_s4led_s3_lustr_x8"  # test_mover is not a profile
+    assert len(warnings) == 2 and "ghost" in warnings[0]

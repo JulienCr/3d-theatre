@@ -10,13 +10,15 @@ import bpy
 import numpy as np
 from mathutils import Vector
 
-from . import atmosphere, materials
+from . import atmosphere, materials, rigbuild
+from .core.face_rig import FaceEq
 from .core.layout import Layout, compute_layout
 from .core.meshes import Mesh, build_mesh, pleated_mesh
 from .core.primitives import Light, PleatedSurface, Tube
 
 TAG = materials.TAG
 OPEN_KEY = "Open"
+FACE_EQ_KEY = "theatre_face_eq"
 OPENING_PATH = "theatre.curtains.main_opening"
 HAZE_NODE = "Haze Scatter"
 HAZE_DENSITY = "Haze Density"
@@ -26,20 +28,20 @@ FABRIC_THICKNESS = 0.003
 
 ROUGHNESS = {
     "TS_StageFloor": 0.35, "TS_Masking": 0.95, "TS_MainCurtain": 0.9, "TS_Cyclorama": 0.8,
-    "TS_Enclosure": 0.85, "TS_HouseFloor": 0.7,
+    "TS_Enclosure": 0.85, "TS_HouseFloor": 0.7, "TS_Fixture": 0.55, "TS_Lens": 0.05,
 }
 
-_layout_cache: tuple[str, Layout] | None = None
+_layout_cache: tuple[tuple, Layout] | None = None
 foreign_names: list[str] = []
 rebuilding = False
 
 
-def cached_layout(params: dict) -> Layout:
-    """`compute_layout` memoised on the last params (the panel calls it per redraw)."""
+def cached_layout(params: dict, library=None, face_eq: str | None = None) -> Layout:
+    """`compute_layout` memoised on the last params, library and stored face equalisation (JSON text)."""
     global _layout_cache
-    key = repr(params)
+    key = (repr(params), id(library), face_eq)
     if _layout_cache is None or _layout_cache[0] != key:
-        _layout_cache = (key, compute_layout(params))
+        _layout_cache = (key, compute_layout(params, library, FaceEq.from_json(face_eq)))
     return _layout_cache[1]
 
 
@@ -66,8 +68,9 @@ def ensure_collections(scene, layout: Layout) -> dict[str, bpy.types.Collection]
     return out
 
 
-def _delete_generated(root) -> None:
-    doomed = [o for o in materials.walk_objects(root) if is_generated(o)]
+def _delete_generated(root, keep_cameras: frozenset[str] | set[str] = frozenset()) -> None:
+    doomed = [o for o in materials.walk_objects(root)
+              if is_generated(o) and not (o.type == "CAMERA" and o.name in keep_cameras)]
     datablocks = [(o.data, o.type) for o in doomed if o.data is not None]
     for obj in doomed:
         bpy.data.objects.remove(obj, do_unlink=True)
@@ -132,8 +135,7 @@ def _setup_haze_material(mat: bpy.types.Material, scene: bpy.types.Scene) -> Non
     links.new(density.outputs[0], scale.inputs[1])
     links.new(scale.outputs[0], scatter.inputs["Density"])
     links.new(scatter.outputs["Volume"], output.inputs["Volume"])
-    _drive(tree, f'nodes["{HAZE_DENSITY}"].outputs[0].default_value', "var", scene,
-           var="theatre.haze.density")
+    drive_haze_density(mat, scene, None)
     _drive(tree, f'nodes["{HAZE_NODE}"].inputs["Anisotropy"].default_value', "var", scene,
            var="theatre.haze.anisotropy")
     ramp_path = f'nodes["{HAZE_RAMP}"].inputs'
@@ -145,6 +147,20 @@ def _setup_haze_material(mat: bpy.types.Material, scene: bpy.types.Scene) -> Non
            mode="theatre.haze.extent")
 
 
+def drive_haze_density(mat: bpy.types.Material, scene: bpy.types.Scene, link) -> None:
+    """Density = `haze.density`, times the hazer level when the rig has a DMX-driven hazer (spec 15.4)."""
+    tree = mat.node_tree
+    if tree is None or tree.nodes.get(HAZE_DENSITY) is None:
+        return
+    path = f'nodes["{HAZE_DENSITY}"].outputs[0].default_value'
+    tree.driver_remove(path)
+    if link is None:
+        _drive(tree, path, "var", scene, var="theatre.haze.density")
+        return
+    level, paths = link.level()
+    _drive(tree, path, f"var*{level}", scene, var="theatre.haze.density", **paths)
+
+
 def _upgrade_haze_material(mat: bpy.types.Material, scene: bpy.types.Scene) -> None:
     """Give a TS_Haze made before the ramp existed its new node setup (ours only)."""
     tree = mat.node_tree
@@ -153,7 +169,8 @@ def _upgrade_haze_material(mat: bpy.types.Material, scene: bpy.types.Scene) -> N
         _setup_haze_material(mat, scene)
 
 
-MATERIAL_SETUP = {"TS_HouseCeiling": _setup_ceiling_material, "TS_Haze": _setup_haze_material}
+MATERIAL_SETUP = {"TS_HouseCeiling": _setup_ceiling_material, "TS_Haze": _setup_haze_material,
+                  "TS_Lens": rigbuild.setup_lens_material}
 MATERIAL_UPGRADE = {"TS_Haze": _upgrade_haze_material}
 
 
@@ -298,37 +315,45 @@ def _make_light(spec: Light, collections) -> bpy.types.Object:
 
 
 def _make_camera(spec, collections) -> bpy.types.Object:
-    data = bpy.data.cameras.new(spec.name)
-    data.lens = spec.lens
-    data.clip_end = 500.0
-    obj = bpy.data.objects.new(spec.name, data)
-    obj[TAG] = True
+    """Create the camera, or update the generated one in place: deleting the active camera
+    throws a 3D view out of camera view."""
+    obj = bpy.data.objects.get(spec.name)
+    if obj is None or obj.type != "CAMERA" or not is_generated(obj):
+        obj = bpy.data.objects.new(spec.name, bpy.data.cameras.new(spec.name))
+        obj[TAG] = True
+    obj.data.lens = spec.lens
+    obj.data.clip_end = 500.0
     _aim(obj, spec.location, spec.target)
-    collections[spec.collection].objects.link(obj)
+    target = collections[spec.collection]
+    for coll in collections.values():
+        if coll is not target and obj.name in coll.objects:
+            coll.objects.unlink(obj)
+    if obj.name not in target.objects:
+        target.objects.link(obj)
     return obj
 
 
 # ------------------------------------------------------------------ rebuild
 
-def rebuild(scene: bpy.types.Scene, params: dict) -> Layout:
-    """Delete every generated object of `scene` and recreate it from `params`."""
+def rebuild(scene: bpy.types.Scene, params: dict, library=None) -> Layout:
+    """Delete every generated object of `scene` and recreate it from `params` and the fixture `library`."""
     global rebuilding
     rebuilding = True
     try:
-        return _rebuild(scene, params)
+        return _rebuild(scene, params, library)
     finally:
         rebuilding = False
 
 
-def _rebuild(scene: bpy.types.Scene, params: dict) -> Layout:
+def _rebuild(scene: bpy.types.Scene, params: dict, library) -> Layout:
     materials.ensure_items(scene)
     materials.detect(scene)
-    layout = cached_layout(params)
+    layout = cached_layout(params, library, scene.get(FACE_EQ_KEY))
     collections = ensure_collections(scene, layout)
 
     active = scene.camera
     wanted_camera = active.name if active is not None and is_generated(active) else "Cam_Face"
-    _delete_generated(collections[layout.root_collection])
+    _delete_generated(collections[layout.root_collection], {spec.name for spec in layout.cameras})
 
     chosen = materials.overrides(scene)
     slot_materials = {}
@@ -339,11 +364,18 @@ def _rebuild(scene: bpy.types.Scene, params: dict) -> Layout:
         _make_geometry(primitive, scene, collections, slot_materials)
     for spec in layout.lights:
         _make_light(spec, collections)
+    rigbuild.build_rig(scene, layout, collections, _new_mesh,
+                       lambda name: chosen.get(name) or get_material(name, layout.materials, scene), library)
+    haze = bpy.data.materials.get("TS_Haze")
+    if haze is not None:
+        drive_haze_density(haze, scene, layout.rig.haze if layout.rig else None)
     cameras = {spec.name: _make_camera(spec, collections) for spec in layout.cameras}
     atmosphere.apply(scene, params, layout)
 
     if scene.camera is None or is_generated(scene.camera):
-        scene.camera = cameras.get(wanted_camera) or cameras.get("Cam_Face")
+        chosen_camera = cameras.get(wanted_camera) or cameras.get("Cam_Face")
+        if scene.camera != chosen_camera:
+            scene.camera = chosen_camera
     foreign_names[:] = sorted(o.name for o in materials.walk_objects(collections[layout.root_collection])
                               if not is_generated(o))
     scene.update_tag()

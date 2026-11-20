@@ -5,11 +5,23 @@ from core.meshes import build_mesh
 from core.params import default_params
 
 
-def make(**groups):
-    """Defaults with per-group overrides, e.g. make(stage={"width": 12.0})."""
-    params = default_params()
-    for key, values in groups.items():
+# The rig mechanics tests pin the McCandless layout (45 degrees, four columns); the shipped defaults
+# (front pipe 2.6 m from the facade, 16 degrees, three columns) are checked in test_params and test_face_rig.
+CLASSIC_FACE = {"rig": {"site": 45.0}, "front_pc": {"azimuth": 45.0, "zone_width": 3.0}}
+
+
+def classic(params):
+    """`params` with the classic lighting layout of `CLASSIC_FACE`."""
+    for key, values in CLASSIC_FACE.items():
         params[key].update(values)
+    return params
+
+
+def make(**groups):
+    """Defaults with per-group overrides, e.g. make(stage={"width": 12.0}); the lighting is the classic layout."""
+    params = default_params()
+    for key, values in {**{k: dict(v) for k, v in CLASSIC_FACE.items()}, **groups}.items():
+        params[key].update({**CLASSIC_FACE.get(key, {}), **values})
     return params
 
 

@@ -1,0 +1,108 @@
+version: 1
+id: generic_fresnel_led
+manufacturer: Generic
+model: Fresnel LED blanc variable
+family: pc
+
+# Calibrated on the Chauvet Professional Ovation F-915VW (89 LED 6-colour engine, motorised zoom).
+# Chosen over the Robe T15 PC (field max 54.4 deg): its field reaches 85 deg (83.8 deg measured), the widest
+# sourced variable-white LED Fresnel found. DMX layout below is generic, not the Chauvet protocol.
+sources:
+  - kind: datasheet
+    url: https://chauvetprofessional.com/wp-content/uploads/pdf/en/OVATIONF915VW-2.pdf
+    note: "Reference product: Chauvet Ovation F-915VW. Beam 17-54 deg, field 30-85 deg, 4143 lm at 30 deg / 6792 lm at 85 deg, CCT 2800-8000 K, 8.5 kg, 569 x 320 x 275 mm."
+  - kind: datasheet
+    url: source/chauvet_ovation_f915vw_datasheet.pdf
+    note: "Local copy of the datasheet above."
+  - kind: other
+    url: https://chauvetprofessional.com/wp-content/uploads/2015/01/Ovation_F-915VW_Photometrics_Report.pdf
+    note: "Chauvet LabSpion photometric report (full flood, 50% zoom, full spot, 3200 K and 5600 K chromaticity)."
+  - kind: other
+    url: source/chauvet_ovation_f915vw_photometrics_report.pdf
+    note: "Local copy of the report above."
+  - kind: other
+    url: https://chauvetprofessional.com/wp-content/uploads/2015/01/Ovation_F-915VW_UM_Rev8-1.pdf
+    note: "User manual Rev. 8: product dimensions drawing (452 / 569 / 320 / 275 / 190 / 192 mm), gel frame holder 191 mm."
+  - kind: other
+    url: source/chauvet_ovation_f915vw_manual.pdf
+    note: "Local copy of the manual above."
+  - kind: other
+    url: https://chauvetprofessional.com/wp-content/uploads/2015/01/Ovation_F-915VW_DMX_Chart_Rev4.pdf
+    note: "Chauvet DMX chart (zoom channel 0 = narrow, 255 = wide)."
+  - kind: other
+    url: source/chauvet_ovation_f915vw_dmx_chart.pdf
+    note: "Local copy of the DMX chart above."
+  - kind: datasheet
+    url: https://chauvetprofessional.com/wp-content/uploads/pdf/en/OF75BARNDOORV2.pdf
+    note: "Accessory named by the F-915VW datasheet: Ovation F 7.5 in Barndoor V2, 8 leaves, 7.5 in (191 mm) slot, open 323 x 308 x 52 mm, closed 256 x 202 x 52 mm, 0.9 kg (an older sheet gives open 464 x 451 mm). No leaf length is published."
+  - kind: ies
+    url: https://chauvetprofessional.com/wp-content/uploads/2015/01/OvationF-915VW-IES.zip
+    note: "Chauvet IES zip (27 files: 3 zoom positions x 9 colour settings); the Full Power files are copied below."
+  - {kind: ies, url: ies/f915vw_zoom_spot.ies, note: "Ovation F-915VW full spot, full power (zoom DMX 0), Chauvet LabSpion, 2020-01"}
+  - {kind: ies, url: ies/f915vw_zoom_mid.ies, note: "Ovation F-915VW 50% zoom, full power, Chauvet LabSpion, 2020-01"}
+  - {kind: ies, url: ies/f915vw_zoom_flood.ies, note: "Ovation F-915VW full flood, full power (zoom DMX 255), Chauvet LabSpion, 2020-01"}
+
+physical:
+  weight: 8.5              # kg, datasheet
+  dimensions:
+    width: 0.320           # datasheet and manual drawing
+    depth: 0.569           # datasheet and manual drawing
+    height: 0.275          # datasheet and manual drawing
+  mount:
+    hook_height: 0.04      # estimated: half a 48.3 mm tube plus clamp, no Chauvet figure
+    tilt_axis_height: 0.163  # estimated: same 0.594 ratio of overall height as the Robe T15 PC drawing, no Chauvet figure
+
+optics:
+  beam_type: wash
+  lens_diameter: 0.190     # estimated: gel frame holder is 191 mm (datasheet), the lens diameter is not published
+  lens_offset: 0.320       # estimated: depth x (1 - 0.438), pivot ratio of the Robe T15 PC drawing, no Chauvet figure
+  flux: 6792               # lm, datasheet at 85 deg (4143 lm at 30 deg; the IES headers total 4397-7246 lm by zoom)
+  field_angle: {min: 30.0, max: 85.0}   # 10% angle, datasheet; IES measured 32.1 / 83.8
+  beam_angle: {min: 17.0, max: 54.0}    # 50% angle, datasheet; IES measured 18.4 / 51.0
+  zoom_invert: false       # DMX chart: zoom 0 = narrow, 255 = wide
+  # IES at three zoom positions; field_angle = full angle at 10% of peak, mean of the 9 planes of each file
+  ies:
+    - {field_angle: 32.1, file: ies/f915vw_zoom_spot.ies}
+    - {field_angle: 50.6, file: ies/f915vw_zoom_mid.ies}
+    - {field_angle: 83.8, file: ies/f915vw_zoom_flood.ies}
+
+colour:
+  systems: [cct]
+  cct_range: {min: 2800, max: 8000}     # datasheet
+
+motion:
+  type: static
+
+modes:
+  - name: Dimmer 16 bit + CCT
+    footprint: 3
+    channels:
+      - {offset: 1, attribute: dimmer, bits: 16, default: 0, fine: 2}
+      - {offset: 3, attribute: cct, bits: 8, default: 0}
+  - name: Dimmer 16 bit + CCT + Zoom
+    footprint: 4
+    channels:
+      - {offset: 1, attribute: dimmer, bits: 16, default: 0, fine: 2}
+      - {offset: 3, attribute: cct, bits: 8, default: 0}
+      - {offset: 4, attribute: zoom, bits: 8, default: 0}
+  - name: Dimmer 8 bit
+    footprint: 1
+    channels:
+      - {offset: 1, attribute: dimmer, bits: 8, default: 0}
+default_mode: Dimmer 16 bit + CCT
+
+# Chauvet Ovation F 7.5 in Barndoor V2 (8 leaves, modelled as 4). Overall open and closed sizes only: leaf values are estimated.
+barn_doors:
+  count: 4
+  leaf_length: 0.10          # estimated; must stay under r / tan(field max / 2) = 0.104 m so open leaves do not clip the 85 deg field
+  leaf_width: 0.19           # estimated: about the 191 mm slot
+  hinge_offset: 0.0          # estimated: hinge on the lens front plane
+  sides: [0, 90, 180, 270]   # head frame, zero rotation
+  max_angle: 80              # estimated
+  rotation: {min: -90, max: 90}   # estimated
+
+model3d:
+  kind: procedural
+  shape: pc
+  body: {width: 0.192, depth: 0.569, height: 0.192}  # width and height: manual drawing 190 / 192 mm; depth datasheet
+  yoke: {gap: 0.200, height: 0.163}                  # estimated: just wider than the body; height as tilt_axis_height

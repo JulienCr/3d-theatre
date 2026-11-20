@@ -1,0 +1,110 @@
+version: 1
+id: martin_mac_aura
+manufacturer: "Martin Professional"
+model: "MAC Aura"
+family: moving_wash
+
+sources:
+  - {kind: gdtf, url: "source/Martin_Professional@MAC_Aura@20230201NoMeas.gdtf", note: "Official Martin Professional file (no measurements): geometry tree, meshes, DMX modes, channel sets."}
+  - {kind: datasheet, url: "source/mac_aura_user_manual_revB.pdf", note: "MAC Aura user manual P/N 35000254 Rev. B (third-party mirror, martin.com refuses automated fetches). Dimensions drawing p.2, DMX protocol p.22-26, specifications p.33 (11-58 deg one-tenth peak, 3850 lm, 5.6 kg, 360 mm)."}
+  - {kind: datasheet, url: "https://cdn01.4wall.com/cms/rentals/files/f60ec7c44f3a1b.pdf", note: "Download URL of the manual copy above."}
+  - {kind: other, url: "https://github.com/mcallegari/qlcplus/blob/master/resources/fixtures/Martin/Martin-MAC-Aura.qxf", note: "QLC+ 4.13.1 definition, modes Standard and Extended compared channel by channel with this sheet (spec 16.4)."}
+
+physical:
+  weight: 5.6              # kg, manual p.33, without accessories (same value in the GDTF)
+  dimensions:
+    width: 0.302           # manual p.33, across yoke
+    depth: 0.220           # GDTF head mesh, Y extent 0.2203
+    height: 0.360          # manual p.33, head straight up; the mesh gives 0.333 (head 27 mm shorter than the drawing)
+  mount:
+    hook_height: 0.05      # estimated: half a 48.3 mm tube plus the M12 clamp (G-clamp or half coupler), no Martin figure
+    tilt_axis_height: 0.249  # manual p.2 drawing, 249 mm from the base bottom to the tilt axis; GDTF yoke+head offsets give 0.248
+
+optics:
+  beam_type: wash
+  lens_diameter: 0.198     # GDTF: array of 19 LED lenses, outer envelope 0.197 (AuraPlate model 0.198)
+  lens_offset: 0.085       # GDTF head mesh, front face 85.4 mm in front of the tilt axis (LED plane at 80 mm)
+  flux: 3850               # lm, manual p.33 and GDTF (19 x 202.6 lm)
+  field_angle: {min: 11, max: 58}  # manual p.33, "one-tenth peak angle"
+  beam_angle: {min: 9, max: 41.7}  # GDTF Zoom physical range (half-peak angle)
+  zoom_invert: true        # DMX 0 = wide, 255 = narrow (manual p.22 "Wide -> narrow")
+  # no IES: Martin publishes none that could be fetched
+
+colour:
+  systems: [rgbw, cct]
+  cct_range: {min: 2500, max: 10000}  # manual p.24: CTC 10000 K to 2500 K
+
+motion:
+  type: moving
+  pan: {min: -270, max: 270, invert: true}   # manual p.33: 540 deg; GDTF maps DMX 0 to +270; sign versus spec 13.9 unchecked
+  tilt: {min: -116, max: 116, invert: true}  # manual p.33: 232 deg; GDTF maps DMX 0 to +116; sign versus spec 13.9 unchecked
+
+strobe:
+  open: [20, 24]
+  closed: [0, 19]
+  strobe: {from: 25, to: 64, hz_min: 1, hz_max: 20}  # manual p.22: strobe 1 is fast (20 Hz, GDTF) at 25 and slow at 64; the sheet cannot express a falling ramp
+
+modes:
+  - name: Standard
+    footprint: 14
+    channels:
+      - {offset: 1, attribute: strobe, bits: 8, default: 22}
+      - {offset: 2, attribute: dimmer, bits: 8, default: 0}
+      - {offset: 3, attribute: zoom, bits: 8, default: 128}
+      - {offset: 4, attribute: pan, bits: 16, default: 32768, fine: 5}
+      - {offset: 6, attribute: tilt, bits: 16, default: 32768, fine: 7}
+      - {offset: 8, attribute: control1, bits: 8, default: 0}
+      - {offset: 9, attribute: color1, bits: 8, default: 0}
+      - {offset: 10, attribute: color_r, bits: 8, default: 255}
+      - {offset: 11, attribute: color_g, bits: 8, default: 255}
+      - {offset: 12, attribute: color_b, bits: 8, default: 255}
+      - {offset: 13, attribute: color_w, bits: 8, default: 0}  # manual p.24 default 0 (GDTF says 255)
+      # CTC: 0-19 disabled (6500 K, GDTF), 20-255 linear 10000 K to 2500 K (manual p.24, GDTF channel sets)
+      - {offset: 14, attribute: cct, bits: 8, default: 0, curve: [[0.0, 6500], [0.0745, 6500], [0.0784, 10000], [1.0, 2500]], curve_mode: linear}
+  - name: Extended
+    footprint: 25
+    channels:
+      - {offset: 1, attribute: strobe, bits: 8, default: 22}
+      - {offset: 2, attribute: dimmer, bits: 8, default: 0}
+      - {offset: 3, attribute: zoom, bits: 8, default: 128}
+      - {offset: 4, attribute: pan, bits: 16, default: 32768, fine: 5}
+      - {offset: 6, attribute: tilt, bits: 16, default: 32768, fine: 7}
+      - {offset: 8, attribute: control1, bits: 8, default: 0}
+      - {offset: 9, attribute: color1, bits: 8, default: 0}
+      - {offset: 10, attribute: color_r, bits: 8, default: 255}
+      - {offset: 11, attribute: color_g, bits: 8, default: 255}
+      - {offset: 12, attribute: color_b, bits: 8, default: 255}
+      - {offset: 13, attribute: color_w, bits: 8, default: 0}
+      - {offset: 14, attribute: cct, bits: 8, default: 0, curve: [[0.0, 6500], [0.0745, 6500], [0.0784, 10000], [1.0, 2500]], curve_mode: linear}
+      - {offset: 15, attribute: effects1, bits: 8, default: 0}
+      - {offset: 16, attribute: effects1rate, bits: 8, default: 128}
+      - {offset: 17, attribute: effects2, bits: 8, default: 0}
+      - {offset: 18, attribute: effects2rate, bits: 8, default: 128}
+      - {offset: 19, attribute: effectssync, bits: 8, default: 0}
+      - {offset: 20, attribute: aura_shutter, bits: 8, default: 22}
+      - {offset: 21, attribute: aura_dimmer, bits: 8, default: 0}
+      - {offset: 22, attribute: aura_color1, bits: 8, default: 0}
+      - {offset: 23, attribute: aura_color_r, bits: 8, default: 255}
+      - {offset: 24, attribute: aura_color_g, bits: 8, default: 255}
+      - {offset: 25, attribute: aura_color_b, bits: 8, default: 255}
+default_mode: Standard
+
+qlc:
+  manufacturer: Martin
+  model: MAC Aura
+  modes: {Standard: Standard, Extended: Extended}
+  verified: 2026-11-20
+
+model3d:
+  # meshes and offsets are in the GDTF frame (head hangs towards -Z), not flipped to the body frame of 13.9
+  kind: mesh
+  parts:
+    base:
+      file: meshes/base.obj
+      offset: [0.0, 0.0, 0.0]
+    yoke:
+      file: meshes/yoke.obj
+      offset: [0.0, 0.0, -0.078]
+    head:
+      file: meshes/head.obj
+      offset: [0.0, 0.0, -0.17]

@@ -1,0 +1,116 @@
+version: 1
+id: generic_pc_led
+manufacturer: Generic
+model: PC LED blanc variable
+family: pc
+
+# Calibrated on the Robe Robin T15 PC (MSL-TE 350 W engine, 200 mm plano-convex lens).
+# DMX layout below is generic, not the Robe protocol (Robe CTC channel is inverted and non-linear).
+sources:
+  - kind: datasheet
+    url: https://www.robe.cz/api/robe/pdfs/en/product/5885
+    note: "Reference product: Robe Robin T15 PC. Datasheet: 9566 lm goniophotometer, 11960 lm sphere, CCT 2700-8000 K, 14.5 kg, 493 x 321 x 498 mm, 200 mm lens."
+  - kind: datasheet
+    url: source/robe_t15_pc_datasheet.pdf
+    note: "Local copy of the datasheet above."
+  - kind: other
+    url: https://www.robe.cz/res/downloads/photometrics/T15_PC_Photometric_report.pdf
+    note: "Robe photometric report V1 20240423: beam 8.5 deg / field 13 deg at min zoom, beam 31 deg / field 54.4 deg at max zoom. Not copied (8 MB)."
+  - kind: other
+    url: https://www.robe.cz/res/downloads/exterior_dimensions/Robin_T15_PC-Dimensions.pdf
+    note: "Dimension drawing: 321 wide, 493 high, 293 mm yoke top to pivot, 218 mm rear to pivot."
+  - kind: other
+    url: source/robe_t15_pc_dimensions.pdf
+    note: "Local copy of the drawing above."
+  - kind: datasheet
+    url: source/robe_t15_pc_datasheet.pdf
+    note: "Accessories list: 4-leaf Barndoor module (Robe 10981010) and 8-leaf (10981011). Robe publishes no dimensions for them; barn_doors values below are estimated."
+  - kind: other
+    url: https://www.robe.cz/res/downloads/dmx_charts/Robin_T15_Fresnel_PC_DMX_charts.pdf
+    note: "Robe DMX protocol v1.2 (mode 4: CRI, CTC, green, zoom 16 bit, dimmer 16 bit)."
+  - kind: other
+    url: source/robe_t15_fresnel_pc_dmx_chart.pdf
+    note: "Local copy of the DMX chart above."
+  - kind: ies
+    url: https://www.robe.cz/res/downloads/photometrics/ies_files/T15_photometrics_ies.zip
+    note: "Robe IES zip (folder inside is named T11 PC Wash, files are T15_PC_Zoom_<dmx>); copies below."
+  - {kind: ies, url: ies/t15_pc_zoom_0.ies, note: "Robe T15 PC at zoom DMX 0 (0 = widest, 255 = narrowest), Robe Research Laboratory, 2024-04"}
+  - {kind: ies, url: ies/t15_pc_zoom_32.ies, note: "Robe T15 PC at zoom DMX 32 (0 = widest, 255 = narrowest), Robe Research Laboratory, 2024-04"}
+  - {kind: ies, url: ies/t15_pc_zoom_64.ies, note: "Robe T15 PC at zoom DMX 64 (0 = widest, 255 = narrowest), Robe Research Laboratory, 2024-04"}
+  - {kind: ies, url: ies/t15_pc_zoom_96.ies, note: "Robe T15 PC at zoom DMX 96 (0 = widest, 255 = narrowest), Robe Research Laboratory, 2024-04"}
+  - {kind: ies, url: ies/t15_pc_zoom_128.ies, note: "Robe T15 PC at zoom DMX 128 (0 = widest, 255 = narrowest), Robe Research Laboratory, 2024-04"}
+  - {kind: ies, url: ies/t15_pc_zoom_160.ies, note: "Robe T15 PC at zoom DMX 160 (0 = widest, 255 = narrowest), Robe Research Laboratory, 2024-04"}
+  - {kind: ies, url: ies/t15_pc_zoom_192.ies, note: "Robe T15 PC at zoom DMX 192 (0 = widest, 255 = narrowest), Robe Research Laboratory, 2024-04"}
+  - {kind: ies, url: ies/t15_pc_zoom_224.ies, note: "Robe T15 PC at zoom DMX 224 (0 = widest, 255 = narrowest), Robe Research Laboratory, 2024-04"}
+  - {kind: ies, url: ies/t15_pc_zoom_255.ies, note: "Robe T15 PC at zoom DMX 255 (0 = widest, 255 = narrowest), Robe Research Laboratory, 2024-04"}
+
+physical:
+  weight: 14.5             # kg, datasheet
+  dimensions:
+    width: 0.321           # drawing and datasheet
+    depth: 0.498           # datasheet; the drawing gives 537 mm with the gel frame holder
+    height: 0.493          # yoke top to the lowest point
+  mount:
+    hook_height: 0.04      # estimated: half a 48.3 mm tube plus clamp, no Robe figure
+    tilt_axis_height: 0.293  # drawing: yoke top to pivot
+
+optics:
+  beam_type: wash
+  lens_diameter: 0.200     # datasheet "output lens diameter"
+  lens_offset: 0.280       # derived: 498 mm depth minus 218 mm rear-to-pivot (drawing)
+  flux: 9566               # lm, datasheet goniophotometer (11960 lm sphere); report totals 7000-8860 lm by zoom and CCT
+  field_angle: {min: 13.0, max: 54.4}   # 10% angle, photometric report (min zoom / max zoom)
+  beam_angle: {min: 8.5, max: 31.0}     # 50% angle, photometric report
+  zoom_invert: false
+  # one IES per zoom DMX position; field_angle = full angle at 10% of peak measured on each file
+  ies:
+    - {field_angle: 13.1, file: ies/t15_pc_zoom_255.ies}
+    - {field_angle: 13.9, file: ies/t15_pc_zoom_224.ies}
+    - {field_angle: 18.0, file: ies/t15_pc_zoom_192.ies}
+    - {field_angle: 23.7, file: ies/t15_pc_zoom_160.ies}
+    - {field_angle: 29.1, file: ies/t15_pc_zoom_128.ies}
+    - {field_angle: 35.0, file: ies/t15_pc_zoom_96.ies}
+    - {field_angle: 41.3, file: ies/t15_pc_zoom_64.ies}
+    - {field_angle: 47.7, file: ies/t15_pc_zoom_32.ies}
+    - {field_angle: 54.5, file: ies/t15_pc_zoom_0.ies}
+
+colour:
+  systems: [cct]
+  cct_range: {min: 2700, max: 8000}     # datasheet standard range (extended 1800-10000 K)
+
+motion:
+  type: static
+
+modes:
+  - name: Dimmer 16 bit + CCT
+    footprint: 3
+    channels:
+      - {offset: 1, attribute: dimmer, bits: 16, default: 0, fine: 2}
+      - {offset: 3, attribute: cct, bits: 8, default: 0}
+  - name: Dimmer 16 bit + CCT + Zoom
+    footprint: 4
+    channels:
+      - {offset: 1, attribute: dimmer, bits: 16, default: 0, fine: 2}
+      - {offset: 3, attribute: cct, bits: 8, default: 0}
+      - {offset: 4, attribute: zoom, bits: 8, default: 0}
+  - name: Dimmer 8 bit
+    footprint: 1
+    channels:
+      - {offset: 1, attribute: dimmer, bits: 8, default: 0}
+default_mode: Dimmer 16 bit + CCT
+
+# Robe 4-leaf Barndoor module 10981010. No published dimensions: every value is estimated.
+barn_doors:
+  count: 4
+  leaf_length: 0.15          # estimated; must stay under r / tan(field max / 2) = 0.194 m so open leaves do not clip the field
+  leaf_width: 0.20           # estimated: about the lens diameter
+  hinge_offset: 0.0          # estimated: hinge on the lens front plane
+  sides: [0, 90, 180, 270]   # head frame, zero rotation
+  max_angle: 80              # estimated
+  rotation: {min: -90, max: 90}   # estimated: the whole accessory turns about the beam axis
+
+model3d:
+  kind: procedural
+  shape: pc
+  body: {width: 0.261, depth: 0.498, height: 0.336}  # width from the Robe IES luminaire size; depth datasheet; height drawing (336 mm)
+  yoke: {gap: 0.254, height: 0.293}                  # drawing: 254 mm inner yoke width, 293 mm yoke top to pivot

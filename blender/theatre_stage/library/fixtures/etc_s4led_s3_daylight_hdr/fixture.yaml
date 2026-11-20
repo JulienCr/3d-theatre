@@ -1,0 +1,202 @@
+version: 1
+id: etc_s4led_s3_daylight_hdr
+manufacturer: ETC
+model: Source Four LED Series 3 Daylight HDR
+family: profile
+
+sources:
+  - kind: datasheet
+    url: https://www.etcconnect.com/WorkArea/DownloadAsset.aspx?id=10737506242
+    note: "Source Four LED Series 3 datasheet (rev 2024-05), copy in source/. Flux, weight, gate, lens tube list, overall dimensions."
+  - kind: datasheet
+    url: source/s4led_series3_datasheet.pdf
+    note: "Local copy of the datasheet above."
+  - kind: other
+    url: https://www.etcconnect.com/WorkArea/DownloadAsset.aspx?id=10737520090
+    note: "User Manual v1.4.0 (10 DMX modes, control channel tables). Not copied (10 MB)."
+  - kind: other
+    url: https://www.etcconnect.com/Products/Entertainment-Fixtures/Source-Four-LED-Series-3/Documentation.aspx?LangType=1036
+    note: "ETC documentation page: dimensional drawings per lens tube (DWG, not read), IES files."
+  - kind: ies
+    url: https://www.etcconnect.com/WorkArea/DownloadAsset.aspx?id=10737518254
+    note: "XDLT IES Photometry Data Files (zip). One IES per lens tube, copied below."
+  - {kind: ies, url: ies/xdlt_5.ies, note: "XDLT 5 deg tube, Daylight HDR ETL IES, ETC Light Lab"}
+  - {kind: ies, url: ies/xdlt_10.ies, note: "XDLT 10 deg tube, Daylight HDR ETL IES, ETC Light Lab"}
+  - {kind: ies, url: ies/xdlt_14.ies, note: "XDLT 14 deg tube, Daylight HDR ETL IES, ETC Light Lab"}
+  - {kind: ies, url: ies/xdlt_19.ies, note: "XDLT 19 deg tube, Daylight HDR ETL IES, ETC Light Lab"}
+  - {kind: ies, url: ies/xdlt_26.ies, note: "XDLT 26 deg tube, Daylight HDR ETL IES, ETC Light Lab"}
+  - {kind: ies, url: ies/xdlt_36.ies, note: "XDLT 36 deg tube, Daylight HDR ETL IES, ETC Light Lab"}
+  - {kind: ies, url: ies/xdlt_50.ies, note: "XDLT 50 deg tube, Daylight HDR ETL IES, ETC Light Lab"}
+  - {kind: ies, url: ies/xdlt_70.ies, note: "XDLT 70 deg tube, Daylight HDR ETL IES, ETC Light Lab"}
+
+physical:
+  weight: 8.9              # kg, with XDLT shutter barrel (6.8 kg without); excludes mounting hardware and lens tube
+  dimensions:
+    width: 0.340           # datasheet physical page, 340 mm maximum (yoke and clutch knobs)
+    depth: 0.658           # 658 mm minimum, 721 mm maximum depending on the lens tube; shortest used
+    height: 0.478          # 478 mm maximum
+  mount:
+    hook_height: 0.04      # estimated: half a 48.3 mm tube plus clamp, no ETC figure
+    tilt_axis_height: 0.308  # datasheet side view, 308 mm from the top of the yoke to the pivot
+
+optics:
+  beam_type: profile
+  lens_diameter: 0.190     # default for the tubes with no own aperture; per-tube apertures in lens_tubes
+  lens_offset: 0.392       # derived: 658 mm overall length minus 266 mm rear-to-pivot (datasheet drawing), shortest tube
+  flux: 14214              # lm, datasheet maximum (best lens tube); per-tube values: see datasheet photometry page
+  # beam/field: full angles at 50% / 10% of peak, measured on each tube's IES (C-planes averaged);
+  # aperture: datasheet XDLT lens table (inches), tube names are ETC nominal values
+  lens_tubes:
+    - {name: "5", beam_angle: 7.3, field_angle: 8.7, lens_diameter: 0.4445, ies: ies/xdlt_5.ies}  # 17.5 in
+    - {name: "10", beam_angle: 10.1, field_angle: 11.7, lens_diameter: 0.3556, ies: ies/xdlt_10.ies}  # 14 in
+    - {name: "14", beam_angle: 14.3, field_angle: 16.5, lens_diameter: 0.254, ies: ies/xdlt_14.ies}  # 10 in
+    - {name: "19", beam_angle: 17.4, field_angle: 20.2, lens_diameter: 0.254, ies: ies/xdlt_19.ies}  # 10 in
+    - {name: "26", beam_angle: 25.4, field_angle: 28.9, lens_diameter: 0.1905, ies: ies/xdlt_26.ies}  # 7.5 in
+    - {name: "36", beam_angle: 35.2, field_angle: 38.3, lens_diameter: 0.1905, ies: ies/xdlt_36.ies}  # 7.5 in
+    - {name: "50", beam_angle: 44.4, field_angle: 52.2, lens_diameter: 0.1905, ies: ies/xdlt_50.ies}  # 7.5 in
+    - {name: "70", beam_angle: 55.7, field_angle: 72.5, lens_diameter: 0.1905, ies: ies/xdlt_70.ies}  # 7.5 in
+
+colour:
+  systems: [emitters, cct, rgbw]
+  # cct curve (modes): 8-bit table of the ETC manual, 0 = 3200 K, 1-165 = 1900-6000 K in 25 K steps,
+  # 166-254 = 6050-10450 K in 50 K steps, 255 held; the 16-bit modes reuse it (estimated)
+  cct_range: {min: 1900, max: 10450}  # manual DMX control table (CCT 1-165: 1900-6000 K, 166-254: 6050-10450 K); Studio/Expanded modes
+  emitters:
+    - {attribute: emitter_1, rgb: [0.35, 0.0, 0.0]}  # deep_red
+    - {attribute: emitter_2, rgb: [1.0, 0.02, 0.0]}  # red
+    - {attribute: emitter_3, rgb: [0.3, 1.0, 0.35]}  # mint
+    - {attribute: emitter_4, rgb: [0.0, 0.9, 0.8]}  # cyan
+    - {attribute: emitter_5, rgb: [0.0, 0.05, 1.0]}  # blue
+    - {attribute: emitter_6, rgb: [0.15, 0.0, 1.0]}  # indigo
+    # estimated: rgb values are approximate linear sRGB of the named LED colours, ETC publishes no chromaticities
+
+motion:
+  type: static
+
+blades:
+  count: 4
+  mode: manual
+  gate_from_lens: 0.275    # estimated: read off the datasheet side view, barrel start (about 383 mm from the rear) to the front of the shortest tube (658 mm)
+  span: 0.100              # estimated: gate is 80 mm (datasheet), blade edge slightly longer
+  travel: {open: 0.045, closed: -0.040}  # estimated: gate radius 40 mm plus margin; blades assumed able to cross the axis by 40 mm
+  sides: [0, 90, 180, 270]
+  angle_limit: 20          # estimated: conservative, no ETC source for blade tilt
+
+strobe:
+  open: [0, 0]             # manual: 0, 201-240 and 255 are all "no strobe, shutter open"
+  closed: [241, 254]       # LEDs off
+  strobe: {from: 1, to: 40, hz_min: 1, hz_max: 40}  # dark strobe 1-40 (41-80 bright strobe, 81-255 pulse/random/flicker not modelled)
+
+modes:
+  - name: Direct
+    footprint: 10
+    channels:
+      - {offset: 1, attribute: dimmer, bits: 8, default: 0}
+      - {offset: 2, attribute: emitter_1, bits: 8, default: 0}
+      - {offset: 3, attribute: emitter_2, bits: 8, default: 0}
+      - {offset: 4, attribute: emitter_3, bits: 8, default: 0}
+      - {offset: 5, attribute: emitter_4, bits: 8, default: 0}
+      - {offset: 6, attribute: emitter_5, bits: 8, default: 0}
+      - {offset: 7, attribute: emitter_6, bits: 8, default: 0}
+      - {offset: 8, attribute: strobe, bits: 8, default: 0}
+      - {offset: 9, attribute: curve, bits: 8, default: 0}
+      - {offset: 10, attribute: fan, bits: 8, default: 0}
+  - name: Expanded
+    footprint: 11
+    channels:
+      - {offset: 1, attribute: dimmer, bits: 8, default: 0}
+      - {offset: 2, attribute: cct, bits: 8, default: 0, curve: &etc_cct [[0, 3200], [0.003921569, 1900], [0.647058824, 6000], [0.650980392, 6050], [0.996078431, 10450], [1, 10450]]}
+      - {offset: 3, attribute: tint, bits: 8, default: 0}
+      - {offset: 4, attribute: tuning, bits: 8, default: 0}
+      - {offset: 5, attribute: mix, bits: 8, default: 0}
+      - {offset: 6, attribute: color_r, bits: 8, default: 0}
+      - {offset: 7, attribute: color_g, bits: 8, default: 0}
+      - {offset: 8, attribute: color_b, bits: 8, default: 0}
+      - {offset: 9, attribute: strobe, bits: 8, default: 0}
+      - {offset: 10, attribute: curve, bits: 8, default: 0}
+      - {offset: 11, attribute: fan, bits: 8, default: 0}
+  - name: Studio
+    footprint: 7
+    channels:
+      - {offset: 1, attribute: dimmer, bits: 8, default: 0}
+      - {offset: 2, attribute: cct, bits: 8, default: 0, curve: *etc_cct}
+      - {offset: 3, attribute: tint, bits: 8, default: 0}
+      - {offset: 4, attribute: tuning, bits: 8, default: 0}
+      - {offset: 5, attribute: strobe, bits: 8, default: 0}
+      - {offset: 6, attribute: curve, bits: 8, default: 0}
+      - {offset: 7, attribute: fan, bits: 8, default: 0}
+  - name: 3 Ch RGB
+    footprint: 3
+    channels:
+      - {offset: 1, attribute: color_r, bits: 8, default: 0}
+      - {offset: 2, attribute: color_g, bits: 8, default: 0}
+      - {offset: 3, attribute: color_b, bits: 8, default: 0}
+  - name: 1 Ch
+    footprint: 1
+    channels:
+      - {offset: 1, attribute: dimmer, bits: 8, default: 0}
+  - name: HSIC
+    footprint: 8
+    channels:
+      - {offset: 1, attribute: hue, bits: 16, default: 0, fine: 2}
+      - {offset: 3, attribute: saturation, bits: 8, default: 0}
+      - {offset: 4, attribute: dimmer, bits: 8, default: 0}
+      - {offset: 5, attribute: cct, bits: 8, default: 0, curve: *etc_cct}
+      - {offset: 6, attribute: strobe, bits: 8, default: 0}
+      - {offset: 7, attribute: curve, bits: 8, default: 0}
+      - {offset: 8, attribute: fan, bits: 8, default: 0}
+  - name: Direct 16bit
+    footprint: 17
+    channels:
+      - {offset: 1, attribute: dimmer, bits: 16, default: 0, fine: 2}
+      - {offset: 3, attribute: emitter_1, bits: 16, default: 0, fine: 4}
+      - {offset: 5, attribute: emitter_2, bits: 16, default: 0, fine: 6}
+      - {offset: 7, attribute: emitter_3, bits: 16, default: 0, fine: 8}
+      - {offset: 9, attribute: emitter_4, bits: 16, default: 0, fine: 10}
+      - {offset: 11, attribute: emitter_5, bits: 16, default: 0, fine: 12}
+      - {offset: 13, attribute: emitter_6, bits: 16, default: 0, fine: 14}
+      - {offset: 15, attribute: strobe, bits: 8, default: 0}
+      - {offset: 16, attribute: curve, bits: 8, default: 0}
+      - {offset: 17, attribute: fan, bits: 8, default: 0}
+  - name: Expanded 16bit
+    footprint: 16
+    channels:
+      - {offset: 1, attribute: dimmer, bits: 16, default: 0, fine: 2}
+      - {offset: 3, attribute: cct, bits: 16, default: 0, fine: 4, curve: *etc_cct}
+      - {offset: 5, attribute: tint, bits: 8, default: 0}
+      - {offset: 6, attribute: tuning, bits: 8, default: 0}
+      - {offset: 7, attribute: mix, bits: 8, default: 0}
+      - {offset: 8, attribute: color_r, bits: 16, default: 0, fine: 9}
+      - {offset: 10, attribute: color_g, bits: 16, default: 0, fine: 11}
+      - {offset: 12, attribute: color_b, bits: 16, default: 0, fine: 13}
+      - {offset: 14, attribute: strobe, bits: 8, default: 0}
+      - {offset: 15, attribute: curve, bits: 8, default: 0}
+      - {offset: 16, attribute: fan, bits: 8, default: 0}
+  - name: Studio 16bit
+    footprint: 9
+    channels:
+      - {offset: 1, attribute: dimmer, bits: 16, default: 0, fine: 2}
+      - {offset: 3, attribute: cct, bits: 16, default: 0, fine: 4, curve: *etc_cct}
+      - {offset: 5, attribute: tint, bits: 8, default: 0}
+      - {offset: 6, attribute: tuning, bits: 8, default: 0}
+      - {offset: 7, attribute: strobe, bits: 8, default: 0}
+      - {offset: 8, attribute: curve, bits: 8, default: 0}
+      - {offset: 9, attribute: fan, bits: 8, default: 0}
+  - name: HSIC 16bit
+    footprint: 11
+    channels:
+      - {offset: 1, attribute: hue, bits: 16, default: 0, fine: 2}
+      - {offset: 3, attribute: saturation, bits: 16, default: 0, fine: 4}
+      - {offset: 5, attribute: dimmer, bits: 16, default: 0, fine: 6}
+      - {offset: 7, attribute: cct, bits: 16, default: 0, fine: 8, curve: *etc_cct}
+      - {offset: 9, attribute: strobe, bits: 8, default: 0}
+      - {offset: 10, attribute: curve, bits: 8, default: 0}
+      - {offset: 11, attribute: fan, bits: 8, default: 0}
+default_mode: Direct       # manual: "Direct ... is the default mode"; 8-bit modes are 1-12 ch, 16-bit modes 9-21 ch
+
+model3d:
+  kind: procedural
+  shape: profile
+  body: {width: 0.202, depth: 0.561, height: 0.217}  # datasheet drawing: 202 mm wide, 561 mm rear to barrel front, 217 mm high
+  barrel: {diameter: 0.216, length: 0.097}           # 216 mm barrel height; length = 658 - 561 mm (shortest tube)
+  yoke: {gap: 0.229, height: 0.308}                  # gap estimated from the 229 mm barrel width; height from the drawing

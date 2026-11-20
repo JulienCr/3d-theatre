@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE FixtureDefinition>
+<FixtureDefinition xmlns="http://www.qlcplus.org/FixtureDefinition">
+ <Creator>
+  <Name>Q Light Controller Plus</Name>
+  <Version>4.14.3</Version>
+  <Author>theatre_stage</Author>
+ </Creator>
+ <Manufacturer>Test</Manufacturer>
+ <Model>PC LED</Model>
+ <Type>Color Changer</Type>
+ <Channel Name="Intensité" Preset="IntensityDimmer"/>
+ <Channel Name="Température de couleur" Default="128">
+  <Group Byte="0">Colour</Group>
+  <Capability Min="0" Max="255">Température de couleur 2700-6500 K</Capability>
+ </Channel>
+ <Channel Name="Intensité fin" Preset="IntensityDimmerFine"/>
+ <Mode Name="2 Ch">
+  <Channel Number="0">Intensité</Channel>
+  <Channel Number="1">Température de couleur</Channel>
+ </Mode>
+ <Mode Name="Wide">
+  <Channel Number="0">Intensité</Channel>
+  <Channel Number="1">Intensité fin</Channel>
+ </Mode>
+ <Physical>
+  <Bulb Type="LED" Lumens="1000" ColourTemperature="0"/>
+  <Dimensions Weight="5.5" Width="300" Height="400" Depth="200"/>
+  <Lens Name="Other" DegreesMin="40" DegreesMax="40"/>
+  <Focus Type="Fixed" PanMax="0" TiltMax="0"/>
+  <Technical PowerConsumption="0" DmxConnector="5-pin"/>
+ </Physical>
+</FixtureDefinition>

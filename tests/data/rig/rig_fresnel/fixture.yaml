@@ -1,0 +1,40 @@
+version: 1
+id: rig_fresnel
+manufacturer: Test
+model: Synthetic wide Fresnel
+family: pc
+sources:
+  - {kind: datasheet, url: "https://example.org/fresnel.pdf", note: "synthetic test data, dimensions of generic_pc_led, field 15 to 75 deg"}
+physical:
+  weight: 14.5
+  dimensions: {width: 0.321, depth: 0.498, height: 0.493}
+  mount: {hook_height: 0.04, tilt_axis_height: 0.293}
+optics:
+  beam_type: wash
+  lens_diameter: 0.20
+  lens_offset: 0.28
+  flux: 9000
+  field_angle: {min: 15, max: 75}
+  beam_angle: {min: 9, max: 45}
+colour:
+  systems: [cct]
+  cct_range: {min: 2700, max: 8000}
+motion: {type: static}
+modes:
+  - name: Dimmer 16 bit + CCT
+    footprint: 3
+    channels:
+      - {offset: 1, attribute: dimmer, bits: 16, default: 0, fine: 2}
+      - {offset: 3, attribute: cct, bits: 8, default: 0}
+  - name: Dimmer 16 bit + CCT + Zoom
+    footprint: 4
+    channels:
+      - {offset: 1, attribute: dimmer, bits: 16, default: 0, fine: 2}
+      - {offset: 3, attribute: cct, bits: 8, default: 0}
+      - {offset: 4, attribute: zoom, bits: 8, default: 0}
+default_mode: Dimmer 16 bit + CCT + Zoom
+model3d:
+  kind: procedural
+  shape: pc
+  body: {width: 0.261, depth: 0.498, height: 0.336}
+  yoke: {gap: 0.254, height: 0.293}

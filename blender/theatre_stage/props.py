@@ -2,6 +2,8 @@
 
 Angles are stored in radians (subtype ANGLE) and converted to degrees when the
 params dict is built. Nothing here names a parameter: the schema drives it all.
+A FIXTURE or MODE param is stored as a string; the panel draws a `<key>_pick`
+enum whose items come from the library (the stored id may be missing from it).
 """
 
 from __future__ import annotations
@@ -10,14 +12,16 @@ import math
 import traceback
 from collections.abc import Mapping
 from contextlib import contextmanager
+from pathlib import Path
 
 import bpy
 from bpy.props import (
     BoolProperty, BoolVectorProperty, EnumProperty, FloatProperty, IntProperty,
-    PointerProperty,
+    PointerProperty, StringProperty,
 )
 
 from . import build
+from .core import fixtures
 from .core import params as schema
 from .core.params import Group, Param
 
@@ -28,6 +32,26 @@ REBUILD_DELAY = 0.15
 _lock_depth = 0
 _pending = False
 _deferred_scene: str | None = None
+
+_library = fixtures.EMPTY_LIBRARY
+_item_pool: dict[tuple, tuple] = {}
+_item_lists: dict[tuple, list] = {}
+
+
+def library() -> fixtures.Library:
+    """The fixture library read at load time or by `reload_library` (never read at draw time)."""
+    return _library
+
+
+def user_fixtures_dir(create: bool = False) -> Path:
+    return Path(bpy.utils.extension_path_user(__package__, path="fixtures", create=create))
+
+
+def reload_library() -> fixtures.Library:
+    """Re-read the shipped then the user fixture folders. Its `messages` feed the alerts."""
+    global _library
+    _library = fixtures.discover([fixtures.SHIPPED_DIR, user_fixtures_dir()])
+    return _library
 
 
 def is_locked() -> bool:
@@ -86,8 +110,13 @@ def _run_deferred():
     return None
 
 
+def current_layout(scene):
+    """The computed layout of the scene parameters with the loaded fixture library (memoised)."""
+    return build.cached_layout(scene_params(scene), library(), scene.get(build.FACE_EQ_KEY))
+
+
 def rebuild_scene(scene) -> None:
-    build.rebuild(scene, scene_params(scene))
+    build.rebuild(scene, scene_params(scene), library())
 
 
 # ------------------------------------------------------------ construction
@@ -113,7 +142,49 @@ def _make_property(param: Param, update):
         return EnumProperty(items=param.items, default=param.default, **common)
     if kind == schema.BOOL_VECTOR:
         return BoolVectorProperty(default=param.default, size=param.length, **common)
+    if param.is_dynamic:
+        return StringProperty(default=param.default, **common)
     raise ValueError(f"Unsupported parameter kind: {kind}")
+
+
+def pick_name(param: Param) -> str:
+    """Name of the UI enum that fronts a FIXTURE or MODE string property."""
+    return f"{param.key}_pick"
+
+
+def _dynamic_items(node, param: Param, group: Group) -> list[tuple[str, str, str]]:
+    """Enum items of a FIXTURE or MODE param from the library, current value always included."""
+    current = getattr(node, param.key)
+    if param.kind == schema.FIXTURE:
+        lib = library()
+        items = [(i, f.label, f.family) for i, f in lib.fixtures.items() if f.family in param.families]
+    else:
+        sheet = library().get(getattr(node, param.depends_on))
+        items = [(fixtures.DEFAULT_MODE,
+                  f"Défaut ({sheet.default_mode})" if sheet else "Défaut",
+                  "Mode par défaut de la fiche.")]
+        items += [(m.name, m.name, f"{m.footprint} canaux") for m in sheet.modes] if sheet else []
+    if current not in {item[0] for item in items}:
+        items.append((current, f"{current} (introuvable)", "Absent de la bibliothèque."))
+    pooled = [_item_pool.setdefault(item, item) for item in items]
+    _item_lists[(group.key, param.key)] = pooled
+    return pooled
+
+
+def _make_pick(group: Group, param: Param):
+    def get(self) -> int:
+        value = getattr(self, param.key)
+        items = _dynamic_items(self, param, group)
+        return next((i for i, item in enumerate(items) if item[0] == value), 0)
+
+    def set_(self, index: int) -> None:
+        items = _dynamic_items(self, param, group)
+        if 0 <= index < len(items) and items[index][0] != getattr(self, param.key):
+            setattr(self, param.key, items[index][0])
+
+    return EnumProperty(name=param.label, description=param.tooltip,
+                        items=lambda self, context: _dynamic_items(self, param, group),
+                        get=get, set=set_)
 
 
 def _tag_scene(self, context):
@@ -125,6 +196,7 @@ def _make_update(group: Group, param: Param):
     if not param.rebuild:
         return _tag_scene
     mirrors = group.side_params and param.key == "symmetric"
+    modes = [p for p in group.params if p.kind == schema.MODE and p.depends_on == param.key]
 
     def update(self, context):
         scene = self.id_data
@@ -134,6 +206,11 @@ def _make_update(group: Group, param: Param):
         with batch(scene, deferred=True):
             if mirrors and not self.symmetric:
                 _copy_set(self.left, self.right, group.side_params)
+            for mode in modes:
+                sheet = library().get(getattr(self, param.key))
+                known = sheet.mode_names() if sheet else ()
+                if getattr(self, mode.key) not in (fixtures.DEFAULT_MODE, *known):
+                    setattr(self, mode.key, mode.default)
             request_rebuild(scene)
 
     return update
@@ -146,6 +223,7 @@ def _copy_set(source, target, params) -> None:
 
 def _group_class(name: str, group: Group, params, extra=None) -> type:
     annotations = {p.key: _make_property(p, _make_update(group, p)) for p in params}
+    annotations.update({pick_name(p): _make_pick(group, p) for p in params if p.is_dynamic})
     annotations.update(extra or {})
     return type(name, (bpy.types.PropertyGroup,), {"__annotations__": annotations})
 
@@ -217,6 +295,7 @@ def apply_params(scene, params: Mapping) -> None:
 
 
 def register() -> None:
+    reload_library()
     for cls in CLASSES:
         bpy.utils.register_class(cls)
     setattr(bpy.types.Scene, SCENE_ATTR, PointerProperty(type=ROOT_CLASS))

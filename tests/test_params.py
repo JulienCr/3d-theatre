@@ -118,3 +118,134 @@ def test_haze_extent_item_order_is_pinned_for_stored_values_and_the_material_dri
     extent = next(p for p in P.GROUPS["haze"].params if p.key == "extent")
     assert [item[0] for item in extent.items] == ["stage", "stage_and_house"]
     assert extent.default == "stage_and_house"
+
+
+# ------------------------------------------------------- lighting groups
+
+LIGHTING_GROUPS = ["rig", "rig_front", "backlight", "front_movers", "towers", "front_pc",
+                   "profiles", "rest", "patch"]
+
+
+def test_lighting_groups_follow_the_panel_order_of_the_spec():
+    keys = [g.key for g in P.SCHEMA]
+    start = keys.index("rig")
+    assert keys[start:start + len(LIGHTING_GROUPS)] == LIGHTING_GROUPS
+    assert keys.index("cameras") < start and "haze" in keys and "house" in keys
+
+
+def test_lighting_defaults_match_the_spec_tables():
+    d = P.default_params()
+    assert d["rig"] == {"enabled": True, "aim_height": 1.7, "site": 44.0, "area_depth": 6.0}
+    assert d["rig_front"] == {"ceiling_gap": 0.3, "auto_position": True, "y": -1.4, "movers_offset": 1.5,
+                              "movers_height_mode": "auto", "movers_z": 6.8}
+    assert d["backlight"] == {"enabled": True, "fixture": "martin_mac_aura", "mode": "default",
+                              "count": 6, "position": "upstage", "distance": 3.1}
+    assert (d["front_movers"]["fixture"], d["front_movers"]["count"]) == ("robe_robin_esprite", 4)
+    assert d["front_pc"]["fixture"] == "generic_pc_led" and d["front_pc"]["azimuth"] == 16.0
+    assert d["front_pc"]["zone_width"] == 3.4
+    assert (d["front_pc"]["zone_mode"], d["front_pc"]["columns"], d["front_pc"]["rows"]) == ("auto", 3, 2)
+    assert d["profiles"]["fixture"] == "etc_s4led_s3_lustr_x8" and d["profiles"]["blades_mode"] == "auto"
+    pc = d["front_pc"]
+    assert pc["barn_doors"] == "auto" and len([k for k in pc if k.startswith("row") and k != "rows"]) == 4 * 2 * 5
+    assert pc["row3_r_leaf_4"] == 0.0 and pc["row4_l_rotation"] == 0.0
+    assert d["rest"] == {"pc_level": 0.7, "profile_level": 0.7, "mover_level": 0.5, "haze_level": 1.0,
+                         "cct_left": 3200, "cct_right": 5600, "cct_profile": 4000}
+    assert d["haze"]["dmx_driven"] is False and d["haze"]["fixture"] == "generic_hazer"
+    assert d["towers"]["left"] == {"count": 1, "first_distance": 3.0, "spacing": 2.0,
+                                   "height": 4.5, "movers": 2}
+    assert d["towers"]["left"] == d["towers"]["right"] and d["towers"]["symmetric"] is True
+
+
+def test_patch_declares_one_universe_and_address_per_family():
+    patch = P.default_params()["patch"]
+    assert [f[0] for f in P.PATCH_FAMILIES] == ["backlight", "front_movers", "tower_movers",
+                                                "front_pc", "profiles", "hazer"]
+    assert [patch[f"{f}_universe"] for f, *_ in P.PATCH_FAMILIES] == [1, 2, 3, 4, 5, 6]
+    assert all(patch[f"{f}_address"] == 1 for f, *_ in P.PATCH_FAMILIES)
+    assert len(patch) == 12
+
+
+def test_profile_manual_blades_are_declared_by_loop_for_three_profiles_and_four_blades():
+    keys = [p.key for p in P.GROUPS["profiles"].params]
+    for side in "lcr":
+        assert f"{side}_rotation" in keys
+        for blade in range(1, 5):
+            assert f"{side}_blade_{blade}_insertion" in keys and f"{side}_blade_{blade}_angle" in keys
+    assert len([k for k in keys if "_blade_" in k]) == 24
+
+
+def test_fixture_and_mode_params_are_dynamic_with_the_families_of_the_spec():
+    expected = {"backlight": ("moving_wash",), "front_movers": ("moving_wash", "moving_profile"),
+                "towers": ("moving_wash", "moving_profile"), "front_pc": ("pc",),
+                "profiles": ("profile",), "haze": ("hazer",)}
+    for key, families in expected.items():
+        by_key = {p.key: p for p in P.GROUPS[key].params}
+        for suffix in ("_far",) if key == "front_pc" else ():
+            assert by_key[f"fixture{suffix}"].families == families
+            assert by_key[f"mode{suffix}"].depends_on == f"fixture{suffix}"
+            assert by_key["fixture_far"].default == "generic_fresnel_led"
+        for suffix in ("", "_far") if key == "front_pc" else ("",):
+            assert by_key[f"fixture{suffix}"].kind == P.FIXTURE and by_key[f"fixture{suffix}"].families == families
+            assert by_key[f"mode{suffix}"].kind == P.MODE and by_key[f"mode{suffix}"].depends_on == f"fixture{suffix}"
+            assert by_key[f"fixture{suffix}"].is_dynamic and by_key[f"mode{suffix}"].default == "default"
+    assert sorted({g.key for g in P.SCHEMA for p in g.params if p.kind == P.FIXTURE}) == sorted(expected)
+
+
+def test_shown_when_points_at_a_sibling_with_a_valid_value():
+    for group in P.SCHEMA:
+        by_key = {p.key: p for p in group.params}
+        for param in group.params:
+            if param.shown_when:
+                sibling, value = param.shown_when
+                assert sibling in by_key, (group.key, param.key)
+                if by_key[sibling].kind == P.ENUM:
+                    assert value in [item[0] for item in by_key[sibling].items]
+
+
+def test_side_sets_serve_towers_like_modules():
+    towers = P.default_params()["towers"]
+    towers["left"]["count"] = 3
+    towers["right"]["count"] = 2
+    assert P.side_sets(towers)[1]["count"] == 3
+    towers["symmetric"] = False
+    assert P.side_sets(towers)[1]["count"] == 2 and P.module_sets is P.side_sets
+
+
+def test_fixture_values_must_be_text():
+    params, warnings = P.validate_params({"backlight": {"fixture": 3, "mode": ""}})
+    assert params["backlight"]["fixture"] == "martin_mac_aura" and params["backlight"]["mode"] == "default"
+    assert len(warnings) == 2
+
+
+def library_of_one_profile():
+    from pathlib import Path
+    from core import fixtures
+    return fixtures.discover([Path(__file__).parent / "data" / "fixtures"])
+
+
+def test_unknown_fixture_and_mode_fall_back_to_defaults_with_a_warning():
+    library = library_of_one_profile()
+    raw = {"front_movers": {"fixture": "test_mover", "mode": "Basic"},
+           "backlight": {"fixture": "ghost_light"},
+           "front_pc": {"fixture": "test_mover"},
+           "towers": {"fixture": "test_mover", "mode": "Turbo"}}
+    params, warnings = P.validate_params(raw, library)
+    assert params["front_movers"]["fixture"] == "test_mover" and params["front_movers"]["mode"] == "Basic"
+    assert params["backlight"]["fixture"] == "martin_mac_aura"
+    assert params["front_pc"]["fixture"] == "generic_pc_led"  # wrong family
+    assert params["towers"]["fixture"] == "test_mover" and params["towers"]["mode"] == "default"
+    text = "\n".join(warnings)
+    assert "ghost_light" in text and "test_mover" in text and "Turbo" in text and len(warnings) == 3
+
+
+def test_missing_default_sheet_is_not_reported_by_every_preset():
+    from core import fixtures
+    params, warnings = P.validate_params({}, fixtures.EMPTY_LIBRARY)
+    assert warnings == [] and params == P.default_params()
+    _, warnings = P.validate_params({"backlight": {"fixture": "ghost"}}, fixtures.EMPTY_LIBRARY)
+    assert len(warnings) == 1
+
+
+def test_without_a_catalog_fixture_ids_are_kept_as_written():
+    params, warnings = P.validate_params({"backlight": {"fixture": "anything", "mode": "X"}})
+    assert params["backlight"]["fixture"] == "anything" and warnings == []

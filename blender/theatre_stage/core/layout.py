@@ -10,6 +10,7 @@ from __future__ import annotations
 import math
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from .meshes import MAX_DEPTH_FACTOR
 from .params import module_sets, validate_params
@@ -21,6 +22,13 @@ from .primitives import (
     SlatGrid, Tube,
 )
 
+if TYPE_CHECKING:
+    from .face_rig import FaceEq
+    from .fixtures import Library
+    from .rig import Rig
+
+STALE_FACE_EQ = ("Face non égalisée depuis la dernière modification de l'implantation : "
+                 "relancer « Égaliser la face ».")
 ROOT_COLLECTION = "Theatre"
 ARCHITECTURE = "Theatre_Architecture"
 STAIRS = "Theatre_Stairs"
@@ -30,7 +38,9 @@ MASKING = "Theatre_Masking"
 CURTAINS = "Theatre_Curtains"
 LIGHTS = "Theatre_Lights"
 CAMERAS = "Theatre_Cameras"
-COLLECTIONS = (ARCHITECTURE, STAIRS, MODULES, GRID, MASKING, CURTAINS, LIGHTS, CAMERAS)
+RIG = "Theatre_Rig"
+FIXTURES = "Theatre_Fixtures"
+COLLECTIONS = (ARCHITECTURE, STAIRS, MODULES, GRID, MASKING, CURTAINS, LIGHTS, CAMERAS, RIG, FIXTURES)
 
 MATERIAL_COLORS: dict[str, tuple[float, float, float, float]] = {
     "TS_Enclosure": (0.35, 0.03, 0.05, 1.0),
@@ -44,6 +54,10 @@ MATERIAL_COLORS: dict[str, tuple[float, float, float, float]] = {
     "TS_Module": (0.04, 0.035, 0.03, 1.0),
     "TS_Grid": (0.10, 0.10, 0.11, 1.0),
     "TS_Batten": (0.10, 0.10, 0.11, 1.0),
+    "TS_Truss": (0.08, 0.08, 0.09, 1.0),
+    "TS_Fixture": (0.02, 0.02, 0.02, 1.0),
+    "TS_Lens": (0.05, 0.06, 0.07, 1.0),
+    "TS_Blade": (0.0, 0.0, 0.0, 1.0),
     "TS_Masking": (0.01, 0.01, 0.01, 1.0),
     "TS_MainCurtain": (0.40, 0.02, 0.03, 1.0),
     "TS_Cyclorama": (0.90, 0.90, 0.90, 1.0),
@@ -63,6 +77,10 @@ MATERIAL_LABELS: dict[str, str] = {
     "TS_Module": "Modules",
     "TS_Grid": "Gril",
     "TS_Batten": "Porteuses",
+    "TS_Truss": "Pylônes (truss)",
+    "TS_Fixture": "Corps des appareils",
+    "TS_Lens": "Lentilles des appareils",
+    "TS_Blade": "Lames de cadrage",
     "TS_Masking": "Pendrillons, frises, fond",
     "TS_MainCurtain": "Rideau de scène",
     "TS_Cyclorama": "Cyclorama",
@@ -82,6 +100,7 @@ MODULE_WALL = 0.10
 BATTEN_RADIUS = 0.024
 BAY_MARGIN = 0.05
 ROOF_THICKNESS = 0.10
+HAZE_INSET = 0.01  # haze faces sit this deep in a solid: a coplanar face makes Cycles skip it
 SLAT = 0.05
 SLAT_PITCH = 0.15
 PLEAT_PITCH = 0.30
@@ -151,6 +170,9 @@ class Layout:
     clearances: tuple[tuple[str, tuple], ...] = ()
     root_collection: str = ROOT_COLLECTION
     materials: Mapping = field(default_factory=lambda: dict(MATERIAL_COLORS))
+    rig: Rig | None = None
+    face_eq_state: str = ""
+    face_eq: FaceEq | None = None
 
     def find(self, name: str):
         for item in self.objects + self.lights + self.cameras:
@@ -614,7 +636,25 @@ def _light_battens(p, Yc, D, plan):
         y = first + i * spacing
         if not any(abs(y - b) < BATTEN_CLEARANCE - EPS for b in blocked):
             ys.append(y)
-    return tuple(ys), []
+    warnings = []
+    lo, hi = plan.planes[-1] + BATTEN_CLEARANCE, plan.yb - BATTEN_CLEARANCE
+    if not any(plan.planes[-1] < y < plan.yb for y in ys):
+        if hi < lo - EPS:
+            warnings.append("Dernière rue trop étroite pour une porteuse lumière : "
+                            "aucune porteuse au fond de scène.")
+        else:
+            ys.append((lo + hi) / 2)
+    if p["masking"]["front_border"]:
+        ys.extend(_mantle_batten(plan, ys))
+    return tuple(sorted(ys)), warnings
+
+
+def _mantle_batten(plan, ys) -> list[float]:
+    """The "perche de manteau" just upstage of the front border, unless a light batten is there."""
+    lo, hi = plan.front_plane + BATTEN_CLEARANCE, plan.planes[0] - BATTEN_CLEARANCE
+    if hi < lo - EPS or any(lo - EPS <= y <= min(lo + BATTEN_CLEARANCE, hi) + EPS for y in ys):
+        return []
+    return [(lo + hi) / 2 if hi - lo < BATTEN_CLEARANCE else lo]
 
 
 def _box(name, material, collection, lo, hi, origin=(0.0, 0.0, 0.0), yaw=0.0):
@@ -921,10 +961,11 @@ def _haze(c: Ctx) -> Part:
     hz = c.p["haze"]
     if not hz["enabled"]:
         return Part()
-    half = max(c.Wk, c.Wt) / 2
-    top = max(c.Hf, c.Hp + c.Hg)
-    y0 = -c.Yh if hz["extent"] == "stage_and_house" else c.Ys - hz["falloff"]
-    return Part((_box("Haze_Volume", "TS_Haze", ARCHITECTURE, (-half, y0, 0.0), (half, c.D, top)),))
+    e = HAZE_INSET
+    half = max(c.Wk, c.Wt) / 2 + e
+    top = c.Hp + c.Hg + e if c.Hp + c.Hg > c.Hf else c.Hf - e
+    y0 = -c.Yh - e if hz["extent"] == "stage_and_house" else c.Ys - hz["falloff"]
+    return Part((_box("Haze_Volume", "TS_Haze", ARCHITECTURE, (-half, y0, -e), (half, c.D + e, top)),))
 
 
 FAMILIES: tuple[Callable[[Ctx], Part], ...] = (
@@ -947,8 +988,16 @@ def haze_view_range(layout: Layout) -> tuple[float, float] | None:
     return max(min(depths), 0.1), max(max(depths), 0.2)
 
 
-def compute_layout(params: Mapping | None = None) -> Layout:
-    """Full scene description for `params` (nested dict, validated and clamped)."""
+def compute_layout(params: Mapping | None = None, library: Library | None = None,
+                   face_eq: FaceEq | None = None) -> Layout:
+    """Full scene description for `params` (nested dict, validated and clamped).
+
+    `library` supplies the fiches of the lighting rig; None reads the shipped library. `face_eq` is a
+    stored face equalisation (spec 13.13): applied to the face PCs when it matches the rig, else ignored
+    with an alert.
+    """
+    from .rig import compute_rig, default_library  # rig.py imports this module
+
     ctx, warnings = _make_context(params)
     objects, lights, cameras, clearances = [], [], [], []
     for family in FAMILIES:
@@ -958,6 +1007,20 @@ def compute_layout(params: Mapping | None = None) -> Layout:
         cameras.extend(part.cameras)
         clearances.extend(part.clearances)
         warnings.extend(part.warnings)
+    library = default_library() if library is None else library
+    rig, rig_part = compute_rig(ctx, library)
+    face_state = ""
+    if face_eq is not None and rig.enabled:
+        pc = ctx.p["front_pc"]
+        if face_eq.matches(rig, pc["min_mean_ratio"], not pc["eq_zoom"]):
+            rig, rig_part = compute_rig(ctx, library, face_eq.by_name())
+            warnings.extend(face_eq.alerts)
+            face_state = "applied"
+        else:
+            face_state = "stale"
+            warnings.append(STALE_FACE_EQ)
+    objects.extend(rig_part.objects)
+    warnings.extend(rig_part.warnings)
     masking_battens = sum(1 for o in objects if o.name.startswith("MaskingBatten_"))
     derived = Derived(
         total_width=ctx.Wt, cage_width=ctx.Wk, frame_opening=ctx.Wc, cage_front_y=ctx.Yc, side_zone=ctx.Z,
@@ -968,4 +1031,5 @@ def compute_layout(params: Mapping | None = None) -> Layout:
         border_bottoms=ctx.sight.derived_bottoms, visible_depths=ctx.sight.depths,
     )
     return Layout(tuple(objects), tuple(lights), tuple(cameras), derived, tuple(warnings),
-                  clearances=tuple(clearances))
+                  clearances=tuple(clearances), rig=rig, face_eq_state=face_state,
+                  face_eq=face_eq if face_state else None)
