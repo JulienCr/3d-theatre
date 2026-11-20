@@ -296,10 +296,12 @@ def test_front_row_field_covers_its_zone_and_the_forestage_corners():
         col = int(f.name[-2:]) - 1
         x0, x1 = z.xs[col] - z.width / 2, z.xs[col] + z.width / 2
         grow = z.width / 2 * 0.2
-        x0 = -ctx.W / 2 if col == 0 else x0 - grow
-        x1 = ctx.W / 2 if col == z.nx - 1 else x1 + grow
+        edge = ctx.W / 2 - params["front_pc"]["inset_side"]
+        x0 = -edge if col == 0 else x0 - grow
+        x1 = edge if col == z.nx - 1 else x1 + grow
         far = z.ys[0] + z.depth / 2 * 1.2
-        corners = [(x, y, zc) for x in (x0, x1) for y, zc in ((0.0, ctx.Hp), (far, 2.9))]
+        near = params["front_pc"]["inset_nez"]
+        corners = [(x, y, zc) for x in (x0, x1) for y, zc in ((near, ctx.Hp), (far, 2.9))]
         spans = [angle(f.axis, sub(c, f.pivot)) for c in corners]
         assert f.field_angle >= 2 * max(spans) - 0.05
         assert f.axis[2] < unit(sub((z.xs[col], z.ys[0], 2.9), f.pivot))[2]
@@ -1240,7 +1242,9 @@ def beam_miss(rig, points):
 
 def nez_points(params, step=0.25):
     ctx, _ = _make_context(params)
-    return ctx, [(-ctx.W / 2 + i * step, 0.0, ctx.Hp) for i in range(round(ctx.W / step) + 1)]
+    node = params["front_pc"]
+    half = ctx.W / 2 - node["inset_side"]
+    return ctx, [(-half + i * step, node["inset_nez"], ctx.Hp) for i in range(round(2 * half / step) + 1)]
 
 
 @pytest.mark.parametrize("name", list(CASES))
@@ -1250,7 +1254,7 @@ def test_the_nez_at_floor_level_sits_in_the_beam_of_both_pc_of_every_zone(name):
     ctx, _ = _make_context(params)
     zones = rig.zones
     for f in row0(rig):
-        centre = (zones.xs[int(f.name[-2:]) - 1], 0.0, ctx.Hp)
+        centre = (zones.xs[int(f.name[-2:]) - 1], params["front_pc"]["inset_nez"], ctx.Hp)
         assert angle(f.axis, sub(centre, f.pivot)) <= f.beam_angle / 2 + 1e-6, f.name
         assert f.beam_angle < f.field_angle
 
@@ -1260,27 +1264,34 @@ def test_the_nez_row_is_in_a_beam_except_the_last_metre_the_outer_pc_cannot_reac
     params = CASES[name]()
     ctx, points = nez_points(params)
     missed = beam_miss(shipped_layout(params).rig, points)
-    assert all(abs(p[0]) > ctx.W / 2 - 1.3 for p in missed), [round(p[0], 2) for p in missed]
+    reach = ctx.W / 2 - params["front_pc"]["inset_side"] - 1.3
+    assert all(abs(p[0]) > reach for p in missed), [round(p[0], 2) for p in missed]
     if name == "user_2":
         assert missed == []
 
 
-def test_the_row_zero_aim_is_the_smallest_field_that_holds_the_nez_in_the_beam():
-    params = make()
+NO_INSET = {"inset_side": 0.0, "inset_nez": 0.0}
+
+
+@pytest.mark.parametrize("insets, field, aim_y, outer_reach", [
+    (NO_INSET, 51.0, 0.54, False), ({}, 49.1, 0.68, True)], ids=["no_inset", "default"])
+def test_the_row_zero_aim_is_the_smallest_field_that_holds_the_nez_in_the_beam(insets, field, aim_y, outer_reach):
+    params = make(front_pc=insets)
     ctx, _ = _make_context(params)
     rig = shipped_layout(params).rig
     pc = rig.find("FrontPC_L_03")
     zones = rig.zones
     xc = zones.xs[int(pc.name[-2:]) - 1]
-    edge = (xc - zones.width / 2, 0.0, ctx.Hp)
+    near = params["front_pc"]["inset_nez"]
+    edge = (xc - zones.width / 2, near, ctx.Hp)
     grow = zones.width / 2 * 0.2
     corners = [(x, y, z) for x in (xc - zones.width / 2 - grow, xc + zones.width / 2 + grow)
-               for y, z in ((0.0, ctx.Hp), (zones.ys[0] + zones.depth / 2 * 1.2, 2.9))]
+               for y, z in ((near, ctx.Hp), (zones.ys[0] + zones.depth / 2 * 1.2, 2.9))]
     assert angle(pc.axis, sub(edge, pc.pivot)) == pytest.approx(pc.beam_angle / 2, abs=0.1)
     assert max(angle(pc.axis, sub(c, pc.pivot)) for c in corners) == pytest.approx(pc.field_angle / 2, abs=0.1)
-    assert pc.field_angle == pytest.approx(51.0, abs=0.2) and pc.aim[1] == pytest.approx(0.54, abs=0.03)
+    assert pc.field_angle == pytest.approx(field, abs=0.2) and pc.aim[1] == pytest.approx(aim_y, abs=0.03)
     reach = dict(rig.dims.nez_reach)
-    assert reach["FrontPC_L_03"] == 1.0 and 0.0 <= reach["FrontPC_L_01"] < 1.0 and reach["FrontPC_R_04"] < 1.0
+    assert reach["FrontPC_L_03"] == 1.0 and (reach["FrontPC_R_04"] == 1.0) == outer_reach
 
 
 def test_an_unreachable_nez_keeps_the_best_aim_and_names_the_pc():
@@ -1324,13 +1335,15 @@ def test_closed_leaves_keep_row_zero_off_the_stage_front_the_house_walls_and_the
     assert any(lit(f, p) for f in row0(bare) for p in front)
 
 
-def test_row_zero_leaf_angles_of_a_central_and_an_outer_pc():
-    rig = shipped_layout(make()).rig
+@pytest.mark.parametrize("insets, inner_bottom, outer_bottom", [(NO_INSET, 28.5, 24.0), ({}, 31.0, 31.5)],
+                         ids=["no_inset", "default"])
+def test_row_zero_leaf_angles_of_a_central_and_an_outer_pc(insets, inner_bottom, outer_bottom):
+    rig = shipped_layout(make(front_pc=insets)).rig
     inner, outer = rig.find("FrontPC_L_03").barn_doors, rig.find("FrontPC_L_01").barn_doors
     cuts = lambda d: {leaf.cut: leaf for leaf in d.leaves if leaf.cut}
     assert set(cuts(inner)) == {"bottom", "right"} and set(cuts(outer)) == {"bottom", "left", "right"}
-    assert cuts(inner)["bottom"].angle == pytest.approx(28.5, abs=0.5)
-    assert cuts(outer)["bottom"].angle == pytest.approx(24.0, abs=0.5)
+    assert cuts(inner)["bottom"].angle == pytest.approx(inner_bottom, abs=0.5)
+    assert cuts(outer)["bottom"].angle == pytest.approx(outer_bottom, abs=0.5)
     assert all(leaf.reached and leaf.active for d in (inner, outer) for leaf in cuts(d).values())
     assert [leaf.angle for leaf in inner.leaves if not leaf.cut] == [0.0, 0.0]
 

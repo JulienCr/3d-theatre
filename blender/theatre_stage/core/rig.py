@@ -256,7 +256,8 @@ class RigDims:
 class FaceSetup:
     """Measuring planes of the face equalisation (spec 13.13): width of the face window at the nose (the
     façade opening less its margin), frame width, forestage and area depths, height of the head and of
-    the torso probes, and the labelled spill probes around the window."""
+    the torso probes, the labelled spill probes around the window, and the depth of the downstage cut
+    (`inset_nez`) the useful grid starts after."""
 
     nose_width: float
     frame_width: float
@@ -265,6 +266,7 @@ class FaceSetup:
     z: float
     z_torso: float
     spill: tuple[tuple[str, Probe], ...] = ()
+    nose_depth: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -1036,19 +1038,18 @@ def _front_row(w: _Work, zone: tuple[float, float]) -> bool:
 
 
 def _nez_end(w: _Work, xc: float, nominal: float, sign: int, grow: float = 0.0) -> float:
-    """X of the nez corner of a row 0 zone on one side (`sign` -1 jardin, +1 cour): the nez width for
-    the outermost zone when it is wider than the zone, else the zone edge pushed out by `grow`."""
+    """X of the nez corner of a row 0 zone on one side (`sign` -1 jardin, +1 cour): the nez width less
+    `inset_side` for the outermost zone, else the zone edge pushed out by `grow`."""
     ends = w.zones.xs
-    wide = sign * w.c.W / 2
-    if xc == (ends[0] if sign < 0 else ends[-1]) and (wide - nominal) * sign > 0:
-        return wide
+    if xc == (ends[0] if sign < 0 else ends[-1]):
+        return sign * (w.c.W / 2 - w.c.p["front_pc"]["inset_side"])
     return nominal + sign * grow
 
 
 def _coverage(w: _Work, zone: tuple[float, float], za: float) -> tuple[Vec3, ...]:
     """Corners of the area a face PC lights (spec 13.7): the zone at `za` plus the overlap. Row 0
-    also lights the forestage: its downstage corners are on the floor at the nez, the outer zones
-    reach the nez width."""
+    also lights the forestage: its downstage corners are on the floor `inset_nez` from the nez, the
+    outer zones reach the nez width less `inset_side`."""
     zones, overlap = w.zones, w.c.p["front_pc"]["overlap"]
     xc, yr = zone
     x0, x1 = xc - zones.width / 2, xc + zones.width / 2
@@ -1058,7 +1059,7 @@ def _coverage(w: _Work, zone: tuple[float, float], za: float) -> tuple[Vec3, ...
         return tuple((xc + sx * hx, yr + sy * hy, za) for sx in (-1, 1) for sy in (-1, 1))
     grow = (x1 - x0) / 2 * overlap
     x0, x1 = _nez_end(w, xc, x0, -1, grow), _nez_end(w, xc, x1, 1, grow)
-    return tuple((x, y, z) for x in (x0, x1) for y, z in ((0.0, w.c.Hp), (yr + hy, za)))
+    return tuple((x, y, z) for x in (x0, x1) for y, z in ((w.c.p["front_pc"]["inset_nez"], w.c.Hp), (yr + hy, za)))
 
 
 @dataclass(frozen=True)
@@ -1107,6 +1108,7 @@ def _focus(w: _Work, sheet: _Sheet, zone: tuple[float, float], side: str, pivot:
     if key in w.focus:
         return w.focus[key]
     optics, hp = sheet.optics, w.c.Hp
+    ny = w.c.p["front_pc"]["inset_nez"]
     heading = _unit(_sub((zone[0], zone[1], w.za), pivot))
     flat = math.hypot(heading[0], heading[1])
     dirs = [_sub(c, pivot) for c in _coverage(w, zone, w.za)]
@@ -1120,7 +1122,7 @@ def _focus(w: _Work, sheet: _Sheet, zone: tuple[float, float], side: str, pivot:
     edge = _nez_end(w, xc, xc + sign * w.zones.width / 2, sign)
     result = None
     for reach in NEZ_REACH:
-        nez = [_sub((xc + reach * (edge - xc), 0.0, hp), pivot), _sub((xc, 0.0, hp), pivot)]
+        nez = [_sub((xc + reach * (edge - xc), ny, hp), pivot), _sub((xc, ny, hp), pivot)]
         fits = []
         for _, axis, need_field in table:
             fit = _fit_beam(optics, need_field, 2 * max(_angle_between(axis, d) for d in nez))
@@ -1134,7 +1136,7 @@ def _focus(w: _Work, sheet: _Sheet, zone: tuple[float, float], side: str, pivot:
             result = _Focus(_tilted(best[2], w.c.p["front_pc"]["face_tilt"]), best[0], best[1], True, reach)
             break
     if result is None:
-        result = _focus_fallback(optics, table, _sub((xc, 0.0, hp), pivot))
+        result = _focus_fallback(optics, table, _sub((xc, ny, hp), pivot))
     w.focus[key] = result
     return result
 
@@ -1411,12 +1413,14 @@ def _channel_values(s: _Slot, overrides: Mapping[str, float]) -> tuple[ChannelVa
 
 def _pc_cut_lines(w: _Work, s: _Slot) -> dict[str, tuple[Vec3, Vec3]]:
     """Target lines of the barn door cuts of a face PC (spec 13.12): row 0 cuts on the edges of the face
-    window (the nez, the lintel bottom, the facade opening less `window_margin`, 13.7); the other rows
-    stay within the masking opening and below the first border upstage of their zone."""
+    window (the floor line `inset_nez` from the nez, the lintel bottom, the facade opening less
+    `window_margin` and `inset_side`, 13.7); the other rows stay within the masking opening and below
+    the first border upstage of their zone."""
     c, zone = w.c, s.meta["zone"]
     if s.meta["row"] == 0:
-        edge = c.W / 2 - c.p["front_pc"]["window_margin"]
-        lines = {"bottom": ((0.0, 0.0, c.Hp), (1.0, 0.0, 0.0)),
+        node = c.p["front_pc"]
+        edge = c.W / 2 - node["window_margin"] - node["inset_side"]
+        lines = {"bottom": ((0.0, node["inset_nez"], c.Hp), (1.0, 0.0, 0.0)),
                  "top": ((0.0, c.Ys, c.Hp + c.Hc), (1.0, 0.0, 0.0))}
         for name, sign in (("left", -1), ("right", 1)):
             lines[name] = ((sign * edge, c.Ys, 0.0), (0.0, 0.0, 1.0))
@@ -2135,6 +2139,6 @@ def compute_rig(c: Ctx, library: Library, adjust: Mapping[str, Adjustment] | Non
                    tuple(w.row_supports), masking_clearance, tuple(w.nez_reach))
     rig = Rig(True, zones, tuple(fixtures), tuple(entries), _rest_map(fixtures), _loads(fixtures),
               tuple((k, tuple(v)) for k, v in circuits.items()), _haze_link(w, fixtures), dims,
-              tuple(w.warnings), FaceSetup(c.W - 2 * c.p["front_pc"]["window_margin"], c.Wc, c.Ys, ya, za, c.Hp + TORSO_HEIGHT,
-                        _spill_probes(c)), bool(w.adjust))
+              tuple(w.warnings), FaceSetup(c.W - 2 * (c.p["front_pc"]["window_margin"] + c.p["front_pc"]["inset_side"]), c.Wc, c.Ys,
+                        ya, za, c.Hp + TORSO_HEIGHT, _spill_probes(c), c.p["front_pc"]["inset_nez"]), bool(w.adjust))
     return rig, Part(tuple(w.objects), warnings=tuple(w.warnings))

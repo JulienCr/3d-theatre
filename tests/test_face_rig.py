@@ -2,6 +2,7 @@
 
 import pytest
 
+from core.face_eq import illuminance
 from core.face_rig import (
     USEFUL_MARGIN, FaceEq, _tuned, emitters_of, equalise_params, equalise_rig, measure, probes_of, signature,
 )
@@ -13,6 +14,7 @@ from helpers import make
 
 LIB = default_library()
 RATIO = 0.85
+NO_INSET = {"inset_side": 0.0, "inset_nez": 0.0}
 
 
 @pytest.fixture(scope="module")
@@ -162,24 +164,27 @@ def test_useful_grid_stays_inside_the_intended_cuts(plain):
         assert abs(p.position[0]) <= half - USEFUL_MARGIN + 1e-9 and p.position[1] <= face.area_depth
 
 
-def test_face_window_is_the_facade_opening_less_its_margin(plain):
-    assert plain.rig.face.nose_width == pytest.approx(11.6)
+def test_face_window_is_the_facade_opening_less_its_margin_and_insets(plain):
+    assert plain.rig.face.nose_width == pytest.approx(11.6 - 2 * 0.8) and plain.rig.face.nose_depth == 0.4
+    flat = compute_layout(make(front_pc=NO_INSET), LIB).rig
+    assert flat.face.nose_width == pytest.approx(11.6) and flat.face.nose_depth == 0.0
     narrow = compute_layout(make(front_pc={"window_margin": 0.5}), LIB).rig
     assert narrow.face.nose_width == pytest.approx(plain.rig.face.nose_width - 1.0)
     assert signature(narrow, RATIO) != signature(plain.rig, RATIO)
 
 
 def test_row_0_barn_doors_cut_on_the_window_edges():
-    """The side leaves of a row 0 PC close on the vertical line of the facade opening, whichever side it hangs."""
-    for margin in (0.0, 0.6):
-        rig = compute_layout(make(front_pc={"window_margin": margin}), LIB).rig
+    """The side leaves of a row 0 PC close on the vertical line of the facade opening less the margin and
+    `inset_side`, whichever side it hangs."""
+    for margin, inset in ((0.0, 0.0), (0.6, 0.0), (0.0, 0.8), (0.6, 0.8)):
+        rig = compute_layout(make(front_pc={"window_margin": margin, "inset_side": inset}), LIB).rig
         edge = rig.face.nose_width / 2
         for f in faces(rig):
             if not f.circuit.startswith("FrontPC_Row1"):
                 continue
             side = {leaf.cut for leaf in f.barn_doors.leaves if leaf.angle > 0}
             assert "bottom" in side and side & {"left", "right"}, (f.name, side)
-        assert edge == pytest.approx(5.8 - margin)
+        assert edge == pytest.approx(5.8 - margin - inset)
 
 
 def test_spill_probes_surround_the_window_and_rear_rows_cannot_reach_them(plain):
@@ -188,7 +193,7 @@ def test_spill_probes_surround_the_window_and_rear_rows_cannot_reach_them(plain)
     floor = [p for label, p in plain.rig.face.spill if label == "sol de salle"]
     assert floor and all(p.position[2] == 0.0 and p.normal == (0.0, 0.0, 1.0) for p in floor)
     assert {round(p.position[1], 2) for p in floor} == {-0.3, -0.74, -1.18, -1.62, -2.06, -2.5}
-    assert min(p.position[0] for p in floor) == -max(p.position[0] for p in floor) == -plain.rig.face.nose_width / 2
+    assert min(p.position[0] for p in floor) == -max(p.position[0] for p in floor) == -5.8
     face = plain.rig.face
     assert all(p.position[1] <= face.forestage_depth + 0.1 for _, p in plain.rig.face.spill)
     emitters = emitters_of(plain.rig, LIB)
@@ -214,7 +219,7 @@ def test_default_layout_hangs_the_face_pcs_inside_the_facade_opening():
     row0 = [f for f in faces(rig) if "Row1" in f.circuit]
     assert rig.warnings == () and len(faces(rig)) == 12
     assert rig.dims.pipe_y == pytest.approx(-2.58, abs=0.02) and rig.dims.pc_azimuths == (16.0, 16.0)
-    assert max(abs(f.hang[0]) for f in row0) < rig.face.nose_width / 2 - 1.0
+    assert max(abs(f.hang[0]) for f in row0) < 5.8 - 1.0
 
 
 def test_manual_front_pipe_position_still_overrides_the_automatic_one():
@@ -222,3 +227,19 @@ def test_manual_front_pipe_position_still_overrides_the_automatic_one():
     params = default_params()
     params["rig_front"].update(auto_position=False, y=-1.4)
     assert compute_layout(params, LIB).rig.dims.pipe_y == pytest.approx(-1.4)
+
+
+def spill_lux(insets):
+    """Mean lux (as built, no equalisation) of the red surfaces and the useful face, by label."""
+    rig = compute_layout(make(front_pc=insets), LIB).rig
+    emitters = emitters_of(rig, LIB)
+    groups = {label: [p for lab, p in rig.face.spill if lab == label] for label in ("façade", "face du nez", "sol de salle")}
+    groups["face"] = list(probes_of(rig))
+    return {k: sum(illuminance(e, p) for e in emitters for p in ps) / len(ps) for k, ps in groups.items()}
+
+
+def test_insets_cut_the_light_on_the_facade_the_band_and_the_house_floor_and_keep_the_face():
+    flat, tight = spill_lux(NO_INSET), spill_lux({})
+    for label in ("façade", "face du nez", "sol de salle"):
+        assert tight[label] < 0.8 * flat[label], label
+    assert tight["face"] > 0.95 * flat["face"]

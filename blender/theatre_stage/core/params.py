@@ -411,6 +411,12 @@ SCHEMA: tuple[Group, ...] = (
         _length("window_margin", 0.0, 0.0, 2.0, "Marge de la fenêtre de face",
                 "Distance dont la fenêtre de face (l'ouverture de la façade, du nez au linteau) est rétrécie "
                 "de chaque côté : la lumière de face doit y rester."),
+        _length("inset_side", 0.80, 0.0, 2.0, "Resserrer sur les côtés",
+                "Distance dont le rang 0 de la face est resserré de chaque côté, depuis la largeur du nez : "
+                "l'extérieur de la façade n'est plus éclairé, au prix d'un peu de lumière en moins aux bords."),
+        _length("inset_nez", 0.40, 0.0, 1.5, "Resserrer au nez",
+                "Distance dont le rang 0 de la face est reculé du nez vers le fond : la face du nez et le sol "
+                "de salle ne sont plus éclairés."),
         _float("min_mean_ratio", 0.85, 0.5, 1.0, "Moyenne minimale de l'égalisation",
                "Part de l'éclairement moyen du rig plein que l'égalisation de la face doit conserver."),
         _enum("barn_doors", "auto", "Volets", "Volets (coupe-flux) des PC dont la fiche en porte.", (

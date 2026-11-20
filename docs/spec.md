@@ -324,6 +324,8 @@ Chaque jeu :
 | `row<j>_<d>_rotation` | Rotation des volets (rang `j`, direction `d`) | 0° | −90 – 90° |
 | `face_tilt` | Remonter la face | 0° *(choix)* | −15 – +15° |
 | `window_margin` | Marge de la fenêtre de face | 0 *(choix)* | 0 – 2 m |
+| `inset_side` | Resserrer sur les côtés | 0,80 m *(choix)* | 0 – 2 m |
+| `inset_nez` | Resserrer au nez | 0,40 m *(choix)* | 0 – 1,5 m |
 | `min_mean_ratio` | Moyenne minimale de l'égalisation | 0,85 *(choix)* | 0,5 – 1 |
 
 `fixture` et `mode` servent le rang 0, sur la perche de face ; `fixture_far`
@@ -1616,18 +1618,31 @@ Deux appareils par zone, un par direction `d` : `L` (accroché côté jardin,
   coins `C_k`.
 - **Rang 0 : l'avancée de scène** *(choix)* : la zone du rang 0 ne s'arrête pas
   au plan de visée, elle descend jusqu'au sol de l'avancée. Ses coins aval sont
-  au **sol** (`Z = Hp`) sur la ligne du nez (`Y = 0`) ; ses coins amont restent
+  au **sol** (`Z = Hp`) sur la ligne `Y = inset_nez` (0,40 m par défaut, au lieu du nez
+  `Y = 0`) ; ses coins amont restent
   à `Za`, à `Y = yr_0 + (zd/2)·(1 + overlap)`. Latéralement, les zones
-  extrêmes vont jusqu'à la largeur du nez : `X = ±W/2` (au lieu de `±Wc/2`), sans
-  recouvrement au-delà ; côté intérieur et en amont le recouvrement s'applique
+  extrêmes vont jusqu'à la largeur du nez moins `inset_side` : `X = ±(W/2 − inset_side)`
+  (0,80 m par défaut, soit `±Wc/2` avec les défauts), sans recouvrement au-delà ; côté intérieur et en amont le recouvrement s'applique
   comme ailleurs. Raison : un appareil de face cadré à hauteur de tête laisse
   noir le sol de l'avancée entre le nez et la façade (`Y ∈ [0, Ys]`), que le
   recul du front engendre.
+  **Resserrer la face** *(choix, 2026-11-20)* : la règle de couverture (nez dans le
+  faisceau, zones extrêmes à `±W/2`) place le bord doux d'un PC exactement sur la
+  façade autour de l'ouverture et sur la face avant de la scène : la moitié de la
+  pénombre y tombe, quelle que soit la perche ou l'inclinaison, et les volets, qui
+  coupent sur ces mêmes limites, n'y changent rien. `inset_side` et `inset_nez`
+  déplacent donc la **cible** du rang 0 (zones, champ, points du nez, volets,
+  grille utile de 13.13), pas la fenêtre de la façade : on perd un peu de lumière
+  aux bords extrêmes de l'avancée (`X` au-delà de `W/2 − inset_side`, `Y < inset_nez`)
+  et on cesse d'éclairer le rouge. À 0 / 0 on retrouve l'ancien comportement. Mesure
+  (moteur d'égalisation, rig tel que construit, sans égalisation) : façade 13,0 → 9,3 lx,
+  face du nez 41,7 → 32,0 lx, sol de salle 35,1 → 23,0 lx, face utile 337 → 333 lx ; à 0,8 / 0,8 :
+  7,9 / 24,4 / 15,2 lx.
 - **Visée, rang 0** : le cap (en plan) est celui qui vise le centre de la zone,
   donc le croisement et le parallélisme des faisceaux (azimut `az_0`) ne
   changent pas. **L'élévation et le zoom se choisissent ensemble** *(choix)* :
   parmi les couples (champ `F`, élévation) où les quatre coins de la zone
-  couverte sont dans le champ (`F ≥ F_req`) et où les **points du nez** sont
+  couverte sont dans le champ (`F ≥ F_req`) et où les **points du nez** (sur la ligne `Y = inset_nez`) sont
   dans le **faisceau** (angle plein à 50 %, interpolé linéairement avec le
   zoom entre `beam_angle` min et max de la fiche, celui du tube pour des
   lentilles fixes), on prend le plus petit champ, puis l'axe le plus haut
@@ -1636,7 +1651,7 @@ Deux appareils par zone, un par direction `d` : `L` (accroché côté jardin,
   (positif) ou abaisse (négatif) ensuite cet axe dans son plan vertical. Points du nez d'un appareil : le sol du nez au
   centre de la zone, `(xc, 0, Hp)`, et un point à la fraction `reach` du
   chemin vers le bord de **sa** moitié de zone (`L` : bord jardin, `R` : bord
-  cour, `±W/2` pour la zone extrême). `reach` vaut 1, puis 0,75 ; 0,5 ; 0,25 ;
+  cour, `±(W/2 − inset_side)` pour la zone extrême). `reach` vaut 1, puis 0,75 ; 0,5 ; 0,25 ;
   0 : on retient la plus grande qui admet un couple. Aucun couple, même avec
   le seul centre : élévation qui manque le moins, zoom maximal, et alerte
   « Face : le nez n'est pas dans le faisceau de … » (liste des appareils).
@@ -1944,9 +1959,9 @@ sans fiche ou avec `front_pc.barn_doors = none`). Même idée que les lames
   `E` en penchant autour de `L E`.
 - **Coupes automatiques** :
   rang 0 : les bords de la fenêtre de face (13.7), pour tous les PC du rang, accrochés dans
-  ou hors de l'ouverture : bas = ligne du nez au sol, `Q = (0, 0, Hp)`, `u = X` ; haut = bas du
+  ou hors de l'ouverture : bas = ligne du sol de l'avancée à `inset_nez` du nez, `Q = (0, inset_nez, Hp)`, `u = X` ; haut = bas du
   linteau dans le plan de la façade, `Q = (0, Ys, Hp + Hc)`, `u = X` ; gauche et droite =
-  verticales de l'ouverture, `Q = (±(W/2 − m), Ys, 0)`, `u = Z`.
+  verticales de l'ouverture resserrées, `Q = (±(W/2 − m − inset_side), Ys, 0)`, `u = Z`.
   Rangs du fond : gauche et droite = verticales de l'ouverture du
   pendrillonnage `Q = (±min(opening, Wk)/2, yr_j, 0)`, `u = Z` ; haut = première
   frise en amont du bord aval de la zone couverte, `Q = (0, Y_frise − épaisseur/2, bas
@@ -2009,12 +2024,13 @@ rig et range le résultat dans la scène (13.14).
 - **Grille utile** (`margin`, 0,30 m *(choix)*) : le rig ne mesure que là où l'on veut
   de la lumière de face, à l'intérieur de chaque coupe voulue avec une marge de 0,30 m.
   Derrière la façade, `|X| ≤ Wc/2 − 0,30` ; sur l'avancée, `|X| ≤ W/2 − m − 0,30` et
-  `Y ≥ 0,30` (nez + marge : `FaceSetup.nose_width = W − 2m`) ; jusqu'au fond de la zone. **Deux hauteurs**, mêmes `X`, `Y` : la tête (`Za`) et le torse
+  `Y ≥ inset_nez + 0,30` (nez + resserrage + marge : `FaceSetup.nose_width = W − 2(m + inset_side)`,
+  `FaceSetup.nose_depth = inset_nez`) ; jusqu'au fond de la zone. **Deux hauteurs**, mêmes `X`, `Y` : la tête (`Za`) et le torse
   (`Hp + 1,20` *(choix)*, `FaceSetup.z_torso`), comptées à égalité : 2 × 212 = 424 sondes par défaut. Les coins
   du nez hors cadre, que les volets coupaient exprès, n'y étaient plus avant la fenêtre : ils fixaient
   seuls `U`.
 - **Sondes de débord** (`FaceSetup.spill`) : des points hors de la fenêtre,
-  à 0,30 m de ses bords, avec leur normale : la façade de part et d'autre de l'ouverture
+  à 0,30 m des bords de l'ouverture (`W/2`, indépendants des resserrages : les groupes ne changent pas), avec leur normale : la façade de part et d'autre de l'ouverture
   (3 colonnes, pas de 0,5 m, du sol à la hauteur de façade), le linteau (2 rangées), les murs de
   salle (7 mètres le long de la façade, de 1,5 m de haut au plafond) la face avant de la scène
   (3 hauteurs) et le sol de salle devant le nez (`Z = 0`, normale vers le haut, `Y` de −0,30 à

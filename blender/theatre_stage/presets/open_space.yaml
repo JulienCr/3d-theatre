@@ -156,6 +156,8 @@ front_pc:
   overlap: 0.2
   face_tilt: 0.0
   window_margin: 0.0
+  inset_side: 0.8
+  inset_nez: 0.4
   min_mean_ratio: 0.85
   barn_doors: auto
   row1_l_leaf_1: 0.0

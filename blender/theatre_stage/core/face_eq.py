@@ -119,18 +119,19 @@ class Bounds:
 
 
 def face_grid(*, nose_width: float, frame_width: float, forestage_depth: float, area_depth: float,
-              z: float, pitch: float = 0.5, margin: float = 0.0) -> tuple[Probe, ...]:
+              z: float, pitch: float = 0.5, margin: float = 0.0, near: float = 0.0) -> tuple[Probe, ...]:
     """Cell-centred probes at height `z` over the acting area, rows ordered from the nose upstage.
 
     A row whose centre is in the forestage (`Y < forestage_depth`) spans `nose_width`, the others
     `frame_width`; both centred on X = 0. `margin` keeps probes that far inside the intended cuts: rows
-    nearer the nose than `margin` are dropped and each row is narrowed by `margin` on both sides.
+    nearer the nose than `near + margin` are dropped (`near` is the downstage cut) and each row is
+    narrowed by `margin` on both sides.
     """
     rows = max(1, round(area_depth / pitch))
     probes = []
     for j in range(rows):
         y = (j + 0.5) * area_depth / rows
-        if y < margin:
+        if y < near + margin:
             continue
         width = (nose_width if y < forestage_depth else frame_width) - 2.0 * margin
         if width <= 0.0:

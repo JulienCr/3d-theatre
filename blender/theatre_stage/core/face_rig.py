@@ -163,8 +163,8 @@ def signature(rig: Rig, min_mean_ratio: float) -> str:
     parts = [VERSION, _r(min_mean_ratio), pcs,
              None if zones is None else [zones.nx, zones.nr, _r(zones.width), _r(zones.depth)],
              None if face is None else [_r(face.nose_width), _r(face.frame_width), _r(face.forestage_depth),
-                                        _r(face.area_depth), _r(face.z), _r(face.z_torso), len(face.spill),
-                                        _r(sum(sum(p.position) for _, p in face.spill))]]
+                                        _r(face.area_depth), _r(face.z), _r(face.z_torso), _r(face.nose_depth),
+                                        len(face.spill), _r(sum(sum(p.position) for _, p in face.spill))]]
     return hashlib.sha1(json.dumps(parts, separators=(",", ":")).encode()).hexdigest()[:16]
 
 
@@ -242,7 +242,7 @@ def probes_of(rig: Rig) -> tuple[Probe, ...]:
         return ()
     return tuple(p for z in (face.z, face.z_torso) for p in face_grid(
         nose_width=face.nose_width, frame_width=face.frame_width, forestage_depth=face.forestage_depth,
-        area_depth=face.area_depth, z=z, margin=USEFUL_MARGIN))
+        area_depth=face.area_depth, z=z, margin=USEFUL_MARGIN, near=face.nose_depth))
 
 
 def spill_probes_of(rig: Rig) -> tuple[Probe, ...]:
