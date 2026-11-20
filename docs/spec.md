@@ -1872,6 +1872,12 @@ Contrat de `core/qlc.py` (aucune dépendance à Blender) :
   rest_bytes=())` : univers et adresse **à base 1** (15.1) ; `pan_tilt` =
   `(pan gros, pan fin, tilt gros, tilt fin)`, octets de 13.9 ; `rest_bytes` =
   couples `(offset, octet)` des autres canaux au repos (15.2), offsets à base 1.
+- `patched_from_rig(rig) -> tuple[PatchedFixture, ...]` : un `PatchedFixture` par
+  `RigFixture` dans l'ordre du patch ; `group` = circuit, `pan_tilt` = octets
+  de pan et tilt des mobiles (fin à 0 en 8 bits), `rest_bytes` = octets de
+  repos des autres canaux, offset relatif à l'adresse
+  (`canal − adresse + 1`), octet = valeur codée de 12.4. L'opérateur
+  d'export appelle exactement cette fonction.
 - `export_workspace(patched, library, out_dir, qlc_fixture_dirs=()) ->
   ExportResult(workspace, written_qxf, reused_qxf, warnings)` : écrit les
   fichiers ; `warnings` en français (appareil ou fiche ignoré, recouvrement,
@@ -1914,7 +1920,9 @@ canal à base 0, univers `ID = u − 1`), vérifiés dans les sources de QLC+
   360 et 270 si 0), et non en entiers 16 bits : `Value="422,91"`, jamais
   `51217,25855`. Précision limitée au demi-degré : la scène `Repos - positions`
   reste la référence exacte, les palettes rappellent un appareil seul
-  *(choix)*. Le moteur 4.14.3 les charge et les réécrit ; seule l'interface
+  *(choix)*. L'inversion d'un axe (`invert`, 12.2) n'entre **pas** dans la
+  conversion : QLC+ envoie `degrés · 65535 / course` sans connaître l'inversion,
+  la valeur « depuis le zéro DMX » rend donc exactement les octets de la scène. Le moteur 4.14.3 les charge et les réécrit ; seule l'interface
   QML (QLC+ 5) les expose, l'interface classique 4.x les conserve sans les
   afficher.
 - `VirtualConsole` : cadre racine vide, `SimpleDesk` vide.
@@ -1935,9 +1943,11 @@ de la fiche, `Physical`.
   `IntensityRed/Green/Blue/White`, `IntensityCyan/Magenta/Yellow`,
   `PositionPan`, `PositionTilt` (et leurs `…Fine`), `BeamZoomSmallBig`
   (`BeamZoomBigSmall` si `zoom_invert`) et `BeamZoomFine`,
-  `ShutterIrisMaxToMin`, `GoboIndex`, `ColorCTOMixer`. Les autres canaux sont
+  `ShutterIrisMaxToMin`, `GoboIndex` (`gobo1_rot` et `gobo2_rot`),
+  `ColorCTOMixer`. Les autres canaux sont
   écrits sans préréglage dans leur groupe QLC+ (`cct`, `emitter_N` : `Colour` ;
-  `strobe` : `Shutter` ; `gobo1/2` : `Gobo` ; lames : `Beam` ; hazer :
+  `strobe` : `Shutter` ; `gobo1/2` : `Gobo` ; lames, `blade_K_rot`
+  (« Pivotement lame K ») et `blade_rot` : `Beam` ; hazer :
   `Effect` ; attribut inconnu : `Nothing`, capacité unique `0–255` nommée
   d'après l'attribut). Un émetteur n'est **jamais** dans le groupe
   `Intensity` : un canal d'intensité sans couleur y serait pris pour le
