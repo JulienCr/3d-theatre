@@ -278,6 +278,15 @@ def test_discrete_channel_sets_with_physical_values_become_a_step_curve():
     assert curve == [[0, 3200], [round(100 / 255, 6), 5600], [round(200 / 255, 6), 8000]]
 
 
+def test_a_function_on_one_dmx_value_keeps_the_curve():
+    functions = (function("Off", "CTC", "0/1", "0/1", "6500", "6500")
+                 + function("CTC", "CTC", "1/1", "0/1", "10000", "2500"))
+    element = ElementTree.fromstring(channel("1", "Head", "CTC", functions))
+    curve, mode = tool._curve(tool._read_channel(element))
+    assert mode == "linear"
+    assert curve == [[0, 6500], [round(1 / 255, 6), 10000], [1, 2500]]
+
+
 def test_a_single_physical_range_gives_no_curve():
     element = ElementTree.fromstring(channel("1", "Head", "Zoom", function("Zoom", "Zoom", "0/1", "0/1", "40", "8")))
     assert tool._curve(tool._read_channel(element)) is None

@@ -165,7 +165,8 @@ def _curve(channel: _Channel) -> tuple[list[list[float]], str] | None:
         ranges = [f for f in channel.functions if f.phys_from is not None and f.phys_to is not None]
         if len(ranges) < 2:
             return None
-        points = [[x / top, v] for f in ranges for x, v in ((f.start, f.phys_from), (f.stop, f.phys_to))]
+        points = [[x / top, v] for f in ranges
+                  for x, v in ((f.start, f.phys_from),) + (() if f.stop == f.start else ((f.stop, f.phys_to),))]
         mode = "linear"
     if any(b[0] <= a[0] for a, b in zip(points, points[1:])):
         return None
