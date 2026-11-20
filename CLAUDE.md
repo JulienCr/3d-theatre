@@ -17,10 +17,16 @@ every dimension rule, default value and object name.
   up by name and never overwritten (BlenderKit shaders are assigned on top).
 - Animated values (curtain opening) reach geometry through drivers. Property
   update callbacks do not fire during timeline playback.
+- A fixture is a fiche (`library/fixtures/<id>/fixture.yaml`, spec §12), never
+  code. DMX reaches fixtures only through scene props `dmx_<u>_<c>` written by
+  DMX Visualizer (`D:\dev\blender-tools`); `D:\dev\blender-dmx` is out of scope.
 
 ## Commands
 
 - Tests: `python -m pytest` from the repo root (system Python + pytest + PyYAML).
+- New fiche: `python tools/gdtf_to_fiche.py <file.gdtf> --id <id> --out
+  blender/theatre_stage/library/fixtures/<id>/`, then fill the `null` fields.
+- Types: `pyright blender/theatre_stage tools` reports only the `bpy` imports.
 - Dev install: the extension folder is a junction from
   `%APPDATA%\Blender Foundation\Blender\5.3\extensions\user_default\theatre_stage`
   to `blender/theatre_stage`. Edit sources here, never in AppData.
