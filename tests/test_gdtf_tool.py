@@ -254,6 +254,12 @@ def test_invert_is_set_only_when_the_function_runs_downwards(low, high, expected
     assert tool._span([tool._read_channel(element)], "Tilt", True) == expected
 
 
+@pytest.mark.parametrize("value", [1e-05, 5e-05, 1e16, -2.5e-05, 0.125])
+def test_floats_are_written_in_a_form_yaml_reads_back_as_numbers(value):
+    loaded = yaml.safe_load(f"a: {tool._scalar(value)}")["a"]
+    assert isinstance(loaded, float) and loaded == pytest.approx(value, abs=1e-6)
+
+
 @pytest.mark.parametrize("evil", ["../../escaped", r"..\..\escaped", ".."])
 def test_a_model_file_name_cannot_leave_the_output_folder(tmp_path, evil):
     work = tmp_path / "work"

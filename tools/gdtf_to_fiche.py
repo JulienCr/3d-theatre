@@ -269,7 +269,11 @@ def _scalar(value) -> str:
     if isinstance(value, int):
         return str(value)
     if isinstance(value, float):
-        return repr(round(value, 6))
+        text = repr(round(value, 6))
+        if "e" in text:  # PyYAML reads '1e-05' as a string, not a float
+            text = f"{round(value, 6):.6f}".rstrip("0")
+            text += "0" if text.endswith(".") else ""
+        return text
     text = str(value)
     if _PLAIN.fullmatch(text) and text.lower() not in _RESERVED:
         return text
